@@ -348,9 +348,7 @@ KimLabISI/
 |-- .gitignore                         # Git ignore patterns
 |-- .gitattributes                     # Git file handling configuration
 |-- README.md                          # Project overview and quick start
-|-- CHANGELOG.md                       # Version history and changes
 |-- LICENSE                            # Software license
-|-- CLAUDE.md                          # Claude Code integration information
 
 ```
 
@@ -397,6 +395,7 @@ KimLabISI/
 ### Separation of Responsibilities
 
 #### Frontend (Electron/React) - Display Only
+
 - **Renders UI**: Display components based on backend state
 - **Forwards Input**: Send user clicks/input to backend via IPC
 - **Shows Status**: Display hardware status, progress, errors from backend
@@ -404,6 +403,7 @@ KimLabISI/
 - **Pure Presentation**: Only formatting for display (e.g., number to percentage)
 
 #### Backend (Python) - All Business Logic
+
 - **Manages State**: Complete workflow state machine and transitions
 - **Validates Input**: All parameter validation and constraint checking
 - **Controls Hardware**: Exclusive hardware access and control
@@ -412,6 +412,7 @@ KimLabISI/
 - **Persists State**: Session management and data storage
 
 #### What NEVER Happens
+
 - Frontend never validates parameters (backend validates)
 - Frontend never decides state transitions (backend controls workflow)
 - Frontend never accesses hardware (backend exclusive control)
@@ -425,41 +426,49 @@ This architecture ensures scientific reliability, cross-platform compatibility, 
 This architecture comprehensively addresses all aspects from our design documentation:
 
 ### Scientific Computing
+
 - **Stimulus Generation**: Pattern generators, spherical transforms, GPU optimization (`algorithms/` and `hardware/`)
 - **ISI Analysis**: Fourier analysis, phase unwrapping, sign mapping (`algorithms/` and domain services)
 - **Real-Time Processing**: Ring buffers, frame management, streaming coordination (`streaming/`)
 
 ### Hardware Control
+
 - **Camera Integration**: PCO SDK bindings, calibration, mock simulation (`hardware/windows/`, `hardware/macos/`)
 - **GPU Acceleration**: DirectX 12, CUDA, Metal implementations (`hardware/` platform-specific)
 - **Timing Synchronization**: Microsecond precision, trigger systems (`hardware/timing/`, `calibration/`)
 
 ### Data Management
+
 - **HDF5 Storage**: Scientific datasets with metadata (`storage/hdf5_repository.py`)
 - **Dataset Reuse**: Parameter matching, discovery (`storage/dataset_discovery.py`)
 - **Session Persistence**: State management, recovery (`application/session_management.py`)
 
 ### User Interface
+
 - **Thin Client**: Zero business logic, display-only frontend (`frontend/` - pure presentation)
 - **3D Visualization**: Spatial configuration display (`visualization/SpatialViewer3D.tsx`)
 - **Real-Time Monitoring**: Downsampled previews (`visualization/PreviewMonitor.tsx`)
 
 ### Cross-Platform Support
+
 - **Development/Production**: macOS development, Windows production environments
 - **Hardware Abstraction**: Common interfaces, platform-specific implementations
 - **Mock Hardware**: Complete simulation for development without production hardware
 
 ### Error Handling & Recovery
+
 - **Graceful Degradation**: Reduced functionality modes (`use_cases/error_recovery.py`)
 - **State Recovery**: Session restoration, data preservation (`application/state_persistence.py`)
 - **Hardware Failover**: Mock hardware fallback (`hardware/factory.py`)
 
 ### Testing & Validation
+
 - **Multi-Layer Testing**: Unit, integration, end-to-end coverage
 - **Performance Validation**: Timing verification, benchmarking (`scripts/testing/`)
 - **Cross-Platform**: Hardware abstraction validation across platforms
 
 ### Configuration & Calibration
+
 - **Environment Management**: Development/production/testing configurations
 - **Hardware Calibration**: Camera, display, timing calibration systems
 - **Parameter Management**: Default sets, validation schemas

@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+    <title>ISI Macroscope Control System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-connected {
+            background: #27ae60;
+            color: white;
+        }
+
+        .status-connecting {
+            background: #f39c12;
+            color: white;
+        }
+
+        .status-disconnected {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .card h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+
+        .button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.3s;
+        }
+
+        .button:hover {
+            background: #2980b9;
+        }
+
+        .button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .button-success {
+            background: #27ae60;
+        }
+
+        .button-success:hover {
+            background: #229954;
+        }
+
+        .button-warning {
+            background: #f39c12;
+        }
+
+        .button-warning:hover {
+            background: #e67e22;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-item {
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #7f8c8d;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .info-value {
+            color: #2c3e50;
+            font-size: 16px;
+            margin-top: 5px;
+        }
+
+        .log-container {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+
+        .log-timestamp {
+            color: #95a5a6;
+        }
+
+        .navigation {
+            margin-bottom: 30px;
+        }
+
+        .nav-item {
+            display: block;
+            padding: 10px 15px;
+            margin-bottom: 5px;
+            background: #34495e;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        .nav-item:hover {
+            background: #4a6278;
+        }
+
+        .nav-item.active {
+            background: #3498db;
+        }
+
+        .workflow-states {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .state-item {
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .state-item.current {
+            background: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+
+        .state-item.available {
+            background: #27ae60;
+            color: white;
+            cursor: pointer;
+        }
+
+        .state-item.available:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar">
+            <h2 style="margin-bottom: 20px; text-align: center;">ISI Macroscope</h2>
+
+            <nav class="navigation">
+                <a href="#" class="nav-item active" data-page="dashboard">📊 Dashboard</a>
+                <a href="#" class="nav-item" data-page="workflow">🔄 Workflow</a>
+                <a href="#" class="nav-item" data-page="hardware">🔧 Hardware</a>
+                <a href="#" class="nav-item" data-page="system">⚙️ System</a>
+            </nav>
+
+            <div class="card" style="background: #34495e; color: white; margin-top: auto;">
+                <h3 style="color: white;">Connection Status</h3>
+                <div id="connection-status" class="status-badge status-disconnected">Disconnected</div>
+                <div style="margin-top: 10px; font-size: 12px;">
+                    Backend: <span id="backend-status">Unknown</span><br>
+                    Mode: <span id="development-mode">Unknown</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="header">
+                <h1>ISI Macroscope Control System</h1>
+                <p>Thin Client Frontend - All business logic handled by Python backend</p>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page">
+                <div class="info-grid">
+                    <div class="card">
+                        <h3>System Overview</h3>
+                        <div class="info-item">
+                            <div class="info-label">Current State</div>
+                            <div class="info-value" id="current-state">Loading...</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Hardware Status</div>
+                            <div class="info-value" id="hardware-status">Loading...</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Quick Actions</h3>
+                        <button class="button button-success" onclick="startWorkflow()">Start Workflow</button>
+                        <button class="button" onclick="refreshSystemInfo()">Refresh Status</button>
+                        <button class="button button-warning" onclick="performHealthCheck()">Health Check</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>System Information</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">Frontend Version</div>
+                            <div class="info-value" id="frontend-version">1.0.0</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Backend Version</div>
+                            <div class="info-value" id="backend-version">Loading...</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Platform</div>
+                            <div class="info-value" id="platform-info">Loading...</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Development Mode</div>
+                            <div class="info-value" id="dev-mode-info">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Page -->
+            <div id="page-workflow" class="page hidden">
+                <div class="card">
+                    <h3>Workflow State Machine</h3>
+                    <p>Current workflow state and available transitions. All workflow logic is handled by the Python backend.</p>
+
+                    <div style="margin: 20px 0;">
+                        <strong>Current State:</strong> <span id="workflow-current-state">Loading...</span>
+                    </div>
+
+                    <div class="workflow-states" id="workflow-states">
+                        <!-- Workflow states will be populated by JavaScript -->
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <button class="button" onclick="loadWorkflowState()">Refresh Workflow State</button>
+                        <button class="button" onclick="getWorkflowHistory()">View History</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hardware Page -->
+            <div id="page-hardware" class="page hidden">
+                <div class="card">
+                    <h3>Hardware Management</h3>
+                    <p>Hardware detection and status. All hardware control is managed by the Python backend.</p>
+
+                    <div style="margin: 20px 0;">
+                        <button class="button" onclick="detectHardware()">Detect Hardware</button>
+                        <button class="button" onclick="getHardwareStatus()">Get Status</button>
+                    </div>
+
+                    <div id="hardware-capabilities" class="info-grid">
+                        <!-- Hardware capabilities will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Page -->
+            <div id="page-system" class="page hidden">
+                <div class="card">
+                    <h3>System Management</h3>
+                    <p>System health and diagnostics. All system operations are handled by the Python backend.</p>
+
+                    <div style="margin: 20px 0;">
+                        <button class="button" onclick="performHealthCheck()">Health Check</button>
+                        <button class="button" onclick="getSystemInfo()">System Info</button>
+                    </div>
+
+                    <div class="card">
+                        <h3>Activity Log</h3>
+                        <div class="log-container" id="activity-log">
+                            <div class="log-entry">
+                                <span class="log-timestamp">[Starting]</span> ISI Macroscope frontend initialized
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ISI Macroscope Frontend JavaScript
+        // Following thin client architecture - no business logic here
+        // All operations are forwarded to Python backend via API
+
+        let currentWorkflowState = null;
+        let connectionStatus = 'disconnected';
+
+        // Initialize application
+        document.addEventListener('DOMContentLoaded', async () => {
+            logActivity('Frontend application starting...');
+
+            // Setup navigation
+            setupNavigation();
+
+            // Setup backend event listeners
+            setupBackendEvents();
+
+            // Load initial data
+            await refreshSystemInfo();
+
+            logActivity('Frontend application ready');
+        });
+
+        // Navigation setup
+        function setupNavigation() {
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const page = e.target.dataset.page;
+                    showPage(page);
+
+                    // Update active nav item
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    e.target.classList.add('active');
+                });
+            });
+        }
+
+        // Show specific page
+        function showPage(pageId) {
+            const pages = document.querySelectorAll('.page');
+            pages.forEach(page => page.classList.add('hidden'));
+            document.getElementById(`page-${pageId}`).classList.remove('hidden');
+
+            // Load page-specific data
+            switch(pageId) {
+                case 'workflow':
+                    loadWorkflowState();
+                    break;
+                case 'hardware':
+                    detectHardware();
+                    break;
+                case 'system':
+                    getSystemInfo();
+                    break;
+            }
+        }
+
+        // Setup backend event listeners
+        function setupBackendEvents() {
+            if (window.isiMacroscope && window.isiMacroscope.events) {
+                window.isiMacroscope.events.onBackendConnected(() => {
+                    connectionStatus = 'connected';
+                    updateConnectionStatus();
+                    logActivity('Backend connected successfully');
+                    refreshSystemInfo();
+                });
+
+                window.isiMacroscope.events.onBackendDisconnected(() => {
+                    connectionStatus = 'disconnected';
+                    updateConnectionStatus();
+                    logActivity('Backend disconnected');
+                });
+
+                window.isiMacroscope.events.onBackendConnecting(() => {
+                    connectionStatus = 'connecting';
+                    updateConnectionStatus();
+                    logActivity('Connecting to backend...');
+                });
+            }
+        }
+
+        // Update connection status display
+        function updateConnectionStatus() {
+            const statusElement = document.getElementById('connection-status');
+            const backendStatusElement = document.getElementById('backend-status');
+
+            statusElement.className = `status-badge status-${connectionStatus}`;
+            statusElement.textContent = connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1);
+
+            backendStatusElement.textContent = connectionStatus === 'connected' ? 'Online' : 'Offline';
+        }
+
+        // Workflow operations (forwarded to backend)
+        async function startWorkflow() {
+            logActivity('Starting workflow...');
+            try {
+                const response = await window.isiMacroscope.workflow.start();
+                if (response.success) {
+                    logActivity('Workflow started successfully');
+                    await loadWorkflowState();
+                } else {
+                    logActivity(`Workflow start failed: ${response.error_message}`);
+                }
+            } catch (error) {
+                logActivity(`Workflow start error: ${error.message}`);
+            }
+        }
+
+        async function loadWorkflowState() {
+            try {
+                const response = await window.isiMacroscope.workflow.getState();
+                if (response.success) {
+                    currentWorkflowState = response.data;
+                    updateWorkflowDisplay();
+                    updateCurrentStateDisplay();
+                }
+            } catch (error) {
+                logActivity(`Failed to load workflow state: ${error.message}`);
+            }
+        }
+
+        function updateWorkflowDisplay() {
+            if (!currentWorkflowState) return;
+
+            const currentStateElement = document.getElementById('workflow-current-state');
+            const statesContainer = document.getElementById('workflow-states');
+
+            currentStateElement.textContent = currentWorkflowState.current_state;
+
+            // Create workflow state visualization
+            const states = [
+                'startup', 'setup_ready', 'setup', 'generation_ready', 'generation',
+                'acquisition_ready', 'acquisition', 'analysis_ready', 'analysis',
+                'error', 'recovery', 'degraded'
+            ];
+
+            statesContainer.innerHTML = states.map(state => {
+                const isCurrent = state === currentWorkflowState.current_state;
+                const isAvailable = currentWorkflowState.valid_transitions?.includes(state);
+
+                let className = 'state-item';
+                if (isCurrent) className += ' current';
+                else if (isAvailable) className += ' available';
+
+                return `<div class="${className}" onclick="${isAvailable ? `transitionToState('${state}')` : ''}">${state}</div>`;
+            }).join('');
+        }
+
+        async function transitionToState(targetState) {
+            logActivity(`Transitioning to state: ${targetState}`);
+            try {
+                const response = await window.isiMacroscope.workflow.transitionTo(targetState);
+                if (response.success) {
+                    logActivity(`Successfully transitioned to ${targetState}`);
+                    await loadWorkflowState();
+                } else {
+                    logActivity(`Transition failed: ${response.error_message}`);
+                }
+            } catch (error) {
+                logActivity(`Transition error: ${error.message}`);
+            }
+        }
+
+        async function getWorkflowHistory() {
+            try {
+                const response = await window.isiMacroscope.workflow.getHistory();
+                if (response.success) {
+                    logActivity(`Workflow history: ${response.data.total_transitions} transitions`);
+                }
+            } catch (error) {
+                logActivity(`Failed to get workflow history: ${error.message}`);
+            }
+        }
+
+        // Hardware operations (forwarded to backend)
+        async function detectHardware() {
+            logActivity('Detecting hardware...');
+            try {
+                const response = await window.isiMacroscope.hardware.detect();
+                if (response.success) {
+                    logActivity('Hardware detection completed');
+                    updateHardwareDisplay(response.data.capabilities);
+                } else {
+                    logActivity(`Hardware detection failed: ${response.error_message}`);
+                }
+            } catch (error) {
+                logActivity(`Hardware detection error: ${error.message}`);
+            }
+        }
+
+        async function getHardwareStatus() {
+            try {
+                const response = await window.isiMacroscope.hardware.getStatus();
+                if (response.success) {
+                    logActivity('Hardware status retrieved');
+                    document.getElementById('hardware-status').textContent = 'Available';
+                }
+            } catch (error) {
+                logActivity(`Failed to get hardware status: ${error.message}`);
+            }
+        }
+
+        function updateHardwareDisplay(capabilities) {
+            const container = document.getElementById('hardware-capabilities');
+
+            if (!capabilities) {
+                container.innerHTML = '<div class="info-item">No hardware data available</div>';
+                return;
+            }
+
+            container.innerHTML = Object.entries(capabilities).map(([type, capability]) => `
+                <div class="info-item">
+                    <div class="info-label">${type}</div>
+                    <div class="info-value">${capability.available ? '✅ Available' : '❌ Unavailable'}</div>
+                </div>
+            `).join('');
+        }
+
+        // System operations (forwarded to backend)
+        async function performHealthCheck() {
+            logActivity('Performing health check...');
+            try {
+                const response = await window.isiMacroscope.system.healthCheck();
+                if (response.success) {
+                    const status = response.data.system_healthy ? 'Healthy' : 'Issues Detected';
+                    logActivity(`Health check completed: ${status}`);
+                } else {
+                    logActivity(`Health check failed: ${response.error_message}`);
+                }
+            } catch (error) {
+                logActivity(`Health check error: ${error.message}`);
+            }
+        }
+
+        async function getSystemInfo() {
+            try {
+                const response = await window.isiMacroscope.system.getInfo();
+                if (response.success) {
+                    updateSystemInfoDisplay(response.data);
+                }
+            } catch (error) {
+                logActivity(`Failed to get system info: ${error.message}`);
+            }
+        }
+
+        function updateSystemInfoDisplay(systemInfo) {
+            document.getElementById('backend-version').textContent = systemInfo.backend_version || 'Unknown';
+            document.getElementById('platform-info').textContent = systemInfo.platform_type || 'Unknown';
+            document.getElementById('dev-mode-info').textContent = systemInfo.development_mode ? 'Yes' : 'No';
+            document.getElementById('development-mode').textContent = systemInfo.development_mode ? 'Development' : 'Production';
+        }
+
+        function updateCurrentStateDisplay() {
+            if (currentWorkflowState) {
+                document.getElementById('current-state').textContent = currentWorkflowState.current_state;
+            }
+        }
+
+        // Refresh all system information
+        async function refreshSystemInfo() {
+            await Promise.all([
+                loadWorkflowState(),
+                getSystemInfo(),
+                getHardwareStatus()
+            ]);
+        }
+
+        // Activity logging
+        function logActivity(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logContainer = document.getElementById('activity-log');
+
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span> ${message}`;
+
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+
+            console.log(`🎨 ${message}`);
+        }
+    </script>
+</body>
+</html>
