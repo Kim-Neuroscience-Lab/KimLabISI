@@ -6,17 +6,32 @@ and ensures parameter compatibility with existing datasets.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
-import logging
 from pathlib import Path
+from cerberus import Validator
+from schema import Schema, SchemaError, Optional as SchemaOptional
+import marshmallow as ma
+from marshmallow import fields, validate
 
-logger = logging.getLogger(__name__)
+from .error_handler import ErrorHandlingService, ISIDomainError
 
 
 class ParameterValidator:
     """Validates parameter combinations and scientific constraints"""
 
-    def __init__(self):
+    def __init__(self, error_handler: Optional[ErrorHandlingService] = None):
+        self.error_handler = error_handler or ErrorHandlingService()
         self.validation_rules = self._load_validation_rules()
+
+        # Setup Cerberus validator for structured parameter validation
+        self.cerberus_validator = Validator()
+
+        # Setup schema for spatial constraints
+        self.spatial_schema = Schema({
+            'monitor_distance_cm': fields.Float(validate=validate.Range(min=5.0, max=20.0)),
+            'monitor_angle_degrees': fields.Float(validate=validate.Range(min=0.0, max=45.0)),
+            'field_of_view_horizontal_degrees': fields.Float(validate=validate.Range(min=0.0, max=180.0)),
+            'field_of_view_vertical_degrees': fields.Float(validate=validate.Range(min=0.0, max=180.0))
+        })
 
     def _load_validation_rules(self) -> Dict[str, Any]:
         """Load scientific validation rules and constraints"""
@@ -49,15 +64,34 @@ class ParameterValidator:
         }
 
     def validate_combined_parameters(self, parameters) -> Tuple[bool, List[str]]:
-        """Validate complete parameter set and check for interactions
+        """Validate complete parameter set using structured validation
 
         Returns:
             Tuple of (is_valid, warnings_list)
         """
         all_warnings = []
-
-        # Basic validation - just return valid for now
         is_valid = True
+
+        try:
+            # Validate spatial configuration using Marshmallow schema
+            if hasattr(parameters, 'spatial_config'):
+                spatial_data = {
+                    'monitor_distance_cm': parameters.spatial_config.monitor_distance_cm,
+                    'monitor_angle_degrees': parameters.spatial_config.monitor_angle_degrees,
+                    'field_of_view_horizontal_degrees': parameters.spatial_config.field_of_view_horizontal_degrees,
+                    'field_of_view_vertical_degrees': parameters.spatial_config.field_of_view_vertical_degrees
+                }
+
+                # Validate using the schema
+                try:
+                    self.spatial_schema.load(spatial_data)
+                except ma.ValidationError as e:
+                    is_valid = False
+                    all_warnings.extend([f"Spatial validation error: {error}" for error in e.messages.values()])
+
+        except Exception as e:
+            is_valid = False
+            all_warnings.append(f"Validation error: {str(e)}")
 
         return is_valid, all_warnings
 
@@ -91,17 +125,25 @@ class ParameterValidator:
 class ParameterCompatibilityChecker:
     """Checks parameter compatibility with existing datasets"""
 
-    def __init__(self, dataset_directory: Optional[Path] = None):
+    def __init__(self, dataset_directory: Optional[Path] = None, error_handler: Optional[ErrorHandlingService] = None):
         self.dataset_directory = dataset_directory
+        self.error_handler = error_handler or ErrorHandlingService()
 
     def check_dataset_compatibility(self, params, dataset_path: Path) -> bool:
         """Check if parameters are compatible with existing dataset"""
         try:
-            logger.info(f"Checking compatibility with dataset: {dataset_path}")
             # For now, return False to force regeneration
             return False
         except Exception as e:
-            logger.warning(f"Could not check dataset compatibility: {e}")
+            # Create domain error instead of logging
+            domain_error = self.error_handler.handle_exception(
+                exception=e,
+                error_code="PARAMETER_COMPATIBILITY_ERROR",
+                custom_message=f"Could not check dataset compatibility with {dataset_path}",
+                dataset_path=str(dataset_path),
+                function="check_dataset_compatibility"
+            )
+            # For compatibility checking, we return False instead of raising
             return False
 
     def find_compatible_datasets(self, params) -> List[Path]:

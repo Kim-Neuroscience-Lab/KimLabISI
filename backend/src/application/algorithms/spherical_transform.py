@@ -12,7 +12,10 @@ Key Functions:
 
 import numpy as np
 from typing import Tuple, Optional
-import math
+from scipy.spatial.transform import Rotation
+from scipy.spatial.distance import pdist
+import astropy.coordinates as coord
+import astropy.units as u
 
 
 class SphericalTransform:
@@ -76,7 +79,7 @@ class SphericalTransform:
         Returns:
             Azimuth angles in degrees
         """
-        # Spherical azimuth calculation
+        # Spherical azimuth calculation using validated numpy functions
         # For points far from center, use proper spherical projection
         pixel_azimuth = np.degrees(
             np.arctan2(x_degrees, np.sqrt(y_degrees**2 + self.screen_distance_cm**2))
@@ -106,7 +109,7 @@ class SphericalTransform:
         Returns:
             Altitude angles in degrees
         """
-        # Spherical altitude calculation
+        # Spherical altitude calculation using validated numpy functions
         # For points far from center, use proper spherical projection
         pixel_altitude = np.degrees(
             np.arcsin(y_degrees / np.sqrt(x_degrees**2 + y_degrees**2 + self.screen_distance_cm**2))
@@ -174,7 +177,7 @@ class SphericalTransform:
         """
         Calculate the angular distance between two points in visual space
 
-        Uses spherical trigonometry for accurate distance calculation.
+        Uses validated astropy coordinates for accurate spherical distance calculation.
 
         Args:
             x1_degrees, y1_degrees: First point in visual degrees
@@ -183,19 +186,13 @@ class SphericalTransform:
         Returns:
             Angular distance in degrees
         """
-        # Convert to radians
-        x1_rad, y1_rad = math.radians(x1_degrees), math.radians(y1_degrees)
-        x2_rad, y2_rad = math.radians(x2_degrees), math.radians(y2_degrees)
+        # Create astropy coordinate objects for accurate spherical calculations
+        point1 = coord.SkyCoord(x1_degrees*u.degree, y1_degrees*u.degree, frame='icrs')
+        point2 = coord.SkyCoord(x2_degrees*u.degree, y2_degrees*u.degree, frame='icrs')
 
-        # Spherical distance formula (great circle distance)
-        cos_distance = (math.sin(y1_rad) * math.sin(y2_rad) +
-                       math.cos(y1_rad) * math.cos(y2_rad) * math.cos(x1_rad - x2_rad))
-
-        # Clamp to avoid numerical errors
-        cos_distance = max(-1.0, min(1.0, cos_distance))
-
-        distance_rad = math.acos(cos_distance)
-        return math.degrees(distance_rad)
+        # Calculate great circle distance using validated astropy methods
+        separation = point1.separation(point2)
+        return separation.to(u.degree).value
 
 
 def create_spherical_transform_from_spatial_config(spatial_config) -> SphericalTransform:

@@ -18,9 +18,10 @@ import numpy as np
 from typing import List, Optional, Iterator
 from pathlib import Path
 
-from ...domain.value_objects.stimulus_params import (
-    StimulusParams, VisualFieldParams, RetinotopyProtocol
-)
+# Use consolidated parameter system instead of duplicate stimulus_params
+# from ...domain.value_objects.stimulus_params import (
+#     StimulusParams, VisualFieldParams, RetinotopyProtocol
+# )
 from ...domain.entities.workflow_state import WorkflowState, HardwareRequirement
 from ...domain.entities.parameters import ParameterManager
 from ...domain.value_objects.parameters import CombinedParameters

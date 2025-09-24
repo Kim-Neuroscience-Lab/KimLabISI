@@ -6,11 +6,15 @@ These interfaces belong in the domain layer and are implemented by infrastructur
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Union
 from pathlib import Path
-import numpy as np
 
 from ..value_objects.parameters import CombinedParameters
+
+# Domain-appropriate type aliases instead of numpy
+DataType = Union[str, int, float]  # Generic data type specification
+ShapeType = Tuple[int, ...]       # Shape specification
+FrameData = List[List[List[float]]]  # Multi-dimensional frame data
 
 
 class DataRepositoryInterface(ABC):
@@ -20,8 +24,8 @@ class DataRepositoryInterface(ABC):
     async def create_dataset(self,
                            session_id: str,
                            dataset_name: str,
-                           shape: Tuple[int, ...],
-                           dtype: np.dtype,
+                           shape: ShapeType,
+                           dtype: str,  # String representation of data type
                            parameters: Optional[CombinedParameters] = None,
                            metadata: Optional[Dict[str, Any]] = None) -> Path:
         """Create a new dataset for storing imaging data"""
@@ -31,8 +35,8 @@ class DataRepositoryInterface(ABC):
     async def write_frames(self,
                           session_id: str,
                           dataset_name: str,
-                          frames: np.ndarray,
-                          frame_indices: Optional[np.ndarray] = None) -> None:
+                          frames: FrameData,
+                          frame_indices: Optional[List[int]] = None) -> None:
         """Write frame data to dataset"""
         pass
 
@@ -40,7 +44,7 @@ class DataRepositoryInterface(ABC):
     async def read_frames(self,
                          session_id: str,
                          dataset_name: str,
-                         frame_indices: Optional[np.ndarray] = None) -> np.ndarray:
+                         frame_indices: Optional[List[int]] = None) -> FrameData:
         """Read frame data from dataset"""
         pass
 

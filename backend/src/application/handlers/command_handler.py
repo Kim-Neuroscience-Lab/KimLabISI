@@ -16,6 +16,7 @@ Command Handler Responsibilities:
 import logging
 from typing import Dict, Any, Optional, Set
 from enum import Enum
+from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
 
 from ...domain.entities.workflow_state import (
@@ -25,7 +26,7 @@ from ...domain.entities.workflow_state import (
     WorkflowTransition
 )
 from ...infrastructure.hardware.factory import HardwareFactory
-from ...infrastructure.communication.ipc_server import IPCHandler, CommandMessage
+from ...infrastructure.communication.ipc_server import IPCHandler, IPCMessage, MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -107,39 +108,51 @@ class CommandHandler(IPCHandler):
 
         logger.info("Command handler initialized")
 
-    async def handle_command(self, command: CommandMessage) -> Dict[str, Any]:
+    async def handle_message(self, message: IPCMessage) -> Optional[IPCMessage]:
         """
-        Handle command from frontend
+        Handle IPC message from frontend
 
         Args:
-            command: Command message from frontend
+            message: IPC message from frontend
 
         Returns:
-            Dictionary containing command response
+            Optional response message
         """
         try:
+            # Extract command information from payload
+            command_name = message.payload.get("command")
+            parameters = message.payload.get("parameters", {})
+
+            if not command_name:
+                return self._create_error_response(message, "Missing command in payload")
+
             # Validate and parse command
             command_request = CommandRequest(
-                command_type=CommandType(command.command),
-                parameters=command.parameters
+                command_type=CommandType(command_name),
+                parameters=parameters
             )
 
             # Route to appropriate command handler
             response = await self._route_command(command_request)
 
-            # Return structured response
-            return response.model_dump()
+            # Return structured IPC response
+            return IPCMessage(
+                message_type=MessageType.RESPONSE,
+                message_id=message.message_id,
+                timestamp=message.timestamp,
+                payload=response.model_dump()
+            )
 
         except ValueError as e:
             # Invalid command type
-            return self._create_error_response(f"Unknown command: {command.command}", str(e))
+            return self._create_error_response(message, f"Unknown command: {command_name}", str(e))
         except ValidationError as e:
             # Invalid command parameters
-            return self._create_error_response("Invalid command parameters", str(e))
+            return self._create_error_response(message, "Invalid command parameters", str(e))
         except Exception as e:
             # Unexpected error
-            logger.error(f"Unexpected error handling command {command.command}: {e}")
-            return self._create_error_response("Command processing failed", str(e))
+            logger.error(f"Unexpected error handling command {command_name}: {e}")
+            return self._create_error_response(message, "Command processing failed", str(e))
 
     async def handle_query(self, query: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -163,7 +176,8 @@ class CommandHandler(IPCHandler):
 
         except Exception as e:
             logger.error(f"Error handling query: {e}")
-            return self._create_error_response("Query processing failed", str(e))
+            # Note: This method needs updating for IPC message structure
+            return {"error": f"Query processing failed: {str(e)}"}
 
     async def _route_command(self, command_request: CommandRequest) -> CommandResponse:
         """Route command to appropriate handler method"""
@@ -463,15 +477,20 @@ class CommandHandler(IPCHandler):
                 timestamp=self._get_current_timestamp()
             )
 
-    def _create_error_response(self, error_message: str, details: str) -> Dict[str, Any]:
-        """Create error response dictionary"""
-        error_response = CommandResponse(
-            success=False,
-            data={},
-            error_message=f"{error_message}: {details}",
-            timestamp=self._get_current_timestamp()
+    def _create_error_response(self, original_message: IPCMessage, error_message: str, details: str = "") -> IPCMessage:
+        """Create error response IPC message"""
+        error_details = f"{error_message}: {details}" if details else error_message
+
+        return IPCMessage(
+            message_type=MessageType.ERROR,
+            message_id=original_message.message_id,
+            timestamp=original_message.timestamp,
+            payload={
+                "success": False,
+                "error": error_details,
+                "original_command": original_message.payload.get("command")
+            }
         )
-        return error_response.model_dump()
 
     def _get_current_timestamp(self) -> float:
         """Get current timestamp"""

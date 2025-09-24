@@ -116,6 +116,9 @@ ACQUISITION_READY → ACQUISITION → ANALYSIS_READY → ANALYSIS
 ### Data Integrity
 - **Scientific Data Isolation**: Full-resolution stimulus and camera data never passes through Electron frontend
 - **State Persistence**: Complete workflow state survives application restarts
+- **Parameter vs Configuration System**: Clear distinction between scientific parameters and technical configuration
+  - **Parameters**: Scientific experimental values (spatial setup, stimulus properties, acquisition protocols)
+  - **Configuration**: Technical system settings (streaming, display, communication protocols)
 - **Parameter Separation**: Generation-time parameters distinct from acquisition-time protocols
 - **Timestamp Preservation**: Microsecond-precision correlation between stimulus and camera events
 

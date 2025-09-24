@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 from datetime import datetime
 import json
-import logging
 from abc import ABC, abstractmethod
 
 from ..value_objects.parameters import (
@@ -18,11 +17,11 @@ from ..value_objects.parameters import (
     AcquisitionProtocolParams,
     CombinedParameters,
     ParameterSource,
-    ParameterValidationError
+    DirectionSequence,
+    BaselineMode
 )
 from ..services.parameter_validator import ParameterValidator
-
-logger = logging.getLogger(__name__)
+from ..services.error_handler import ErrorHandlingService, ISIDomainError
 
 
 class ParameterStore(ABC):
@@ -52,17 +51,24 @@ class ParameterStore(ABC):
 class FileBasedParameterStore(ParameterStore):
     """File-based parameter storage for development and configuration management"""
 
-    def __init__(self, storage_directory: Path):
+    def __init__(self, storage_directory: Path, error_handler: Optional[ErrorHandlingService] = None):
         self.storage_directory = Path(storage_directory)
         self.storage_directory.mkdir(parents=True, exist_ok=True)
-        self.validator = ParameterValidator()
+        self.error_handler = error_handler or ErrorHandlingService()
+        self.validator = ParameterValidator(self.error_handler)
 
     def load_parameters(self, parameter_set_id: str) -> CombinedParameters:
         """Load parameters from JSON file"""
         file_path = self.storage_directory / f"{parameter_set_id}.json"
 
         if not file_path.exists():
-            raise ParameterValidationError(f"Parameter set '{parameter_set_id}' not found")
+            domain_error = self.error_handler.create_error(
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message=f"Parameter set '{parameter_set_id}' not found",
+                parameter_set_id=parameter_set_id,
+                file_path=str(file_path)
+            )
+            raise ISIDomainError(domain_error)
 
         try:
             with open(file_path, 'r') as f:
@@ -84,7 +90,14 @@ class FileBasedParameterStore(ParameterStore):
             )
 
         except Exception as e:
-            raise ParameterValidationError(f"Failed to load parameter set '{parameter_set_id}': {e}")
+            domain_error = self.error_handler.handle_exception(
+                exception=e,
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message=f"Failed to load parameter set '{parameter_set_id}'",
+                parameter_set_id=parameter_set_id,
+                operation="load"
+            )
+            raise ISIDomainError(domain_error)
 
     def save_parameters(self, parameters: CombinedParameters, parameter_set_id: str) -> None:
         """Save parameters to JSON file"""
@@ -93,7 +106,13 @@ class FileBasedParameterStore(ParameterStore):
         # Validate parameters before saving
         is_valid, warnings = self.validator.validate_combined_parameters(parameters)
         if not is_valid:
-            raise ParameterValidationError(f"Cannot save invalid parameters: {warnings}")
+            domain_error = self.error_handler.create_error(
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message="Cannot save invalid parameters",
+                parameter_set_id=parameter_set_id,
+                validation_warnings=warnings
+            )
+            raise ISIDomainError(domain_error)
 
         try:
             # Convert to dictionary with timestamps
@@ -114,10 +133,15 @@ class FileBasedParameterStore(ParameterStore):
             with open(file_path, 'w') as f:
                 json.dump(data, f, indent=2, sort_keys=True)
 
-            logger.info(f"Saved parameter set '{parameter_set_id}' to {file_path}")
-
         except Exception as e:
-            raise ParameterValidationError(f"Failed to save parameter set '{parameter_set_id}': {e}")
+            domain_error = self.error_handler.handle_exception(
+                exception=e,
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message=f"Failed to save parameter set '{parameter_set_id}'",
+                parameter_set_id=parameter_set_id,
+                operation="save"
+            )
+            raise ISIDomainError(domain_error)
 
     def list_parameter_sets(self) -> List[str]:
         """List available parameter set IDs"""
@@ -129,9 +153,14 @@ class FileBasedParameterStore(ParameterStore):
         file_path = self.storage_directory / f"{parameter_set_id}.json"
         if file_path.exists():
             file_path.unlink()
-            logger.info(f"Deleted parameter set '{parameter_set_id}'")
         else:
-            raise ParameterValidationError(f"Parameter set '{parameter_set_id}' not found")
+            domain_error = self.error_handler.create_error(
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message=f"Parameter set '{parameter_set_id}' not found",
+                parameter_set_id=parameter_set_id,
+                operation="delete"
+            )
+            raise ISIDomainError(domain_error)
 
 
 class DefaultParameterFactory:
@@ -180,11 +209,19 @@ class DefaultParameterFactory:
             compression_level=6,
         )
 
-        # Standard acquisition parameters
+        # Standard acquisition parameters based on Marshel et al.
         protocol_params = AcquisitionProtocolParams(
-            num_cycles=10,  # 10 drifts in each direction
-            repetitions_per_direction=1,
+            num_cycles=10,  # 10 drifts in each direction per Marshel et al.
+            total_protocol_repetitions=1,
+            direction_sequence=DirectionSequence.SEQUENTIAL,
+            include_reverse_directions=True,
+            baseline_mode=BaselineMode.PRE_POST_SESSION,
+            baseline_duration_sec=10.0,
             frame_rate=60.0,  # Standard display rate
+            inter_direction_interval_sec=5.0,
+            inter_cycle_interval_sec=2.0,
+            inter_protocol_interval_sec=30.0,
+            # Legacy parameters for compatibility
             inter_trial_interval_sec=2.0,
             pre_stimulus_baseline_sec=10.0,
             post_stimulus_baseline_sec=10.0,
@@ -238,10 +275,18 @@ class DefaultParameterFactory:
 
         # Shorter acquisition for development
         protocol_params = AcquisitionProtocolParams(
-            num_cycles=2,  # Fewer cycles
-            repetitions_per_direction=1,
+            num_cycles=2,  # Fewer cycles for faster testing
+            total_protocol_repetitions=1,
+            direction_sequence=DirectionSequence.SEQUENTIAL,
+            include_reverse_directions=False,  # Only LR and TB for speed
+            baseline_mode=BaselineMode.PRE_SESSION,
+            baseline_duration_sec=2.0,  # Shorter baseline
             frame_rate=30.0,  # Lower frame rate
-            inter_trial_interval_sec=1.0,  # Shorter intervals
+            inter_direction_interval_sec=1.0,
+            inter_cycle_interval_sec=0.5,
+            inter_protocol_interval_sec=5.0,
+            # Legacy parameters for compatibility
+            inter_trial_interval_sec=1.0,
             pre_stimulus_baseline_sec=2.0,
             post_stimulus_baseline_sec=2.0,
             session_name_pattern="Dev_Test_{timestamp}",
@@ -263,13 +308,14 @@ class DefaultParameterFactory:
 class ParameterManager:
     """High-level parameter management with validation and defaults"""
 
-    def __init__(self, storage_directory: Optional[Path] = None):
+    def __init__(self, storage_directory: Optional[Path] = None, error_handler: Optional[ErrorHandlingService] = None):
         if storage_directory is None:
             # Default storage location
             storage_directory = Path.home() / ".isi_macroscope" / "parameters"
 
-        self.parameter_store = FileBasedParameterStore(storage_directory)
-        self.validator = ParameterValidator()
+        self.error_handler = error_handler or ErrorHandlingService()
+        self.parameter_store = FileBasedParameterStore(storage_directory, self.error_handler)
+        self.validator = ParameterValidator(self.error_handler)
         self._ensure_defaults_exist()
 
     def _ensure_defaults_exist(self):
@@ -279,16 +325,20 @@ class ParameterManager:
             if "marshel_2011_defaults" not in self.parameter_store.list_parameter_sets():
                 defaults = DefaultParameterFactory.create_marshel_2011_defaults()
                 self.parameter_store.save_parameters(defaults, "marshel_2011_defaults")
-                logger.info("Created Marshel 2011 default parameters")
 
             # Check if development defaults exist
             if "development_defaults" not in self.parameter_store.list_parameter_sets():
                 dev_defaults = DefaultParameterFactory.create_development_defaults()
                 self.parameter_store.save_parameters(dev_defaults, "development_defaults")
-                logger.info("Created development default parameters")
 
         except Exception as e:
-            logger.warning(f"Could not create default parameters: {e}")
+            # Create domain error but don't fail initialization
+            domain_error = self.error_handler.handle_exception(
+                exception=e,
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message="Could not create default parameters",
+                operation="ensure_defaults_exist"
+            )
 
     def get_parameters(self, parameter_set_id: str) -> CombinedParameters:
         """Get parameters by ID with validation"""
@@ -297,7 +347,13 @@ class ParameterManager:
         # Validate parameters
         is_valid, warnings = self.validator.validate_combined_parameters(parameters)
         if warnings:
-            logger.warning(f"Parameter warnings for '{parameter_set_id}': {warnings}")
+            # Create domain error for warnings but don't fail
+            domain_error = self.error_handler.create_error(
+                error_code="PARAMETER_VALIDATION_ERROR",
+                custom_message=f"Parameter warnings for '{parameter_set_id}': {warnings}",
+                parameter_set_id=parameter_set_id,
+                warnings=warnings
+            )
 
         return parameters
 

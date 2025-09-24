@@ -108,16 +108,15 @@ KimLabISI/
             |-- hardware.py        # Hardware capability and status entities
             |-- dataset.py         # Scientific dataset entities with metadata
 
-         |-- value_objects/         # Immutable value objects
+         |-- value_objects/         # Immutable value objects (Pydantic V2)
             |-- __init__.py
-            |-- spatial_config.py  # 3D spatial configuration values
-            |-- stimulus_params.py # Visual stimulus parameter values
-            |-- acquisition_params.py # Data acquisition parameter values
+            |-- parameters.py      # Scientific parameters (spatial, stimulus, acquisition)
+            |-- stream_config.py   # Technical system configuration (streaming, display)
 
          |-- services/              # Domain services (complex business logic)
             |-- __init__.py
             |-- parameter_validator.py # Scientific parameter validation logic
-            |-- dataset_matcher.py # Dataset reuse parameter matching logic
+            |-- dataset_repository.py # Simple dataset persistence and retrieval
             |-- workflow_orchestrator.py # Workflow state transition rules
             |-- stimulus_calculator.py # Spherical corrections and pattern math
             |-- isi_analyzer.py     # ISI computation and phase map algorithms
@@ -127,6 +126,7 @@ KimLabISI/
              |-- hardware_repository.py # Hardware control abstractions
              |-- data_repository.py # Data storage abstractions
              |-- config_repository.py # Configuration management abstractions
+             |-- experiment_repository.py # Experiment session management abstractions
 
       |-- application/               # Application layer (use cases, orchestration)
          |-- __init__.py
@@ -194,6 +194,13 @@ KimLabISI/
 
              |-- factory.py         # Platform detection and hardware factory
 
+             |-- calibration/       # Hardware calibration systems
+                |-- __init__.py
+                |-- camera_calibrator.py # Camera calibration procedures
+                |-- display_calibrator.py # Display calibration procedures
+                |-- spatial_calibrator.py # Spatial configuration calibration
+                |-- timing_calibrator.py # Timing system calibration
+
              |-- streaming/         # Real-time data streaming
                 |-- __init__.py
                 |-- ring_buffer.py  # Lock-free ring buffers
@@ -205,7 +212,7 @@ KimLabISI/
              |-- __init__.py
              |-- hdf5_repository.py # HDF5 scientific data storage (h5py)
              |-- config_repository.py # Configuration file management
-             |-- dataset_discovery.py # Dataset reuse parameter matching
+             |-- metadata_indexing.py # Dataset metadata for discovery
              |-- session_repository.py # Session state persistence
              |-- cache_manager.py    # Stimulus cache and buffer management
 
@@ -358,8 +365,18 @@ KimLabISI/
 - **Backend Controls Everything**: All business logic, validation, and state management in Python backend
 - **Frontend Display Only**: Electron frontend purely displays backend state and forwards user input
 - **Domain Layer (Backend)**: Pure business logic with zero external dependencies
+  - **Domain Purity**: No logging, numpy, asyncio, or any infrastructure imports
+  - **Centralized Error Handling**: Single ErrorHandlingService replaces scattered exceptions
+  - **Computation Abstraction**: ComputationServiceInterface protocol for mathematical operations
+  - **Dependency Injection**: All services inject dependencies through constructor parameters
+  - **Protocol-Based Design**: Service contracts defined through Python protocols
 - **Application Layer (Backend)**: Use cases orchestrating domain logic and handling IPC messages
+  - **Error Orchestration**: Infrastructure-aware error handling with logging and metrics
+  - **Computation Services**: Mathematical operations delegated from domain layer
+  - **Service Coordination**: Orchestrates domain services with infrastructure concerns
 - **Infrastructure Layer (Backend)**: External concerns (hardware, storage, communication)
+  - **Hardware Abstraction**: Platform-specific implementations with common interfaces
+  - **Computational Libraries**: NumPy/SciPy operations abstracted from domain layer
 - **Thin Client (Frontend)**: Zero business logic, only UI rendering and IPC communication
 
 ### Cross-Platform Strategy
@@ -380,7 +397,7 @@ KimLabISI/
 ### Data Management Strategy
 
 - **HDF5 Storage**: Scientific data with hierarchical metadata organization
-- **Dataset Reuse**: Parameter-based exact matching for stimulus sharing
+- **Dataset Persistence**: Simple file-based storage and retrieval for stimulus datasets, acquisition sessions, and analysis results
 - **State Persistence**: Complete workflow state survives application restarts
 - **Local Storage**: No external networking or cloud dependencies
 
@@ -439,7 +456,7 @@ This architecture comprehensively addresses all aspects from our design document
 ### Data Management
 
 - **HDF5 Storage**: Scientific datasets with metadata (`storage/hdf5_repository.py`)
-- **Dataset Reuse**: Parameter matching, discovery (`storage/dataset_discovery.py`)
+- **Dataset Management**: Simple file-based persistence and retrieval (`domain/services/dataset_repository.py`)
 - **Session Persistence**: State management, recovery (`application/session_management.py`)
 
 ### User Interface
@@ -456,6 +473,29 @@ This architecture comprehensively addresses all aspects from our design document
 
 ### Error Handling & Recovery
 
+**Centralized Error Handling Architecture** - Eliminates code duplication and ensures consistent error handling across all system components:
+
+- **Domain Error Service** (`domain/services/error_handler.py`):
+  - Pure domain service with zero infrastructure dependencies
+  - Centralized error definitions for all system error types
+  - Consistent error categorization (validation, business logic, infrastructure, etc.)
+  - Recovery strategy specification (retry, fallback, user intervention)
+  - Single `ISIDomainError` class replaces all scattered custom exceptions
+
+- **Application Error Orchestrator** (`application/services/error_orchestrator.py`):
+  - Infrastructure-aware error handling with logging, metrics, and alerting
+  - Implements `ErrorLogger` protocol for domain service integration
+  - Error recovery strategy execution and coordination
+  - Error history tracking and analysis capabilities
+  - Alert callback system for critical error notifications
+
+- **Clean Architecture Compliance**:
+  - Domain layer: Pure error definitions and business rules (no logging/infrastructure)
+  - Application layer: Error orchestration, logging, metrics, recovery coordination
+  - Infrastructure layer: Platform-specific error reporting and alerting
+
+- **Dependency Injection Pattern**: All domain services inject ErrorHandlingService for consistent error handling
+- **Legacy Systems Migration**: Eliminated 17+ scattered exception classes in favor of centralized approach
 - **Graceful Degradation**: Reduced functionality modes (`use_cases/error_recovery.py`)
 - **State Recovery**: Session restoration, data preservation (`application/state_persistence.py`)
 - **Hardware Failover**: Mock hardware fallback (`hardware/factory.py`)

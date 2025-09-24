@@ -9,10 +9,10 @@ Acquisition-time parameters control experimental execution and protocol.
 """
 
 from enum import Enum
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from pydantic import BaseModel, Field, field_validator
-import hashlib
-import json
+from joblib import hash as joblib_hash
+import orjson
 
 
 class ParameterSource(Enum):
@@ -21,6 +21,23 @@ class ParameterSource(Enum):
     USER_CONFIG = "user_config"  # User-defined configuration
     PARAMETER_STORE = "parameter_store"  # Production parameter store
     SESSION_LOADED = "session_loaded"  # Loaded from saved session
+
+
+class DirectionSequence(Enum):
+    """Direction presentation sequence options"""
+    SEQUENTIAL = "sequential"  # LR → RL → TB → BT
+    INTERLEAVED = "interleaved"  # LR → TB → RL → BT
+    RANDOMIZED = "randomized"   # Random order per cycle
+    CUSTOM = "custom"          # User-defined order
+
+
+class BaselineMode(Enum):
+    """Baseline recording strategies"""
+    PRE_SESSION = "pre_session"     # Record baseline before any stimuli
+    PRE_DIRECTION = "pre_direction" # Record baseline before each direction
+    PRE_CYCLE = "pre_cycle"         # Record baseline before each cycle
+    INTERLEAVED = "interleaved"     # Baseline periods between stimuli
+    PRE_POST_SESSION = "pre_post_session"  # Baseline before and after session
 
 
 class SpatialConfiguration(BaseModel):
@@ -96,7 +113,7 @@ class SpatialConfiguration(BaseModel):
 
     @property
     def config_hash(self) -> str:
-        """Generate MD5 hash for parameter comparison and dataset reuse validation"""
+        """Generate deterministic hash for parameter comparison and dataset reuse validation"""
         # Create canonical parameter dict in sorted order
         params = {
             "monitor_distance_cm": self.monitor_distance_cm,
@@ -110,15 +127,14 @@ class SpatialConfiguration(BaseModel):
             "field_of_view_horizontal_degrees": self.field_of_view_horizontal_degrees,
             "field_of_view_vertical_degrees": self.field_of_view_vertical_degrees,
         }
-        canonical_json = json.dumps(params, sort_keys=True, separators=(',', ':'))
-        return hashlib.md5(canonical_json.encode()).hexdigest()
+        return joblib_hash(params)
 
     @property
     def pixels_per_degree(self) -> float:
-        """Calculate pixels per degree of visual angle"""
-        import math
-        # Calculate degrees per pixel using display geometry
-        screen_width_degrees = 2 * math.degrees(math.atan(self.screen_width_cm / (2 * self.monitor_distance_cm)))
+        """Calculate pixels per degree of visual angle using validated trigonometry"""
+        import numpy as np
+        # Calculate degrees per pixel using display geometry with validated numpy functions
+        screen_width_degrees = 2 * np.degrees(np.arctan(self.screen_width_cm / (2 * self.monitor_distance_cm)))
         return self.screen_width_pixels / screen_width_degrees
 
 
@@ -206,7 +222,7 @@ class StimulusGenerationParams(BaseModel):
 
     @property
     def params_hash(self) -> str:
-        """Generate MD5 hash for parameter comparison and dataset reuse validation"""
+        """Generate deterministic hash for parameter comparison and dataset reuse validation"""
         # Create canonical parameter dict in sorted order
         params = {
             "bar_width_degrees": self.bar_width_degrees,
@@ -221,8 +237,7 @@ class StimulusGenerationParams(BaseModel):
             "bit_depth": self.bit_depth,
             "compression_level": self.compression_level,
         }
-        canonical_json = json.dumps(params, sort_keys=True, separators=(',', ':'))
-        return hashlib.md5(canonical_json.encode()).hexdigest()
+        return joblib_hash(params)
 
 
 class AcquisitionProtocolParams(BaseModel):
@@ -230,46 +245,97 @@ class AcquisitionProtocolParams(BaseModel):
 
     These parameters control experimental execution but do not affect
     stimulus content. Changes do NOT invalidate existing stimulus datasets.
+    Based on Marshel et al. 2011 experimental procedures with modern enhancements.
     """
 
     # Protocol control
     num_cycles: int = Field(
         default=10,
         gt=0,
-        le=20,
-        description="Number of stimulus cycles (Marshel et al.: 10 drifts per direction)"
+        le=50,
+        description="Number of stimulus cycles per direction (Marshel et al.: 10 drifts per direction)"
     )
-    repetitions_per_direction: int = Field(
+    total_protocol_repetitions: int = Field(
         default=1,
         gt=0,
         le=10,
-        description="Number of repetitions for each direction"
+        description="Number of times to repeat entire protocol sequence"
     )
 
-    # Timing control
+    # Direction sequencing
+    direction_sequence: DirectionSequence = Field(
+        default=DirectionSequence.SEQUENTIAL,
+        description="Order of direction presentation (sequential, interleaved, randomized, custom)"
+    )
+    custom_direction_order: Optional[List[str]] = Field(
+        default=None,
+        description="Custom direction order when direction_sequence is CUSTOM (e.g., ['LR', 'TB', 'RL', 'BT'])"
+    )
+    include_reverse_directions: bool = Field(
+        default=True,
+        description="Include both forward and reverse directions (LR+RL, TB+BT)"
+    )
+    randomize_cycle_order: bool = Field(
+        default=False,
+        description="Randomize frame order within each cycle"
+    )
+
+    # Baseline recording strategy
+    baseline_mode: BaselineMode = Field(
+        default=BaselineMode.PRE_POST_SESSION,
+        description="When to record baseline periods"
+    )
+    baseline_duration_sec: float = Field(
+        default=10.0,
+        ge=0.0,
+        le=300.0,
+        description="Duration of baseline recording periods in seconds"
+    )
+
+    # Advanced timing control
     frame_rate: float = Field(
         default=60.0,
         gt=1.0,
         le=120.0,
         description="Display frame rate in Hz"
     )
+    inter_direction_interval_sec: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=60.0,
+        description="Pause between different directions in seconds"
+    )
+    inter_cycle_interval_sec: float = Field(
+        default=2.0,
+        ge=0.0,
+        le=30.0,
+        description="Pause between cycles within a direction in seconds"
+    )
+    inter_protocol_interval_sec: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=300.0,
+        description="Pause between full protocol repetitions in seconds"
+    )
+
+    # Legacy timing parameters (maintained for compatibility)
     inter_trial_interval_sec: float = Field(
         default=2.0,
         ge=0.0,
         le=30.0,
-        description="Interval between trials in seconds"
+        description="Legacy: Interval between trials in seconds (use inter_cycle_interval_sec)"
     )
     pre_stimulus_baseline_sec: float = Field(
         default=10.0,
         ge=0.0,
         le=60.0,
-        description="Baseline recording before stimulus"
+        description="Legacy: Pre-stimulus baseline (use baseline_mode and baseline_duration_sec)"
     )
     post_stimulus_baseline_sec: float = Field(
         default=10.0,
         ge=0.0,
         le=60.0,
-        description="Baseline recording after stimulus"
+        description="Legacy: Post-stimulus baseline (use baseline_mode and baseline_duration_sec)"
     )
 
     # Session management
@@ -277,7 +343,7 @@ class AcquisitionProtocolParams(BaseModel):
         default="ISI_Mapping_{timestamp}",
         description="Session naming pattern with placeholders"
     )
-    export_formats: list[str] = Field(
+    export_formats: List[str] = Field(
         default=["hdf5", "png"],
         description="Data export formats for analysis"
     )
@@ -295,6 +361,39 @@ class AcquisitionProtocolParams(BaseModel):
     )
 
     model_config = {"frozen": True}
+
+    @field_validator('custom_direction_order')
+    @classmethod
+    def validate_custom_direction_order(cls, v):
+        """Validate custom direction order when specified"""
+        if v is not None:
+            valid_directions = ["LR", "RL", "TB", "BT"]
+            for direction in v:
+                if direction not in valid_directions:
+                    raise ValueError(f"Invalid direction: {direction}. Must be one of {valid_directions}")
+        return v
+
+    def get_direction_order(self) -> List[str]:
+        """Get the actual direction presentation order"""
+        base_directions = ["LR", "RL", "TB", "BT"] if self.include_reverse_directions else ["LR", "TB"]
+
+        if self.direction_sequence == DirectionSequence.SEQUENTIAL:
+            return base_directions
+        elif self.direction_sequence == DirectionSequence.INTERLEAVED:
+            if self.include_reverse_directions:
+                return ["LR", "TB", "RL", "BT"]
+            else:
+                return ["LR", "TB"]
+        elif self.direction_sequence == DirectionSequence.CUSTOM:
+            if self.custom_direction_order:
+                return self.custom_direction_order
+            else:
+                return base_directions  # Fallback
+        elif self.direction_sequence == DirectionSequence.RANDOMIZED:
+            # Return base order - randomization happens at runtime
+            return base_directions
+        else:
+            return base_directions
 
 
 class CombinedParameters(BaseModel):
@@ -319,21 +418,19 @@ class CombinedParameters(BaseModel):
     @property
     def combined_hash(self) -> str:
         """Generate combined hash for complete parameter set validation"""
-        combined = f"{self.spatial_config.config_hash}:{self.stimulus_params.params_hash}"
-        return hashlib.sha256(combined.encode()).hexdigest()
+        combined_params = {
+            "spatial_config": self.spatial_config.model_dump(),
+            "stimulus_params": self.stimulus_params.model_dump()
+        }
+        return joblib_hash(combined_params)
 
     @property
     def generation_hash(self) -> str:
         """Generate hash for generation-time parameters only (for dataset reuse)"""
-        combined = f"{self.spatial_config.config_hash}:{self.stimulus_params.params_hash}"
-        return hashlib.sha256(combined.encode()).hexdigest()
+        generation_params = {
+            "spatial_config": self.spatial_config.model_dump(),
+            "stimulus_params": self.stimulus_params.model_dump()
+        }
+        return joblib_hash(generation_params)
 
 
-class ParameterValidationError(Exception):
-    """Raised when parameter validation fails"""
-    pass
-
-
-class ParameterCompatibilityError(Exception):
-    """Raised when parameters are incompatible with existing datasets"""
-    pass

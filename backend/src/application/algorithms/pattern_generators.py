@@ -12,13 +12,17 @@ Key Features:
 """
 
 import numpy as np
-import math
 from typing import Tuple, Optional
 from enum import Enum
+# from skimage import transform, filters, feature  # Temporarily disabled due to version issue
+from scipy import ndimage, signal
+from scipy.spatial.distance import cdist
 
-from ...domain.value_objects.stimulus_params import (
-    StimulusType, MovementDirection, StimulusParams, VisualFieldParams
-)
+# Use consolidated parameter system instead of duplicate stimulus_params
+# from ...domain.value_objects.stimulus_params import (
+#     StimulusType, MovementDirection, StimulusParams, VisualFieldParams
+# )
+from ...domain.value_objects.parameters import StimulusGenerationParams
 from ...domain.entities.parameters import ParameterManager
 from ...domain.value_objects.parameters import CombinedParameters
 from .spherical_transform import SphericalTransform, create_spherical_transform_from_spatial_config
@@ -64,8 +68,8 @@ class PatternGenerator:
         self.X_degrees = (self.X_pixels - center_x) / self.pixels_per_degree
         self.Y_degrees = (self.Y_pixels - center_y) / self.pixels_per_degree
 
-        # Polar coordinates
-        self.R_degrees = np.sqrt(self.X_degrees**2 + self.Y_degrees**2)
+        # Polar coordinates using validated numpy functions
+        self.R_degrees = np.linalg.norm(np.stack([self.X_degrees, self.Y_degrees], axis=-1), axis=-1)
         self.Theta_radians = np.arctan2(self.Y_degrees, self.X_degrees)
         self.Theta_degrees = np.degrees(self.Theta_radians)
 
@@ -219,10 +223,10 @@ class PatternGenerator:
         """Generate expanding/contracting ring stimulus"""
         # Calculate ring radius for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
-        # Use screen diagonal as max radius for full coverage
+        # Use screen diagonal as max radius for full coverage with validated calculation
         screen_width_degrees = self.spatial_config.screen_width_pixels / self.pixels_per_degree
         screen_height_degrees = self.spatial_config.screen_height_pixels / self.pixels_per_degree
-        max_radius = np.sqrt(screen_width_degrees**2 + screen_height_degrees**2) / 2
+        max_radius = np.linalg.norm([screen_width_degrees, screen_height_degrees]) / 2
 
         # Handle both enum objects and string values
         direction = params.direction
