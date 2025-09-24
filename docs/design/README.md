@@ -141,7 +141,7 @@ Parameters are configured proximally to their usage for immediate feedback and q
 - Hardware-controlled mouse display (60 FPS)
 - Camera-to-disk capture path
 - Electron frontend monitoring (downsampled previews)
-- IPC/WebSocket protocols
+- IPC protocols
 - Binary streaming format
 
 #### [DATA_MANAGEMENT.md](./DATA_MANAGEMENT.md)

@@ -63,8 +63,8 @@ Note: Full-resolution camera data NEVER passes through frontend
 
 **Path 3: Scientist Monitoring (NVENC/IPC)**
 ```
-Backend → NVENC Compression → IPC/WebSocket → Electron Renderer
-         (RTX 4070 Hardware)                   (Preview Only)
+Backend → NVENC Compression → IPC → Electron Renderer
+         (RTX 4070 Hardware)     (Preview Only)
                 ↓
       NVENC Compressed Previews (50-200KB/frame)
 ```
@@ -74,7 +74,7 @@ Note: Frontend receives only downsampled copies for monitoring
 
 ### Binary Streaming Format
 
-Communication uses binary frames for efficiency (via IPC or WebSocket):
+Communication uses binary frames for efficiency (via IPC):
 
 **Frame Structure:**
 ```
@@ -152,7 +152,7 @@ Communication uses binary frames for efficiency (via IPC or WebSocket):
 ### Non-Critical Path Flexibility
 
 **Monitoring Streaming:**
-- GPU-accelerated downsampling for best-effort delivery via IPC/WebSocket
+- GPU-accelerated downsampling for best-effort delivery via IPC
 - GPU-based automatic quality adjustment and scaling
 - Frame dropping acceptable with GPU buffer management
 - GPU-accelerated bandwidth optimization for preview streams
@@ -179,7 +179,7 @@ Communication uses binary frames for efficiency (via IPC or WebSocket):
 - **Frame Drop**: Mark in metadata, continue if possible
 
 ### Non-Critical Path Failures
-- **IPC/WebSocket Disconnect**: Continue experiment, attempt reconnection
+- **IPC Disconnect**: Continue experiment, attempt reconnection
 - **Preview Lag**: Reduce quality automatically
 - **Renderer Process Crash**: No impact on experiment, can restart renderer
 
@@ -189,13 +189,13 @@ Communication uses binary frames for efficiency (via IPC or WebSocket):
 - **DirectX 12/Vulkan**: Hardware-accelerated display and compute for RTX 4070
 - **FFmpeg with NVENC**: Hardware video encoding using RTX 4070 dual encoders
 - **CUDA 12.x**: GPU-accelerated image processing optimized for RTX 4070
-- **libwebsockets**: WebSocket server for IPC communication
+- **Named Pipes/Stdio**: Native IPC communication
 - **DirectShow/Media Foundation**: Camera interfaces with GPU memory mapping
 - **Windows Performance Toolkit**: Real-time performance monitoring
 
 ### Electron Frontend (Windows)
 - **IPC**: Inter-process communication for local data with 2 GB memory budget
-- **WebSocket**: Binary streaming for compressed previews from NVENC
+- **Binary IPC**: Binary streaming for compressed previews from NVENC
 - **WebGL 2.0/WebGPU**: Hardware-accelerated rendering using RTX 4070
 - **GPU.js/WebGL Compute**: GPU-accelerated preview processing in renderer
 - **Node.js Integration**: Direct NTFS file system access with 64K clusters
@@ -221,6 +221,6 @@ The display architecture maintains strict separation between:
 
 1. **Critical scientific path**: Hardware-controlled, frame-perfect mouse display
 2. **Data capture path**: Direct camera-to-disk with timestamps
-3. **Monitoring path**: Flexible IPC/streaming for Electron renderer observation
+3. **Monitoring path**: Flexible IPC streaming for Electron renderer observation
 
 This separation ensures experimental integrity while providing responsive monitoring capabilities. The backend maintains complete control over timing-critical operations, while the Electron frontend provides a convenient but non-critical observation interface.

@@ -63,7 +63,7 @@ We will implement **comprehensive error recovery with graceful degradation** str
 - **Hardware Disconnection**: Camera communication failures and device unavailability
 - **Memory Exhaustion**: Insufficient system or GPU memory for operations
 - **Storage Full**: Disk space limitations preventing data storage
-- **Communication Timeout**: Frontend-backend IPC/WebSocket failures
+- **Communication Timeout**: Frontend-backend IPC failures
 - **Invalid Configuration**: Parameter validation and compatibility errors
 
 #### Recovery Action Categories
@@ -101,10 +101,10 @@ We will implement **comprehensive error recovery with graceful degradation** str
 5. **Alert**: User notification with options for manual intervention
 
 #### Communication Breakdown
-1. **Timeout**: Detect frontend-backend IPC/WebSocket communication failures
-2. **Reconnect**: Automatic IPC/WebSocket reconnection attempts using established libraries
+1. **Timeout**: Detect frontend-backend IPC communication failures
+2. **Reconnect**: Automatic IPC reconnection attempts using established libraries
 3. **Buffer**: Maintain operation state during temporary process communication failures
-4. **Synchronize**: Re-synchronize state when IPC/WebSocket communication restored
+4. **Synchronize**: Re-synchronize state when IPC communication restored
 5. **Failsafe**: Preserve data locally and enter safe mode if reconnection fails
 
 ## Consequences

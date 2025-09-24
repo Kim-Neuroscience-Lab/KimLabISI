@@ -41,7 +41,7 @@ class SpatialConfiguration(BaseModel):
         default=20.0,
         ge=0.0,
         le=45.0,
-        description="Monitor angle inward toward nose in degrees (Marshel et al.: 20°)"
+        description="Monitor angle inward toward nose in degrees (Marshel et al.: 20 degrees)"
     )
     monitor_height_degrees: float = Field(
         default=0.0,
@@ -83,13 +83,13 @@ class SpatialConfiguration(BaseModel):
         default=147.0,
         gt=0.0,
         le=180.0,
-        description="Horizontal visual field coverage in degrees (Marshel et al.: 147°)"
+        description="Horizontal visual field coverage in degrees (Marshel et al.: 147 degrees)"
     )
     field_of_view_vertical_degrees: float = Field(
         default=153.0,
         gt=0.0,
         le=180.0,
-        description="Vertical visual field coverage in degrees (Marshel et al.: 153°)"
+        description="Vertical visual field coverage in degrees (Marshel et al.: 153 degrees)"
     )
 
     model_config = {"frozen": True}
@@ -135,7 +135,7 @@ class StimulusGenerationParams(BaseModel):
         default=20.0,
         gt=0.0,
         le=45.0,
-        description="Bar width in degrees of visual angle (Marshel et al.: 20°)"
+        description="Bar width in degrees of visual angle (Marshel et al.: 20 degrees)"
     )
 
     # Movement and timing
@@ -143,7 +143,7 @@ class StimulusGenerationParams(BaseModel):
         default=9.0,
         gt=0.0,
         le=50.0,
-        description="Bar drift speed in degrees per second (Marshel et al.: 8.5-9.5°/s)"
+        description="Bar drift speed in degrees per second (Marshel et al.: 8.5-9.5 degrees/s)"
     )
 
     # Checkerboard pattern properties
@@ -155,13 +155,13 @@ class StimulusGenerationParams(BaseModel):
         default=25.0,
         gt=0.0,
         le=50.0,
-        description="Checkerboard square size in degrees (Marshel et al.: 25°)"
+        description="Checkerboard square size in degrees (Marshel et al.: 25 degrees)"
     )
     flicker_frequency_hz: float = Field(
         default=6.0,
         gt=0.0,
         le=30.0,
-        description="Counter-phase flicker frequency in Hz (Marshel et al.: 166ms period H 6Hz)"
+        description="Counter-phase flicker frequency in Hz (Marshel et al.: 166ms period = 6Hz)"
     )
 
     # Visual properties
@@ -314,7 +314,7 @@ class CombinedParameters(BaseModel):
     modified_timestamp: Optional[str] = Field(default=None)
     version: str = Field(default="1.0")
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "use_enum_values": True}
 
     @property
     def combined_hash(self) -> str:

@@ -5,7 +5,7 @@ This document defines the complete codebase architecture based on our establishe
 ## Overview
 
 - **Architecture Pattern**: Clean Architecture with Thin Client (ADR-0002, ADR-0003)
-- **Communication**: IPC/WebSocket between Electron frontend and Python backend (ADR-0005)
+- **Communication**: Electron IPC between frontend and Python backend (ADR-0005)
 - **Cross-Platform**: macOS development, Windows production with hardware abstraction (ADR-0008, ADR-0010)
 - **Technology Stack**: Modern 2025 validated external packages (ADR-0004)
 
@@ -150,7 +150,7 @@ KimLabISI/
             |-- error_recovery.py  # Error handling and recovery
             |-- session_management.py # Session state and persistence
 
-         |-- handlers/              # IPC/WebSocket message handlers
+         |-- handlers/              # IPC message handlers
             |-- __init__.py
             |-- command_handler.py  # Process all commands from frontend
             |-- state_broadcaster.py # Broadcast state changes to frontend
@@ -158,7 +158,7 @@ KimLabISI/
 
          |-- services/              # Application services
              |-- __init__.py
-             |-- communication_service.py # IPC/WebSocket server management
+             |-- communication_service.py # IPC server management
              |-- state_persistence.py # Workflow state persistence and recovery
              |-- monitoring_service.py # System monitoring and health checks
 
@@ -209,10 +209,9 @@ KimLabISI/
              |-- session_repository.py # Session state persistence
              |-- cache_manager.py    # Stimulus cache and buffer management
 
-          |-- communication/         # IPC/WebSocket communication
+          |-- communication/         # Electron IPC communication
              |-- __init__.py
              |-- ipc_server.py      # Receive commands, send state updates
-             |-- websocket_server.py # WebSocket fallback for development
              |-- message_dispatcher.py  # Route commands to handlers
 
           |-- monitoring/            # System monitoring and logging
@@ -231,7 +230,7 @@ KimLabISI/
       |-- integration/               # Integration tests
          |-- hardware/              # Hardware abstraction integration tests
          |-- storage/               # Data storage integration tests
-         |-- communication/         # IPC/WebSocket integration tests
+         |-- communication/         # IPC communication integration tests
          |-- streaming/             # Real-time streaming tests
          |-- workflow/              # Complete workflow tests
 
@@ -252,7 +251,7 @@ KimLabISI/
    |-- .ruff.toml                     # Ruff linting configuration
 
 |-- shared/                            # Shared message definitions only
-   |-- protocols/                     # IPC/WebSocket message formats
+   |-- protocols/                     # IPC message formats
       |-- typescript/                # TypeScript message types
          |-- commands.ts            # Commands from frontend to backend
          |-- state-updates.ts       # State updates from backend to frontend
@@ -376,7 +375,7 @@ KimLabISI/
 - **Unidirectional State**: Backend sends state updates to frontend for display
 - **No Frontend Logic**: Frontend never validates, calculates, or decides - only forwards
 - **Backend Authority**: Backend validates all commands and controls all state transitions
-- **IPC/WebSocket Transport**: Message passing only, no business logic in transport layer
+- **IPC Transport**: Message passing only, no business logic in transport layer
 
 ### Data Management Strategy
 

@@ -14,7 +14,7 @@ The current codebase has become difficult to understand and maintain:
 - Database concerns leak into business rules
 - Testing is difficult due to tight coupling
 - Framework changes would require massive refactoring
-- WebSocket message handling is intertwined with business logic
+- IPC message handling is intertwined with business logic
 
 ## Decision
 
@@ -22,7 +22,7 @@ We will adopt Clean Architecture principles with clear layer separation:
 
 - Domain layer: Pure business logic, zero dependencies
 - Application layer: Use cases orchestrating domain logic, message handlers
-- Infrastructure layer: WebSocket server, database, external services
+- Infrastructure layer: IPC server, database, external services
 - Presentation layer: Message protocol handlers, serialization
 
 ## Consequences

@@ -26,7 +26,7 @@ We will implement a **thin client architecture** with strict scientific data iso
 - **Electron Frontend**: Monitoring and configuration only, receives downsampled previews
 - **Python Backend**: Exclusive scientific control, hardware management, data processing
 - **Critical Principle**: Full-resolution scientific data (stimulus + camera) NEVER passes through Electron frontend
-- **Communication**: IPC/WebSocket for control and monitoring (no internal APIs)
+- **Communication**: Electron IPC for control and monitoring (no internal APIs)
 - **Hardware Control**: Backend maintains direct, exclusive hardware access
 
 ## Consequences
@@ -49,7 +49,7 @@ We will implement a **thin client architecture** with strict scientific data iso
 
 ### Risks
 
-- **Communication Failures**: IPC/WebSocket interruptions could break UI monitoring
+- **Communication Failures**: IPC interruptions could break UI monitoring
 - **State Synchronization**: Frontend and backend state could diverge during failures
 - **Development Workflow**: Developers must run both processes for full system testing
 

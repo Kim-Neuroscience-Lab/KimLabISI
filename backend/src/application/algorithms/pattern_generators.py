@@ -19,28 +19,38 @@ from enum import Enum
 from ...domain.value_objects.stimulus_params import (
     StimulusType, MovementDirection, StimulusParams, VisualFieldParams
 )
+from ...domain.entities.parameters import ParameterManager
+from ...domain.value_objects.parameters import CombinedParameters
+from .spherical_transform import SphericalTransform, create_spherical_transform_from_spatial_config
 
 
 class PatternGenerator:
     """Core pattern generation engine for retinotopy stimuli"""
 
-    def __init__(self, visual_field: VisualFieldParams):
+    def __init__(self, combined_parameters: CombinedParameters):
         """
-        Initialize pattern generator with visual field parameters
+        Initialize pattern generator with combined parameters
 
         Args:
-            visual_field: Visual field setup parameters
+            combined_parameters: Complete parameter set from parameter system
         """
-        self.visual_field = visual_field
-        self.pixels_per_degree = visual_field.pixels_per_degree
+        self.parameters = combined_parameters
+        self.spatial_config = combined_parameters.spatial_config
+        self.stimulus_params = combined_parameters.stimulus_params
+
+        # Calculate pixels per degree from spatial configuration
+        self.pixels_per_degree = self.spatial_config.pixels_per_degree
+
+        # Create spherical transform for coordinate conversions
+        self.spherical_transform = create_spherical_transform_from_spatial_config(self.spatial_config)
 
         # Create coordinate grids
         self._setup_coordinate_grids()
 
     def _setup_coordinate_grids(self):
         """Setup coordinate grids for pattern generation"""
-        width = self.visual_field.screen_width_pixels
-        height = self.visual_field.screen_height_pixels
+        width = self.spatial_config.screen_width_pixels
+        height = self.spatial_config.screen_height_pixels
 
         # Pixel coordinates
         x_pixels = np.arange(width)
@@ -105,7 +115,7 @@ class PatternGenerator:
         # Horizontal bars sweep through altitude coordinates (vertical position)
 
         # Calculate total vertical sweep range in degrees (based on visual field)
-        max_altitude = 75.0  # degrees, approximately half of 153° vertical from paper
+        max_altitude = self.spatial_config.field_of_view_vertical_degrees / 2
 
         if direction == MovementDirection.TOP_TO_BOTTOM:
             current_altitude = max_altitude - (progress * 2 * max_altitude)
@@ -114,19 +124,10 @@ class PatternGenerator:
         else:
             raise ValueError(f"Invalid direction for horizontal bar: {direction}")
 
-        # Convert screen coordinates to spherical coordinates
-        # Eye is at origin, screen is at distance (using simplified geometry)
-        screen_distance = 10.0  # cm, from paper
-
-        # Convert pixels to visual angle properly
-        r_visual_angle = np.sqrt(self.X_degrees**2 + self.Y_degrees**2)
-
-        # Calculate altitude for each pixel (spherical coordinate)
-        # Altitude is the angle above/below the horizontal plane
-        pixel_altitude = np.degrees(np.arcsin(self.Y_degrees / np.sqrt(self.X_degrees**2 + self.Y_degrees**2 + screen_distance**2)))
-
-        # For pixels at screen center, use direct Y coordinate as altitude approximation
-        pixel_altitude = np.where(r_visual_angle > 0.1, pixel_altitude, self.Y_degrees)
+        # Convert screen coordinates to spherical coordinates using dedicated transform
+        _, pixel_altitude = self.spherical_transform.screen_to_spherical_coordinates(
+            self.X_degrees, self.Y_degrees
+        )
 
         # Create bar mask based on altitude coordinates
         bar_half_width = params.bar_width_degrees / 2
@@ -155,7 +156,7 @@ class PatternGenerator:
         # Vertical bars sweep through azimuth coordinates (horizontal position)
 
         # Calculate total horizontal sweep range in degrees (based on visual field)
-        max_azimuth = 73.5  # degrees, approximately half of 147° horizontal from paper
+        max_azimuth = self.spatial_config.field_of_view_horizontal_degrees / 2
 
         if direction == MovementDirection.LEFT_TO_RIGHT:
             current_azimuth = -max_azimuth + (progress * 2 * max_azimuth)
@@ -164,19 +165,10 @@ class PatternGenerator:
         else:
             raise ValueError(f"Invalid direction for vertical bar: {direction}")
 
-        # Convert screen coordinates to spherical coordinates
-        # Eye is at origin, screen is at distance
-        screen_distance = 10.0  # cm, from paper
-
-        # Convert pixels to visual angle properly
-        r_visual_angle = np.sqrt(self.X_degrees**2 + self.Y_degrees**2)
-
-        # Calculate azimuth for each pixel (spherical coordinate)
-        # Azimuth is the angle left/right from the center
-        pixel_azimuth = np.degrees(np.arctan2(self.X_degrees, np.sqrt(self.Y_degrees**2 + screen_distance**2)))
-
-        # For pixels near screen center, use direct X coordinate as azimuth approximation
-        pixel_azimuth = np.where(r_visual_angle > 0.1, pixel_azimuth, self.X_degrees)
+        # Convert screen coordinates to spherical coordinates using dedicated transform
+        pixel_azimuth, _ = self.spherical_transform.screen_to_spherical_coordinates(
+            self.X_degrees, self.Y_degrees
+        )
 
         # Create bar mask based on azimuth coordinates
         bar_half_width = params.bar_width_degrees / 2
@@ -228,8 +220,8 @@ class PatternGenerator:
         # Calculate ring radius for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
         # Use screen diagonal as max radius for full coverage
-        screen_width_degrees = self.visual_field.screen_width_pixels / self.pixels_per_degree
-        screen_height_degrees = self.visual_field.screen_height_pixels / self.pixels_per_degree
+        screen_width_degrees = self.spatial_config.screen_width_pixels / self.pixels_per_degree
+        screen_height_degrees = self.spatial_config.screen_height_pixels / self.pixels_per_degree
         max_radius = np.sqrt(screen_width_degrees**2 + screen_height_degrees**2) / 2
 
         # Handle both enum objects and string values
@@ -257,24 +249,23 @@ class PatternGenerator:
         return np.clip(frame, 0, 1)
 
     def _generate_checkerboard_pattern(self, params: StimulusParams, frame_index: int) -> np.ndarray:
-        """Generate counter-phase checkerboard pattern following Marshel et al."""
-        # Use 25° squares with 166ms period from Marshel et al. paper
-        # Converting to our coordinate system
-        checker_size_degrees = 25.0  # From paper: "25° squares"
+        """Generate counter-phase checkerboard pattern using parameter system"""
+        # Use checkerboard size from parameter system
+        checker_size_degrees = self.stimulus_params.checkerboard_size_degrees
         checker_size_pixels = checker_size_degrees * self.pixels_per_degree
 
         # Standard checkerboard grid in screen coordinates
-        center_x = self.visual_field.screen_width_pixels / 2
-        center_y = self.visual_field.screen_height_pixels / 2
+        center_x = self.spatial_config.screen_width_pixels / 2
+        center_y = self.spatial_config.screen_height_pixels / 2
 
         # Create regular grid pattern
         x_checks = ((self.X_pixels - center_x) / checker_size_pixels).astype(int)
         y_checks = ((self.Y_pixels - center_y) / checker_size_pixels).astype(int)
         checkerboard = (x_checks + y_checks) % 2
 
-        # Counter-phase flickering with 166ms period from paper
-        # 166ms = 0.166s, so frequency = 1/0.166 = ~6 Hz
-        flicker_period_frames = int(0.166 * params.frame_rate)  # 166ms in frames
+        # Counter-phase flickering using parameter system
+        flicker_frequency_hz = self.stimulus_params.flicker_frequency_hz
+        flicker_period_frames = int(params.frame_rate / flicker_frequency_hz)
         phase_flip = (frame_index // flicker_period_frames) % 2
         if phase_flip:
             checkerboard = 1 - checkerboard
@@ -314,32 +305,36 @@ class PatternGenerator:
         return frame
 
 
-def create_default_horizontal_bar_params(visual_field: VisualFieldParams) -> StimulusParams:
-    """Create default parameters for horizontal bar stimulus following Marshel et al. 2011
+def create_horizontal_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+    """Create horizontal bar stimulus parameters using parameter system
 
-    Based on Marshel et al. Supplemental Experimental Procedures:
-    - Bar width: 20° wide (page 13-14)
-    - Visual field: 153° vertical, 147° horizontal (page 12)
-    - Counter-phase checkerboard: 25° squares with 166ms period (page 14)
-    - Bar drift speed: 8.5-9.5°/s for intrinsic imaging (page 14)
-    - Flicker frequency: 166ms period ≈ 6 Hz (page 14)
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+
+    Returns:
+        StimulusParams configured for horizontal bar stimulus
     """
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
     # Calculate cycle duration based on field size and drift speed
-    # 153° vertical field / 9.0°/s = 17 seconds for full sweep
-    cycle_duration = 153.0 / 9.0  # ~17 seconds per cycle
+    vertical_field = combined_params.spatial_config.field_of_view_vertical_degrees
+    drift_speed = combined_params.stimulus_params.drift_speed_degrees_per_sec
+    cycle_duration = vertical_field / drift_speed
 
     return StimulusParams(
         stimulus_type=StimulusType.HORIZONTAL_BAR,
         direction=MovementDirection.TOP_TO_BOTTOM,
-        width_degrees=153.0,  # 153° vertical from Marshel et al.
-        height_degrees=147.0,  # 147° horizontal from Marshel et al.
-        bar_width_degrees=20.0,  # 20° wide from Marshel et al.
-        cycle_duration_sec=cycle_duration,  # Based on field size and drift speed
-        frame_rate=60.0,  # Standard display frame rate
-        num_cycles=10,  # 10 drifts in each direction from Marshel et al.
-        contrast=0.5,  # Full contrast (black to white)
-        background_luminance=0.5,  # Mid gray background
-        checkerboard_size_degrees=25.0,  # 25° squares from Marshel et al.
+        width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,
+        height_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees,
+        bar_width_degrees=combined_params.stimulus_params.bar_width_degrees,
+        cycle_duration_sec=cycle_duration,
+        frame_rate=combined_params.protocol_params.frame_rate,
+        num_cycles=combined_params.protocol_params.num_cycles,
+        contrast=combined_params.stimulus_params.contrast,
+        background_luminance=combined_params.stimulus_params.background_luminance,
+        checkerboard_size_degrees=combined_params.stimulus_params.checkerboard_size_degrees,
         phase_steps=8,  # Phase encoding steps for analysis
         fixation_cross=False,  # No fixation during retinotopy
         fixation_size_degrees=0.5,
@@ -347,32 +342,36 @@ def create_default_horizontal_bar_params(visual_field: VisualFieldParams) -> Sti
     )
 
 
-def create_default_vertical_bar_params(visual_field: VisualFieldParams) -> StimulusParams:
-    """Create default parameters for vertical bar stimulus following Marshel et al. 2011
+def create_vertical_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+    """Create vertical bar stimulus parameters using parameter system
 
-    Based on Marshel et al. Supplemental Experimental Procedures:
-    - Bar width: 20° wide (page 13-14)
-    - Visual field: 153° vertical, 147° horizontal (page 12)
-    - Counter-phase checkerboard: 25° squares with 166ms period (page 14)
-    - Bar drift speed: 8.5-9.5°/s for intrinsic imaging (page 14)
-    - Flicker frequency: 166ms period ≈ 6 Hz (page 14)
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+
+    Returns:
+        StimulusParams configured for vertical bar stimulus
     """
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
     # Calculate cycle duration based on field size and drift speed
-    # 147° horizontal field / 9.0°/s = 16.3 seconds for full sweep
-    cycle_duration = 147.0 / 9.0  # ~16.3 seconds per cycle
+    horizontal_field = combined_params.spatial_config.field_of_view_horizontal_degrees
+    drift_speed = combined_params.stimulus_params.drift_speed_degrees_per_sec
+    cycle_duration = horizontal_field / drift_speed
 
     return StimulusParams(
         stimulus_type=StimulusType.VERTICAL_BAR,
         direction=MovementDirection.LEFT_TO_RIGHT,
-        width_degrees=153.0,  # 153° vertical from Marshel et al.
-        height_degrees=147.0,  # 147° horizontal from Marshel et al.
-        bar_width_degrees=20.0,  # 20° wide from Marshel et al.
-        cycle_duration_sec=cycle_duration,  # Based on field size and drift speed
-        frame_rate=60.0,  # Standard display frame rate
-        num_cycles=10,  # 10 drifts in each direction from Marshel et al.
-        contrast=0.5,  # Full contrast (black to white)
-        background_luminance=0.5,  # Mid gray background
-        checkerboard_size_degrees=25.0,  # 25° squares from Marshel et al.
+        width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,
+        height_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees,
+        bar_width_degrees=combined_params.stimulus_params.bar_width_degrees,
+        cycle_duration_sec=cycle_duration,
+        frame_rate=combined_params.protocol_params.frame_rate,
+        num_cycles=combined_params.protocol_params.num_cycles,
+        contrast=combined_params.stimulus_params.contrast,
+        background_luminance=combined_params.stimulus_params.background_luminance,
+        checkerboard_size_degrees=combined_params.stimulus_params.checkerboard_size_degrees,
         phase_steps=8,  # Phase encoding steps for analysis
         fixation_cross=False,  # No fixation during retinotopy
         fixation_size_degrees=0.5,
@@ -380,14 +379,19 @@ def create_default_vertical_bar_params(visual_field: VisualFieldParams) -> Stimu
     )
 
 
-def create_default_polar_wedge_params(visual_field: VisualFieldParams) -> StimulusParams:
-    """Create default parameters for polar wedge stimulus following Marshel et al. 2011
+def create_polar_wedge_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+    """Create polar wedge stimulus parameters using parameter system
 
-    Based on Marshel et al. Supplemental Experimental Procedures:
-    - Visual field: 153° vertical, 147° horizontal (page 12)
-    - Counter-phase checkerboard: 25° squares with 166ms period (page 14)
-    - Wedge parameters adapted for polar angle mapping
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+
+    Returns:
+        StimulusParams configured for polar wedge stimulus
     """
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
     # Polar wedge rotates through full 360°, typically slower than bar stimuli
     # Common values: 40-60 seconds for full rotation
     cycle_duration = 40.0  # 40 seconds for full 360° rotation
@@ -395,15 +399,15 @@ def create_default_polar_wedge_params(visual_field: VisualFieldParams) -> Stimul
     return StimulusParams(
         stimulus_type=StimulusType.POLAR_WEDGE,
         direction=MovementDirection.CLOCKWISE,
-        width_degrees=153.0,  # 153° vertical from Marshel et al.
-        height_degrees=147.0,  # 147° horizontal from Marshel et al.
+        width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,
+        height_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees,
         bar_width_degrees=30.0,  # 30° wedge width (standard for polar mapping)
-        cycle_duration_sec=cycle_duration,  # Full rotation duration
-        frame_rate=60.0,  # Standard display frame rate
+        cycle_duration_sec=cycle_duration,
+        frame_rate=combined_params.protocol_params.frame_rate,
         num_cycles=2,  # Fewer cycles due to longer duration
-        contrast=0.5,  # Full contrast (black to white)
-        background_luminance=0.5,  # Mid gray background
-        checkerboard_size_degrees=25.0,  # 25° squares from Marshel et al.
+        contrast=combined_params.stimulus_params.contrast,
+        background_luminance=combined_params.stimulus_params.background_luminance,
+        checkerboard_size_degrees=combined_params.stimulus_params.checkerboard_size_degrees,
         phase_steps=8,  # Phase encoding steps for analysis
         fixation_cross=False,  # No fixation during retinotopy
         fixation_size_degrees=0.5,

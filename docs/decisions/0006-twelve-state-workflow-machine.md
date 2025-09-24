@@ -87,7 +87,7 @@ We will implement a **12-state finite state machine** for workflow management:
 ## Related Decisions
 
 - Depends on: ADR-0003 (Thin Client Architecture)
-- Depends on: ADR-0005 (IPC/WebSocket Communication)
+- Depends on: ADR-0005 (Electron IPC Communication)
 - Enables: Future ADRs on state persistence, error recovery, session management
 
 ## Notes

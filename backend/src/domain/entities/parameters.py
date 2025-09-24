@@ -143,35 +143,35 @@ class DefaultParameterFactory:
 
         Based on Marshel et al. Supplemental Experimental Procedures:
         - Monitor distance: 10 cm from eye (page 13)
-        - Monitor angle: 20° inward toward nose (page 13)
-        - Visual field: 153° vertical, 147° horizontal (page 12)
-        - Bar width: 20° wide (page 13-14)
-        - Bar drift speed: 8.5-9.5°/s for intrinsic imaging (page 14)
-        - Counter-phase checkerboard: 25° squares with 166ms period (page 14)
-        - Flicker frequency: 166ms period H 6 Hz (page 14)
+        - Monitor angle: 20 degrees inward toward nose (page 13)
+        - Visual field: 153 degrees vertical, 147 degrees horizontal (page 12)
+        - Bar width: 20 degrees wide (page 13-14)
+        - Bar drift speed: 8.5-9.5 degrees/s for intrinsic imaging (page 14)
+        - Counter-phase checkerboard: 25 degrees squares with 166ms period (page 14)
+        - Flicker frequency: 166ms period approximately 6 Hz (page 14)
         """
 
         # Spatial configuration from Marshel et al.
         spatial_config = SpatialConfiguration(
             monitor_distance_cm=10.0,  # 10 cm from eye
-            monitor_angle_degrees=20.0,  # 20° inward toward nose
+            monitor_angle_degrees=20.0,  # 20 degrees inward toward nose
             monitor_height_degrees=0.0,  # Eye level
             monitor_roll_degrees=0.0,  # No roll
             screen_width_cm=52.0,  # Reasonable monitor size
             screen_height_cm=52.0,  # Square aspect ratio
             screen_width_pixels=2048,  # High resolution
             screen_height_pixels=2048,  # Square pixels
-            field_of_view_horizontal_degrees=147.0,  # 147° horizontal
-            field_of_view_vertical_degrees=153.0,  # 153° vertical
+            field_of_view_horizontal_degrees=147.0,  # 147 degrees horizontal
+            field_of_view_vertical_degrees=153.0,  # 153 degrees vertical
         )
 
         # Stimulus parameters from Marshel et al.
         stimulus_params = StimulusGenerationParams(
-            bar_width_degrees=20.0,  # 20° wide
-            drift_speed_degrees_per_sec=9.0,  # 8.5-9.5°/s range
+            bar_width_degrees=20.0,  # 20 degrees wide
+            drift_speed_degrees_per_sec=9.0,  # 8.5-9.5 degrees/s range
             pattern_type="counter_phase_checkerboard",
-            checkerboard_size_degrees=25.0,  # 25° squares
-            flicker_frequency_hz=6.0,  # 166ms period H 6 Hz
+            checkerboard_size_degrees=25.0,  # 25 degrees squares
+            flicker_frequency_hz=6.0,  # 166ms period approximately 6 Hz
             contrast=0.5,  # Full contrast (black to white)
             background_luminance=0.5,  # Mid gray
             spherical_correction=True,  # Apply spherical correction

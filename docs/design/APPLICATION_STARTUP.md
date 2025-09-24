@@ -41,7 +41,7 @@ Hardware Status Dashboard:
 **Software Component Initialization:**
 - **Electron Frontend**: Renderer process startup and IPC establishment
 - **Backend Services**: Python/C++ backend initialization
-- **Communication Channels**: IPC/WebSocket connectivity validation
+- **Communication Channels**: IPC connectivity validation
 - **Memory Management**: Component memory pool allocation
 
 **Cross-Platform Considerations:**

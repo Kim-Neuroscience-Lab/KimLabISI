@@ -18,7 +18,7 @@ The ISI Macroscope Control System is a comprehensive neuroscience research platf
 The system follows a **thin client architecture** with clear separation between user interface and scientific operations:
 
 ```
-┌─────────────────────┐    IPC/WebSocket    ┌──────────────────────────┐
+┌─────────────────────┐    Electron IPC     ┌──────────────────────────┐
 │  Electron Frontend  │ ◄────────────────► │   Python Backend        │
 │  (Monitoring Only)  │                    │   (Scientific Control)  │
 └─────────────────────┘                    └──────────────────────────┘
@@ -42,7 +42,7 @@ The system follows a **thin client architecture** with clear separation between 
 **Backend (Python + C++ Extensions)**
 - **Purpose**: Scientific control, hardware management, data processing
 - **Responsibilities**: Hardware timing, data acquisition, stimulus generation, analysis
-- **Communication**: IPC/WebSocket for frontend coordination (no internal APIs)
+- **Communication**: Electron IPC for frontend coordination (no internal APIs)
 - **Performance**: Direct hardware control for time-critical operations
 
 ## Technology Stack (2025)

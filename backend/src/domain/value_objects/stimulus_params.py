@@ -57,7 +57,7 @@ class StimulusParams(BaseModel):
     # Visual properties
     contrast: float = Field(ge=0, le=1, description="Stimulus contrast (0-1)")
     background_luminance: float = Field(ge=0, le=1, description="Background luminance (0-1)")
-    checkerboard_size_degrees: float = Field(gt=0, le=10, description="Checkerboard square size in degrees")
+    checkerboard_size_degrees: float = Field(gt=0, le=50, description="Checkerboard square size in degrees")
 
     # Phase encoding
     phase_steps: int = Field(gt=1, le=64, description="Number of phase steps per cycle")

@@ -22,6 +22,8 @@ from ...domain.value_objects.stimulus_params import (
     StimulusParams, VisualFieldParams, RetinotopyProtocol
 )
 from ...domain.entities.workflow_state import WorkflowState, HardwareRequirement
+from ...domain.entities.parameters import ParameterManager
+from ...domain.value_objects.parameters import CombinedParameters
 from ..algorithms.pattern_generators import PatternGenerator
 
 logger = logging.getLogger(__name__)
@@ -35,17 +37,19 @@ class StimulusGenerationError(Exception):
 class StimulusSequence:
     """Represents a complete stimulus sequence"""
 
-    def __init__(self, protocol: RetinotopyProtocol, generator: PatternGenerator):
+    def __init__(self, protocol: RetinotopyProtocol, generator: PatternGenerator, combined_parameters: CombinedParameters):
         """
         Initialize stimulus sequence
 
         Args:
             protocol: Retinotopy protocol parameters
             generator: Pattern generator instance
+            combined_parameters: Combined parameters from parameter system
         """
         self.protocol = protocol
         self.generator = generator
         self.params = protocol.stimulus_params
+        self.combined_parameters = combined_parameters
         self._current_frame = 0
 
     @property
@@ -116,7 +120,7 @@ class StimulusGenerationUseCase:
         self._current_sequence: Optional[StimulusSequence] = None
         self._generator: Optional[PatternGenerator] = None
 
-    async def create_stimulus_sequence(self, protocol: RetinotopyProtocol) -> StimulusSequence:
+    async def create_stimulus_sequence(self, protocol: RetinotopyProtocol, parameter_set_id: str = "marshel_2011_defaults") -> StimulusSequence:
         """
         Create a new stimulus sequence from protocol
 
@@ -132,11 +136,16 @@ class StimulusGenerationUseCase:
         try:
             logger.info(f"Creating stimulus sequence: {protocol.protocol_name}")
 
-            # Create pattern generator
-            generator = PatternGenerator(protocol.visual_field)
+            # Load parameters from parameter system
+            pm = ParameterManager()
+            combined_parameters = pm.get_parameters(parameter_set_id)
+            logger.info(f"Loaded parameters: {parameter_set_id}")
+
+            # Create pattern generator with combined parameters
+            generator = PatternGenerator(combined_parameters)
 
             # Create stimulus sequence
-            sequence = StimulusSequence(protocol, generator)
+            sequence = StimulusSequence(protocol, generator, combined_parameters)
 
             # Validate sequence
             await self._validate_sequence(sequence)
@@ -181,7 +190,8 @@ class StimulusGenerationUseCase:
 
     async def generate_preview_frames(self,
                                     protocol: RetinotopyProtocol,
-                                    num_frames: int = 10) -> List[np.ndarray]:
+                                    num_frames: int = 10,
+                                    parameter_set_id: str = "marshel_2011_defaults") -> List[np.ndarray]:
         """
         Generate preview frames for stimulus validation
 
@@ -198,9 +208,13 @@ class StimulusGenerationUseCase:
         try:
             logger.info(f"Generating {num_frames} preview frames")
 
+            # Load parameters from parameter system
+            pm = ParameterManager()
+            combined_parameters = pm.get_parameters(parameter_set_id)
+
             # Create temporary sequence
-            generator = PatternGenerator(protocol.visual_field)
-            sequence = StimulusSequence(protocol, generator)
+            generator = PatternGenerator(combined_parameters)
+            sequence = StimulusSequence(protocol, generator, combined_parameters)
 
             # Generate evenly spaced preview frames
             preview_frames = []
@@ -221,7 +235,8 @@ class StimulusGenerationUseCase:
     async def export_stimulus_video(self,
                                   protocol: RetinotopyProtocol,
                                   output_path: Path,
-                                  frame_skip: int = 1) -> Path:
+                                  frame_skip: int = 1,
+                                  parameter_set_id: str = "marshel_2011_defaults") -> Path:
         """
         Export stimulus sequence as video file for visual validation
 
@@ -245,13 +260,17 @@ class StimulusGenerationUseCase:
             except ImportError:
                 raise StimulusGenerationError("OpenCV (cv2) required for video export. Install with: pip install opencv-python")
 
+            # Load parameters from parameter system
+            pm = ParameterManager()
+            combined_parameters = pm.get_parameters(parameter_set_id)
+
             # Create stimulus sequence
-            generator = PatternGenerator(protocol.visual_field)
-            sequence = StimulusSequence(protocol, generator)
+            generator = PatternGenerator(combined_parameters)
+            sequence = StimulusSequence(protocol, generator, combined_parameters)
 
             # Setup video writer
-            height, width = (protocol.visual_field.screen_height_pixels,
-                           protocol.visual_field.screen_width_pixels)
+            height, width = (combined_parameters.spatial_config.screen_height_pixels,
+                           combined_parameters.spatial_config.screen_width_pixels)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             fps = protocol.stimulus_params.frame_rate / frame_skip
 
@@ -345,67 +364,136 @@ class StimulusGenerationUseCase:
 
 # Factory functions for creating common protocols
 
-def create_horizontal_bar_protocol(visual_field: VisualFieldParams,
-                                 cycle_duration: float = 30.0,
-                                 num_cycles: int = 2) -> RetinotopyProtocol:
-    """Create a horizontal bar retinotopy protocol"""
-    from ..algorithms.pattern_generators import create_default_horizontal_bar_params
+def create_horizontal_bar_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
+                                                  cycle_duration: Optional[float] = None,
+                                                  num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+    """Create a horizontal bar retinotopy protocol using parameter system
 
-    stimulus_params = create_default_horizontal_bar_params(visual_field)
-    stimulus_params = stimulus_params.model_copy(update={
-        'cycle_duration_sec': cycle_duration,
-        'num_cycles': num_cycles
-    })
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+        cycle_duration: Override cycle duration (optional)
+        num_cycles: Override number of cycles (optional)
+    """
+    from ..algorithms.pattern_generators import create_horizontal_bar_params_from_parameter_system
+
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
+    # Create visual field from spatial configuration
+    visual_field = VisualFieldParams(
+        screen_width_pixels=combined_params.spatial_config.screen_width_pixels,
+        screen_height_pixels=combined_params.spatial_config.screen_height_pixels,
+        screen_width_cm=combined_params.spatial_config.screen_width_cm,
+        screen_distance_cm=combined_params.spatial_config.monitor_distance_cm,
+        field_of_view_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees
+    )
+
+    # Create stimulus params with optional overrides
+    stimulus_params = create_horizontal_bar_params_from_parameter_system(parameter_set_id)
+    if cycle_duration is not None or num_cycles is not None:
+        updates = {}
+        if cycle_duration is not None:
+            updates['cycle_duration_sec'] = cycle_duration
+        if num_cycles is not None:
+            updates['num_cycles'] = num_cycles
+        stimulus_params = stimulus_params.model_copy(update=updates)
 
     return RetinotopyProtocol(
         protocol_name="Horizontal Bar Retinotopy",
         description="Phase-encoded horizontal bar for vertical retinotopy mapping",
         stimulus_params=stimulus_params,
         visual_field=visual_field,
-        pre_stimulus_baseline_sec=10.0,
-        post_stimulus_baseline_sec=10.0
+        pre_stimulus_baseline_sec=combined_params.protocol_params.pre_stimulus_baseline_sec,
+        post_stimulus_baseline_sec=combined_params.protocol_params.post_stimulus_baseline_sec
     )
 
 
-def create_vertical_bar_protocol(visual_field: VisualFieldParams,
-                               cycle_duration: float = 30.0,
-                               num_cycles: int = 2) -> RetinotopyProtocol:
-    """Create a vertical bar retinotopy protocol"""
-    from ..algorithms.pattern_generators import create_default_vertical_bar_params
+def create_vertical_bar_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
+                                                cycle_duration: Optional[float] = None,
+                                                num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+    """Create a vertical bar retinotopy protocol using parameter system
 
-    stimulus_params = create_default_vertical_bar_params(visual_field)
-    stimulus_params = stimulus_params.model_copy(update={
-        'cycle_duration_sec': cycle_duration,
-        'num_cycles': num_cycles
-    })
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+        cycle_duration: Override cycle duration (optional)
+        num_cycles: Override number of cycles (optional)
+    """
+    from ..algorithms.pattern_generators import create_vertical_bar_params_from_parameter_system
+
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
+    # Create visual field from spatial configuration
+    visual_field = VisualFieldParams(
+        screen_width_pixels=combined_params.spatial_config.screen_width_pixels,
+        screen_height_pixels=combined_params.spatial_config.screen_height_pixels,
+        screen_width_cm=combined_params.spatial_config.screen_width_cm,
+        screen_distance_cm=combined_params.spatial_config.monitor_distance_cm,
+        field_of_view_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees
+    )
+
+    # Create stimulus params with optional overrides
+    stimulus_params = create_vertical_bar_params_from_parameter_system(parameter_set_id)
+    if cycle_duration is not None or num_cycles is not None:
+        updates = {}
+        if cycle_duration is not None:
+            updates['cycle_duration_sec'] = cycle_duration
+        if num_cycles is not None:
+            updates['num_cycles'] = num_cycles
+        stimulus_params = stimulus_params.model_copy(update=updates)
 
     return RetinotopyProtocol(
         protocol_name="Vertical Bar Retinotopy",
         description="Phase-encoded vertical bar for horizontal retinotopy mapping",
         stimulus_params=stimulus_params,
         visual_field=visual_field,
-        pre_stimulus_baseline_sec=10.0,
-        post_stimulus_baseline_sec=10.0
+        pre_stimulus_baseline_sec=combined_params.protocol_params.pre_stimulus_baseline_sec,
+        post_stimulus_baseline_sec=combined_params.protocol_params.post_stimulus_baseline_sec
     )
 
 
-def create_polar_wedge_protocol(visual_field: VisualFieldParams,
-                              cycle_duration: float = 40.0,
-                              num_cycles: int = 2) -> RetinotopyProtocol:
-    """Create a polar wedge retinotopy protocol"""
-    from ..algorithms.pattern_generators import create_default_polar_wedge_params
+def create_polar_wedge_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
+                                              cycle_duration: Optional[float] = None,
+                                              num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+    """Create a polar wedge retinotopy protocol using parameter system
 
-    stimulus_params = create_default_polar_wedge_params(visual_field)
-    stimulus_params = stimulus_params.model_copy(update={
-        'cycle_duration_sec': cycle_duration,
-        'num_cycles': num_cycles
-    })
+    Args:
+        parameter_set_id: Parameter set ID to load from parameter store
+        cycle_duration: Override cycle duration (optional)
+        num_cycles: Override number of cycles (optional)
+    """
+    from ..algorithms.pattern_generators import create_polar_wedge_params_from_parameter_system
+
+    # Load parameters from parameter system
+    pm = ParameterManager()
+    combined_params = pm.get_parameters(parameter_set_id)
+
+    # Create visual field from spatial configuration
+    visual_field = VisualFieldParams(
+        screen_width_pixels=combined_params.spatial_config.screen_width_pixels,
+        screen_height_pixels=combined_params.spatial_config.screen_height_pixels,
+        screen_width_cm=combined_params.spatial_config.screen_width_cm,
+        screen_distance_cm=combined_params.spatial_config.monitor_distance_cm,
+        field_of_view_degrees=combined_params.spatial_config.field_of_view_horizontal_degrees
+    )
+
+    # Create stimulus params with optional overrides
+    stimulus_params = create_polar_wedge_params_from_parameter_system(parameter_set_id)
+    if cycle_duration is not None or num_cycles is not None:
+        updates = {}
+        if cycle_duration is not None:
+            updates['cycle_duration_sec'] = cycle_duration
+        if num_cycles is not None:
+            updates['num_cycles'] = num_cycles
+        stimulus_params = stimulus_params.model_copy(update=updates)
 
     return RetinotopyProtocol(
         protocol_name="Polar Wedge Retinotopy",
         description="Phase-encoded polar wedge for polar angle mapping",
         stimulus_params=stimulus_params,
         visual_field=visual_field,
-        pre_stimulus_baseline_sec=10.0,
-        post_stimulus_baseline_sec=10.0
+        pre_stimulus_baseline_sec=combined_params.protocol_params.pre_stimulus_baseline_sec,
+        post_stimulus_baseline_sec=combined_params.protocol_params.post_stimulus_baseline_sec
     )
