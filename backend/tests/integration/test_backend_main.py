@@ -9,7 +9,7 @@ import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
 
-from main import ISIMacroscopeBackend
+from src.isi_control.main import ISIMacroscopeBackend
 
 
 class TestBackendMain:

@@ -6,20 +6,11 @@ validation, routing, and communication patterns.
 """
 
 import pytest
-import asyncio
 import json
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any
 
-from src.infrastructure.communication.ipc_server import (
-    IPCServer,
-    IPCHandler,
-    IPCMessage,
-    CommandMessage,
-    StateUpdateMessage,
-    NotificationMessage,
-    MessageType
-)
+from src.infrastructure.communication.ipc_server import IPCServer, IPCMessage, MessageType
 from pydantic import ValidationError
 
 
@@ -45,7 +36,7 @@ class TestIPCMessage:
             message_type=MessageType.COMMAND,
             message_id="test-123",
             timestamp=1234567890.0,
-            payload={"command": "test", "data": "value"}
+            payload={"command": "test", "data": "value"},
         )
 
         assert message.message_type == MessageType.COMMAND.value
@@ -59,7 +50,7 @@ class TestIPCMessage:
             message_type=MessageType.STATE_UPDATE,
             message_id="update-456",
             timestamp=1234567890.0,
-            payload={"state": "ready"}
+            payload={"state": "ready"},
         )
 
         data = message.model_dump()
@@ -74,7 +65,7 @@ class TestIPCMessage:
             "message_type": "command",
             "message_id": "test-123",
             "timestamp": 1234567890.0,
-            "payload": {}
+            "payload": {},
         }
         message = IPCMessage.model_validate(valid_data)
         assert message.message_type == MessageType.COMMAND.value
@@ -84,7 +75,7 @@ class TestIPCMessage:
             "message_type": "invalid_type",
             "message_id": "test-123",
             "timestamp": 1234567890.0,
-            "payload": {}
+            "payload": {},
         }
         with pytest.raises(ValidationError):
             IPCMessage.model_validate(invalid_data)
@@ -96,9 +87,7 @@ class TestCommandMessage:
     def test_command_message_creation(self):
         """Test creating command message"""
         command = CommandMessage(
-            command="workflow.start",
-            parameters={"param1": "value1"},
-            request_id="req-123"
+            command="workflow.start", parameters={"param1": "value1"}, request_id="req-123"
         )
 
         assert command.command == "workflow.start"
@@ -114,10 +103,7 @@ class TestCommandMessage:
 
     def test_command_message_serialization(self):
         """Test command message serialization"""
-        command = CommandMessage(
-            command="hardware.detect",
-            parameters={"force": True}
-        )
+        command = CommandMessage(command="hardware.detect", parameters={"force": True})
 
         data = command.model_dump()
         assert data["command"] == "hardware.detect"
@@ -131,8 +117,7 @@ class TestStateUpdateMessage:
     def test_state_update_message_creation(self):
         """Test creating state update message"""
         update = StateUpdateMessage(
-            state_type="workflow",
-            state_data={"current_state": "ready", "progress": 50}
+            state_type="workflow", state_data={"current_state": "ready", "progress": 50}
         )
 
         assert update.state_type == "workflow"
@@ -149,7 +134,7 @@ class TestNotificationMessage:
             level="error",
             title="Hardware Error",
             message="Camera disconnected",
-            details={"error_code": 404}
+            details={"error_code": 404},
         )
 
         assert notification.level == "error"
@@ -160,9 +145,7 @@ class TestNotificationMessage:
     def test_notification_message_defaults(self):
         """Test notification message with defaults"""
         notification = NotificationMessage(
-            level="info",
-            title="Info",
-            message="Operation completed"
+            level="info", title="Info", message="Operation completed"
         )
 
         assert notification.details is None
@@ -192,7 +175,6 @@ class TestIPCServer:
         """Mock IPC handler for testing"""
         return MockIPCHandler()
 
-
     @pytest.mark.asyncio
     async def test_ipc_server_initialization(self, ipc_server):
         """Test IPC server initialization"""
@@ -220,7 +202,7 @@ class TestIPCServer:
     @pytest.mark.asyncio
     async def test_send_state_update(self, ipc_server):
         """Test sending state update"""
-        with patch.object(ipc_server, '_send_to_frontend', new_callable=AsyncMock) as mock_send:
+        with patch.object(ipc_server, "_send_to_frontend", new_callable=AsyncMock) as mock_send:
             await ipc_server.send_state_update("workflow", {"state": "ready"})
 
             mock_send.assert_called_once()
@@ -232,12 +214,9 @@ class TestIPCServer:
     @pytest.mark.asyncio
     async def test_send_notification(self, ipc_server):
         """Test sending notification"""
-        with patch.object(ipc_server, '_send_to_frontend', new_callable=AsyncMock) as mock_send:
+        with patch.object(ipc_server, "_send_to_frontend", new_callable=AsyncMock) as mock_send:
             await ipc_server.send_notification(
-                "error",
-                "Test Error",
-                "Something went wrong",
-                {"code": 500}
+                "error", "Test Error", "Something went wrong", {"code": 500}
             )
 
             mock_send.assert_called_once()
@@ -259,11 +238,11 @@ class TestIPCServer:
             payload={
                 "command": "workflow.start",
                 "parameters": {"param": "value"},
-                "request_id": "req-123"
-            }
+                "request_id": "req-123",
+            },
         )
 
-        with patch.object(ipc_server, '_send_response', new_callable=AsyncMock) as mock_response:
+        with patch.object(ipc_server, "_send_response", new_callable=AsyncMock) as mock_response:
             await ipc_server._route_message(message)
 
             assert len(mock_handler.commands_handled) == 1
@@ -282,10 +261,10 @@ class TestIPCServer:
             message_type=MessageType.QUERY,
             message_id="query-123",
             timestamp=1234567890.0,
-            payload={"type": "status", "details": "system"}
+            payload={"type": "status", "details": "system"},
         )
 
-        with patch.object(ipc_server, '_send_response', new_callable=AsyncMock) as mock_response:
+        with patch.object(ipc_server, "_send_response", new_callable=AsyncMock) as mock_response:
             await ipc_server._route_message(message)
 
             assert len(mock_handler.queries_handled) == 1
@@ -301,14 +280,10 @@ class TestIPCServer:
             message_type=MessageType.COMMAND,
             message_id="cmd-123",
             timestamp=1234567890.0,
-            payload={
-                "command": "unknown.command",
-                "parameters": {},
-                "request_id": "req-123"
-            }
+            payload={"command": "unknown.command", "parameters": {}, "request_id": "req-123"},
         )
 
-        with patch.object(ipc_server, '_send_error_response', new_callable=AsyncMock) as mock_error:
+        with patch.object(ipc_server, "_send_error_response", new_callable=AsyncMock) as mock_error:
             await ipc_server._handle_command(message)
 
             mock_error.assert_called_once()
@@ -322,10 +297,10 @@ class TestIPCServer:
             message_type=MessageType.QUERY,
             message_id="query-123",
             timestamp=1234567890.0,
-            payload={"type": "status"}
+            payload={"type": "status"},
         )
 
-        with patch.object(ipc_server, '_send_error_response', new_callable=AsyncMock) as mock_error:
+        with patch.object(ipc_server, "_send_error_response", new_callable=AsyncMock) as mock_error:
             await ipc_server._handle_query(message)
 
             mock_error.assert_called_once()
@@ -336,21 +311,22 @@ class TestIPCServer:
     async def test_process_invalid_message(self, ipc_server):
         """Test processing invalid message format"""
         # Test the routing logic directly instead of the infinite loop
-        invalid_message_data = {
-            "invalid_field": "value",
-            "missing_required_fields": True
-        }
+        invalid_message_data = {"invalid_field": "value", "missing_required_fields": True}
 
         # Mock the IPCMessage validation to fail
-        with patch('src.infrastructure.communication.ipc_server.IPCMessage.model_validate') as mock_validate:
+        with patch(
+            "src.infrastructure.communication.ipc_server.IPCMessage.model_validate"
+        ) as mock_validate:
             mock_validate.side_effect = ValidationError("Invalid message format", [])
-            with patch.object(ipc_server, '_send_error_response', new_callable=AsyncMock) as mock_error:
+            with patch.object(
+                ipc_server, "_send_error_response", new_callable=AsyncMock
+            ) as mock_error:
                 # Create a fake message to test the routing logic
                 fake_message = IPCMessage(
                     message_type=MessageType.COMMAND,
                     message_id="test-123",
                     timestamp=1234567890.0,
-                    payload=invalid_message_data
+                    payload=invalid_message_data,
                 )
 
                 # Call _route_message directly to test error handling
@@ -387,7 +363,7 @@ class TestIPCServer:
         """Test sending response message"""
         response_data = {"success": True, "data": "test"}
 
-        with patch.object(ipc_server, '_send_to_frontend', new_callable=AsyncMock) as mock_send:
+        with patch.object(ipc_server, "_send_to_frontend", new_callable=AsyncMock) as mock_send:
             await ipc_server._send_response("req-123", response_data)
 
             mock_send.assert_called_once()
@@ -399,7 +375,7 @@ class TestIPCServer:
     @pytest.mark.asyncio
     async def test_send_error_response(self, ipc_server):
         """Test sending error response"""
-        with patch.object(ipc_server, '_send_to_frontend', new_callable=AsyncMock) as mock_send:
+        with patch.object(ipc_server, "_send_to_frontend", new_callable=AsyncMock) as mock_send:
             await ipc_server._send_error_response("Test error", "Error details", "req-123")
 
             mock_send.assert_called_once()
@@ -412,8 +388,8 @@ class TestIPCServer:
     @pytest.mark.asyncio
     async def test_send_error_response_no_request_id(self, ipc_server):
         """Test sending error response without request ID"""
-        with patch.object(ipc_server, '_send_to_frontend', new_callable=AsyncMock) as mock_send:
-            with patch.object(ipc_server, '_generate_message_id', return_value="auto-123"):
+        with patch.object(ipc_server, "_send_to_frontend", new_callable=AsyncMock) as mock_send:
+            with patch.object(ipc_server, "_generate_message_id", return_value="auto-123"):
                 await ipc_server._send_error_response("Test error", "Error details")
 
                 mock_send.assert_called_once()
@@ -423,8 +399,8 @@ class TestIPCServer:
     @pytest.mark.asyncio
     async def test_start_websocket_server(self, ipc_server):
         """Test starting WebSocket server"""
-        with patch('websockets.serve', new_callable=AsyncMock) as mock_serve:
-            with patch.object(ipc_server, '_process_messages', new_callable=AsyncMock):
+        with patch("websockets.serve", new_callable=AsyncMock) as mock_serve:
+            with patch.object(ipc_server, "_process_messages", new_callable=AsyncMock):
                 await ipc_server.start()
                 mock_serve.assert_called_once_with(
                     ipc_server._handle_websocket_connection,
@@ -432,7 +408,7 @@ class TestIPCServer:
                     ipc_server.port,
                     ping_interval=30,
                     ping_timeout=10,
-                    close_timeout=10
+                    close_timeout=10,
                 )
 
     @pytest.mark.asyncio
@@ -440,8 +416,8 @@ class TestIPCServer:
         """Test that start() sets the running flag"""
         assert ipc_server._running is False
 
-        with patch('websockets.serve', new_callable=AsyncMock):
-            with patch.object(ipc_server, '_process_messages', new_callable=AsyncMock):
+        with patch("websockets.serve", new_callable=AsyncMock):
+            with patch.object(ipc_server, "_process_messages", new_callable=AsyncMock):
                 await ipc_server.start()
                 assert ipc_server._running is True
 
@@ -473,11 +449,9 @@ class TestIPCServer:
 
         # Mock the async iteration over websocket messages
         async def mock_messages():
-            yield json.dumps({
-                "command": "workflow.start",
-                "parameters": {},
-                "request_id": "test-123"
-            })
+            yield json.dumps(
+                {"command": "workflow.start", "parameters": {}, "request_id": "test-123"}
+            )
 
         mock_websocket.__aiter__ = lambda self: mock_messages()
 
@@ -502,7 +476,7 @@ class TestIPCServer:
         message_data = {
             "command": "workflow.get_state",
             "parameters": {"param": "value"},
-            "request_id": "req-456"
+            "request_id": "req-456",
         }
 
         await ipc_server._handle_frontend_message(message_data, mock_websocket)
@@ -524,11 +498,7 @@ class TestIPCServer:
         mock_websocket = MagicMock()
         mock_websocket.send = AsyncMock()
 
-        message_data = {
-            "query": "status",
-            "type": "system",
-            "request_id": "query-789"
-        }
+        message_data = {"query": "status", "type": "system", "request_id": "query-789"}
 
         await ipc_server._handle_frontend_message(message_data, mock_websocket)
 
@@ -544,9 +514,7 @@ class TestIPCServer:
         mock_websocket = MagicMock()
         mock_websocket.send = AsyncMock()
 
-        message_data = {
-            "unknown_field": "value"
-        }
+        message_data = {"unknown_field": "value"}
 
         await ipc_server._handle_frontend_message(message_data, mock_websocket)
 
@@ -563,7 +531,7 @@ class TestIPCServer:
             message_type=MessageType.STATE_UPDATE,
             message_id="test-123",
             timestamp=1234567890.0,
-            payload={"test": "data"}
+            payload={"test": "data"},
         )
 
         # Should not raise an error when no clients connected
@@ -576,7 +544,7 @@ class TestIPCServer:
             message_type=MessageType.STATE_UPDATE,
             message_id="test-123",
             timestamp=1234567890.0,
-            payload={"test": "data"}
+            payload={"test": "data"},
         )
 
         # Add mock clients
@@ -605,11 +573,7 @@ class TestIPCServer:
         mock_websocket = MagicMock()
         mock_websocket.send = AsyncMock()
 
-        await ipc_server._send_error_to_client(
-            mock_websocket,
-            "Test error",
-            "Error details"
-        )
+        await ipc_server._send_error_to_client(mock_websocket, "Test error", "Error details")
 
         mock_websocket.send.assert_called_once()
         error_call = mock_websocket.send.call_args[0][0]

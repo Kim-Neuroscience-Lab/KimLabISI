@@ -1,7 +1,19 @@
 {
-    "python.testing.pytestArgs": [
-        "backend"
-    ],
+    "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.cwd": "${workspaceFolder}/backend",
+    "python.testing.pytestPath": "poetry",
+    "python.testing.pytestArgs": [
+        "run",
+        "pytest",
+        "backend/tests",
+        "-v",
+        "--tb=short"
+    ],
+    "python.defaultInterpreterPath": "./backend/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.analysis.extraPaths": [
+        "./backend/src"
+    ]
 }

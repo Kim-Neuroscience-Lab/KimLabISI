@@ -27,9 +27,9 @@ from src.domain.value_objects.parameters import (
     StimulusGenerationParams,
     AcquisitionProtocolParams,
     CombinedParameters,
-    ParameterSource,
-    ParameterValidationError
+    ParameterSource
 )
+from src.domain.services.error_handler import ISIDomainError, create_parameter_error
 
 
 class TestFileBasedParameterStore:
@@ -80,7 +80,7 @@ class TestFileBasedParameterStore:
 
     def test_load_nonexistent_parameters(self):
         """Test loading nonexistent parameters raises error"""
-        with pytest.raises(ParameterValidationError) as excinfo:
+        with pytest.raises(ISIDomainError) as excinfo:
             self.store.load_parameters("nonexistent")
         assert "not found" in str(excinfo.value)
 
@@ -123,7 +123,7 @@ class TestFileBasedParameterStore:
 
     def test_delete_nonexistent_parameters(self):
         """Test deleting nonexistent parameters raises error"""
-        with pytest.raises(ParameterValidationError) as excinfo:
+        with pytest.raises(ISIDomainError) as excinfo:
             self.store.delete_parameter_set("nonexistent")
         assert "not found" in str(excinfo.value)
 
@@ -159,7 +159,7 @@ class TestFileBasedParameterStore:
             protocol_params=AcquisitionProtocolParams()
         )
 
-        with pytest.raises(ParameterValidationError) as excinfo:
+        with pytest.raises(ISIDomainError) as excinfo:
             self.store.save_parameters(combined, "invalid")
         assert "invalid parameters" in str(excinfo.value)
 
@@ -170,7 +170,7 @@ class TestFileBasedParameterStore:
         with open(corrupted_file, 'w') as f:
             f.write("{ invalid json }")
 
-        with pytest.raises(ParameterValidationError) as excinfo:
+        with pytest.raises(ISIDomainError) as excinfo:
             self.store.load_parameters("corrupted")
         assert "Failed to load parameter set" in str(excinfo.value)
 
@@ -361,7 +361,7 @@ class TestParameterManager:
 
     def test_get_nonexistent_parameters(self):
         """Test getting nonexistent parameters raises error"""
-        with pytest.raises(ParameterValidationError):
+        with pytest.raises(ISIDomainError):
             self.manager.get_parameters("nonexistent_set")
 
     @patch('src.domain.services.parameter_validator.ParameterValidator.validate_combined_parameters')

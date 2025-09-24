@@ -43,6 +43,8 @@ class GammaCorrection(BaseModel):
     green_gamma: float
     blue_gamma: float
     luminance_curve: np.ndarray
+
+    model_config = {"arbitrary_types_allowed": True}
     measurement_date: datetime
     target_gamma: float = 2.2
 
@@ -78,6 +80,7 @@ class ColorProfile(BaseModel):
     color_matrix: np.ndarray  # 3x3 transformation matrix
     max_luminance: float  # cd/m�
     measurement_date: datetime
+    model_config = {"arbitrary_types_allowed": True}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -110,6 +113,7 @@ class SpatialMapping(BaseModel):
     distortion_coefficients: Optional[np.ndarray] = None
     pixel_pitch: Tuple[float, float] = (0.0, 0.0)  # �m per pixel
     measurement_date: Optional[datetime] = None
+    model_config = {"arbitrary_types_allowed": True}
 
     def __post_init__(self):
         if self.measurement_date is None:
@@ -144,6 +148,7 @@ class UniformityCorrection(BaseModel):
     measurement_points: np.ndarray  # Grid points where measurements were taken
     uniformity_score: float  # 0-1, higher is more uniform
     measurement_date: datetime
+    model_config = {"arbitrary_types_allowed": True}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""

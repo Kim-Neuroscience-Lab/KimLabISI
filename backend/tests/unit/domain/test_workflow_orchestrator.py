@@ -12,11 +12,9 @@ import asyncio
 
 from src.domain.services.workflow_orchestrator import (
     WorkflowOrchestrator,
-    WorkflowTransition,
-    WorkflowError,
-    WorkflowValidationError,
-    WorkflowTransitionError
+    WorkflowTransition
 )
+from src.domain.services.error_handler import ISIDomainError, create_workflow_error
 from src.domain.value_objects.workflow_state import WorkflowState
 from src.domain.value_objects.parameters import (
     CombinedParameters,

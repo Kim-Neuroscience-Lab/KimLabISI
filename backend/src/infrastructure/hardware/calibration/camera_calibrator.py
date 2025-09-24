@@ -56,8 +56,7 @@ class CameraIntrinsics(BaseModel):
     reprojection_error: float
     calibration_date: datetime
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
