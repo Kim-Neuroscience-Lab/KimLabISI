@@ -208,4 +208,6 @@ __marimo__/
 
 .DS_Store
 .claude
+*.claude
 .cursor
+

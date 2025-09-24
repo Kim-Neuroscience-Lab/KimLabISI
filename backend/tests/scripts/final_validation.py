@@ -11,8 +11,13 @@ import sys
 from datetime import datetime
 
 # Import all our components
-from src.domain.entities.workflow_state import (
-    WorkflowStateMachine, WorkflowState, HardwareRequirement, WorkflowTransition
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+from src.domain.entities.workflow_state_machine import WorkflowStateMachine
+from src.domain.value_objects.workflow_state import (
+    WorkflowState, HardwareRequirement, WorkflowTransition
 )
 from src.infrastructure.hardware.factory import (
     HardwareFactory, PlatformType, HardwareCapability, PlatformInfo

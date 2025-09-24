@@ -19,10 +19,10 @@ from typing import Dict, Any, Optional, List, Callable, AsyncGenerator, Tuple
 from datetime import datetime, timedelta
 import time
 from enum import Enum
-from dataclasses import dataclass
+from pydantic import BaseModel
 
 from ...domain.value_objects.parameters import CombinedParameters
-from ...domain.entities.workflow_state import WorkflowState, HardwareRequirement
+from ...domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from ...domain.repositories.data_repository import DataRepositoryInterface
 from ...domain.repositories.experiment_repository import (
     ExperimentRepositoryInterface, ExperimentSessionInterface, SessionStatus, SessionType
@@ -55,8 +55,7 @@ class AcquisitionMode(Enum):
     CALIBRATION = "calibration"  # System calibration
 
 
-@dataclass
-class AcquisitionMetrics:
+class AcquisitionMetrics(BaseModel):
     """Real-time acquisition metrics"""
     frames_acquired: int = 0
     frames_dropped: int = 0

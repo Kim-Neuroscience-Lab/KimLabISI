@@ -6,12 +6,15 @@ system with status tracking and capability definitions.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
 import json
+import logging
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class HardwareStatus(Enum):
@@ -52,14 +55,13 @@ class DisplayType(Enum):
     OLED_DISPLAY = "oled_display"
 
 
-@dataclass
-class HardwareCapabilities:
+class HardwareCapabilities(BaseModel):
     """Hardware capabilities and specifications"""
     max_resolution: tuple[int, int] = (0, 0)
     bit_depth: int = 16
     max_frame_rate: float = 30.0
     wavelength_range: tuple[float, float] = (400.0, 700.0)  # nm
-    custom_properties: Dict[str, Any] = field(default_factory=dict)
+    custom_properties: Dict[str, Any] = Field(default_factory=dict)
 
     def supports_resolution(self, width: int, height: int) -> bool:
         """Check if hardware supports specific resolution"""
@@ -70,15 +72,14 @@ class HardwareCapabilities:
         return fps <= self.max_frame_rate
 
 
-@dataclass
-class HardwareConfiguration:
+class HardwareConfiguration(BaseModel):
     """Hardware configuration settings"""
     exposure_time_ms: Optional[float] = None
     gain: Optional[float] = None
     binning: tuple[int, int] = (1, 1)
     roi: Optional[tuple[int, int, int, int]] = None  # x, y, width, height
     temperature_setpoint: Optional[float] = None
-    custom_settings: Dict[str, Any] = field(default_factory=dict)
+    custom_settings: Dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -104,8 +105,7 @@ class HardwareConfiguration:
         )
 
 
-@dataclass
-class HardwareMetrics:
+class HardwareMetrics(BaseModel):
     """Hardware performance and health metrics"""
     temperature: Optional[float] = None
     cpu_usage: Optional[float] = None
@@ -115,7 +115,7 @@ class HardwareMetrics:
     error_count: int = 0
     uptime_seconds: float = 0.0
     last_calibration: Optional[datetime] = None
-    custom_metrics: Dict[str, float] = field(default_factory=dict)
+    custom_metrics: Dict[str, float] = Field(default_factory=dict)
 
     def is_healthy(self) -> bool:
         """Check if hardware metrics indicate healthy operation"""

@@ -12,9 +12,9 @@ from typing import Dict, List, Set, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
 
-from ...domain.entities.workflow_state import (
-    WorkflowStateMachine, WorkflowState, WorkflowTransition,
-    HardwareRequirement, SystemHealth, TransitionResult
+from ...domain.entities.workflow_state_machine import WorkflowStateMachine
+from ...domain.value_objects.workflow_state import (
+    WorkflowState, WorkflowTransition, HardwareRequirement
 )
 from ...domain.entities.parameters import ParameterManager
 from ...domain.value_objects.parameters import CombinedParameters, ParameterSource

@@ -19,8 +19,8 @@ from enum import Enum
 from datetime import datetime
 from pydantic import BaseModel, Field, ValidationError
 
-from ...domain.entities.workflow_state import (
-    WorkflowStateMachine,
+from ...domain.entities.workflow_state_machine import WorkflowStateMachine
+from ...domain.value_objects.workflow_state import (
     WorkflowState,
     HardwareRequirement,
     WorkflowTransition

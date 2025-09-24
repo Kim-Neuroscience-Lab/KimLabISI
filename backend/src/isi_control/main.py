@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 # Import from our layered architecture
 # Domain Layer
-from ..domain.entities.workflow_state import WorkflowStateMachine, WorkflowState
+from ..domain.entities.workflow_state_machine import WorkflowStateMachine
+from ..domain.entities.hardware import HardwareSystem
+from ..domain.value_objects.workflow_state import WorkflowState
 from ..domain.services.workflow_orchestrator import WorkflowOrchestrator
 from ..domain.services.error_handler import ErrorHandlingService
 
@@ -119,7 +121,9 @@ class ISIMacroscopeBackend:
             logger.info(">>> Initializing domain components...")
             self.error_handler = ErrorHandlingService()
             self.workflow_state_machine = WorkflowStateMachine()
+            self.hardware_system = HardwareSystem()
             self.workflow_orchestrator = WorkflowOrchestrator(
+                hardware_system=self.hardware_system,
                 error_handler=self.error_handler
             )
             logger.info(f">>> Domain layer initialized - State: {self.workflow_state_machine.current_state.value}")
@@ -131,7 +135,7 @@ class ISIMacroscopeBackend:
             self.hardware_factory = HardwareFactory()
             if self.development_mode:
                 self.hardware_factory._development_mode = True
-                logger.info(">>> Development mode enabled - using mock hardware")
+                logger.info(">>> Development mode enabled - using development stubs")
 
             # System Monitor
             self.system_monitor = SystemMonitor()

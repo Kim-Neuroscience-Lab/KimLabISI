@@ -9,7 +9,7 @@ Factory Responsibilities:
 - Platform detection (macOS vs Windows)
 - Hardware capability detection
 - Abstract interface instantiation
-- Mock vs production hardware selection
+- Development stub vs production hardware selection
 - Development mode configuration
 """
 
@@ -19,11 +19,11 @@ from typing import Protocol, Dict, Type, Set
 from enum import Enum
 from pydantic import BaseModel, Field
 
-from ..abstract.camera_interface import CameraInterface
-from ..abstract.gpu_interface import GPUInterface
-from ..abstract.timing_interface import TimingInterface
-from ..abstract.display_interface import DisplayInterface
-from ...domain.entities.workflow_state import HardwareRequirement
+from .abstract.camera_interface import CameraInterface
+from .abstract.gpu_interface import GPUInterface
+from .abstract.timing_interface import TimingInterface
+from .abstract.display_interface import DisplayInterface
+from ...domain.value_objects.workflow_state import HardwareRequirement
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ class HardwareCapability(BaseModel):
     """Hardware capability detection result using Pydantic V2"""
     hardware_type: HardwareRequirement
     available: bool = Field(description="Whether hardware is available")
-    mock: bool = Field(description="Whether this is mock hardware")
+    simulated: bool = Field(default=False, description="Whether this is simulated hardware for development")
     details: Dict[str, str] = Field(default_factory=dict, description="Hardware-specific details")
 
     model_config = {"use_enum_values": True}
@@ -63,13 +63,13 @@ class HardwareFactory:
     Cross-Platform Hardware Factory
 
     Implements platform detection and hardware abstraction instantiation
-    following the dependency inversion principle. Provides mock hardware
+    following the dependency inversion principle. Provides simulated hardware
     for development and production hardware for Windows deployment.
 
     Design Principles:
     - Platform detection determines implementation strategy
     - Abstract interfaces ensure consistent API across platforms
-    - Mock hardware enables development without production equipment
+    - Development stubs enable development without production equipment
     - Graceful degradation when hardware unavailable
     """
 
@@ -112,37 +112,37 @@ class HardwareFactory:
         """
         capabilities = {}
 
-        # Development mode provides mock hardware
+        # Development mode provides simulated hardware
         if self._development_mode:
             capabilities.update({
                 HardwareRequirement.DISPLAY: HardwareCapability(
                     hardware_type=HardwareRequirement.DISPLAY,
                     available=True,
-                    mock=True,
-                    details={"type": "mock_display", "platform": self._platform_info.platform_type}
+                    simulated=True,
+                    details={"type": "simulated_display", "platform": self._platform_info.platform_type}
                 ),
                 HardwareRequirement.GPU: HardwareCapability(
                     hardware_type=HardwareRequirement.GPU,
                     available=True,
-                    mock=True,
-                    details={"type": "metal_gpu" if self._platform_info.platform_type == PlatformType.MACOS.value else "mock_gpu"}
+                    simulated=True,
+                    details={"type": "metal_gpu" if self._platform_info.platform_type == PlatformType.MACOS.value else "simulated_gpu"}
                 ),
                 HardwareRequirement.CAMERA: HardwareCapability(
                     hardware_type=HardwareRequirement.CAMERA,
                     available=True,
-                    mock=True,
-                    details={"type": "mock_camera", "model": "PCO Panda 4.2 Simulation"}
+                    simulated=True,
+                    details={"type": "simulated_camera", "model": "PCO Panda 4.2 Simulation"}
                 ),
                 HardwareRequirement.STORAGE: HardwareCapability(
                     hardware_type=HardwareRequirement.STORAGE,
                     available=True,
-                    mock=True,
+                    simulated=True,
                     details={"type": "local_storage", "location": "development"}
                 ),
                 HardwareRequirement.DEV_MODE_BYPASS: HardwareCapability(
                     hardware_type=HardwareRequirement.DEV_MODE_BYPASS,
                     available=True,
-                    mock=False,
+                    simulated=False,
                     details={"enabled": "true"}
                 )
             })
@@ -159,10 +159,12 @@ class HardwareFactory:
         Returns:
             Camera interface implementation
         """
-        if self._development_mode:
-            return self._camera_implementations["mock"]()
-        else:
+        if self._development_mode and "development" in self._camera_implementations:
+            return self._camera_implementations["development"]()
+        elif "production" in self._camera_implementations:
             return self._camera_implementations["production"]()
+        else:
+            raise RuntimeError("No camera implementation available for this platform")
 
     def create_gpu_interface(self) -> GPUInterface:
         """
@@ -171,9 +173,8 @@ class HardwareFactory:
         Returns:
             GPU interface implementation
         """
-        if self._development_mode:
-            gpu_type = "metal" if self._platform_info.platform_type == PlatformType.MACOS.value else "mock"
-            return self._gpu_implementations[gpu_type]()
+        if self._platform_info.platform_type == PlatformType.MACOS.value and "metal" in self._gpu_implementations:
+            return self._gpu_implementations["metal"]()
         else:
             return self._gpu_implementations["directx"]()
 
@@ -184,8 +185,8 @@ class HardwareFactory:
         Returns:
             Timing interface implementation
         """
-        if self._development_mode:
-            return self._timing_implementations["mock"]()
+        if self._platform_info.platform_type == PlatformType.MACOS.value and "macos" in self._timing_implementations:
+            return self._timing_implementations["macos"]()
         else:
             return self._timing_implementations["windows"]()
 
@@ -196,8 +197,8 @@ class HardwareFactory:
         Returns:
             Display interface implementation
         """
-        if self._development_mode:
-            return self._display_implementations["mock"]()
+        if self._platform_info.platform_type == PlatformType.MACOS.value and "displaycontrol" in self._display_implementations:
+            return self._display_implementations["displaycontrol"]()
         else:
             return self._display_implementations["directx"]()
 
@@ -247,25 +248,25 @@ class HardwareFactory:
                 HardwareRequirement.DISPLAY: HardwareCapability(
                     hardware_type=HardwareRequirement.DISPLAY,
                     available=True,  # Assume available on Windows
-                    mock=False,
+                    simulated=False,
                     details={"type": "directx12", "gpu": "RTX 4070"}
                 ),
                 HardwareRequirement.GPU: HardwareCapability(
                     hardware_type=HardwareRequirement.GPU,
                     available=True,  # Assume available on Windows
-                    mock=False,
+                    simulated=False,
                     details={"type": "cuda", "model": "RTX 4070"}
                 ),
                 HardwareRequirement.CAMERA: HardwareCapability(
                     hardware_type=HardwareRequirement.CAMERA,
                     available=False,  # Requires actual detection
-                    mock=False,
+                    simulated=False,
                     details={"type": "pco_sdk", "model": "PCO Panda 4.2"}
                 ),
                 HardwareRequirement.STORAGE: HardwareCapability(
                     hardware_type=HardwareRequirement.STORAGE,
                     available=True,  # Assume available
-                    mock=False,
+                    simulated=False,
                     details={"type": "nvme", "model": "Samsung 990 PRO"}
                 )
             })
@@ -283,9 +284,13 @@ class HardwareFactory:
             except ImportError:
                 logger.warning("PCO camera implementation not available")
 
-        # Always provide mock implementation
-        from ..macos.mock_camera import MockCamera
-        implementations["mock"] = MockCamera
+        # Development mode uses stub implementation
+        if self._development_mode:
+            try:
+                from ..development.stub_camera import StubCamera
+                implementations["development"] = StubCamera
+            except ImportError:
+                logger.warning("Development camera stub not available")
 
         return implementations
 
@@ -307,10 +312,6 @@ class HardwareFactory:
             except ImportError:
                 logger.warning("Metal GPU implementation not available")
 
-        # Mock implementation for fallback
-        from ..macos.mock_processing import MockProcessing
-        implementations["mock"] = MockProcessing
-
         return implementations
 
     def _initialize_timing_implementations(self) -> Dict[str, Type]:
@@ -324,9 +325,12 @@ class HardwareFactory:
             except ImportError:
                 logger.warning("Windows timing implementation not available")
 
-        # Mock timing for development
-        from ..macos.macos_timing import MacOSTiming
-        implementations["mock"] = MacOSTiming
+        if self._platform_info.platform_type == PlatformType.MACOS.value:
+            try:
+                from ..macos.macos_timing import MacOSTiming
+                implementations["macos"] = MacOSTiming
+            except ImportError:
+                logger.warning("macOS timing implementation not available")
 
         return implementations
 
@@ -341,8 +345,11 @@ class HardwareFactory:
             except ImportError:
                 logger.warning("DirectX display implementation not available")
 
-        # Mock display for development
-        from ..macos.mock_display import MockDisplay
-        implementations["mock"] = MockDisplay
+        if self._platform_info.platform_type == PlatformType.MACOS.value:
+            try:
+                from ..macos.display_control import DisplayControl
+                implementations["displaycontrol"] = DisplayControl
+            except ImportError:
+                logger.warning("macOS display implementation not available")
 
         return implementations

@@ -276,9 +276,9 @@ class StreamingProfile(BaseModel):
         default=False,
         description="Enable development mode optimizations"
     )
-    mock_hardware: bool = Field(
+    simulated_hardware: bool = Field(
         default=False,
-        description="Use mock hardware for development"
+        description="Use simulated hardware for development"
     )
 
     model_config = {"frozen": True, "use_enum_values": True}

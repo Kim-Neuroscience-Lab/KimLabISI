@@ -48,7 +48,7 @@ class WorkflowOrchestrator:
     def __init__(self, hardware_system: HardwareSystem, error_handler: Optional[ErrorHandlingService] = None):
         self.hardware_system = hardware_system
         self.error_handler = error_handler or ErrorHandlingService()
-        self._current_state = WorkflowState.UNINITIALIZED
+        self._current_state = WorkflowState.STARTUP
         self._state_history: List[tuple[datetime, WorkflowState]] = []
         self._error_history: List[tuple[datetime, str]] = []
 
@@ -68,11 +68,11 @@ class WorkflowOrchestrator:
         self._state_start_time: Optional[datetime] = None
         self._total_workflow_timeout = timedelta(hours=24)
         self._state_timeouts: Dict[WorkflowState, timedelta] = {
-            WorkflowState.INITIALIZING: timedelta(minutes=5),
-            WorkflowState.GENERATING_STIMULUS: timedelta(minutes=30),
-            WorkflowState.SPATIAL_SETUP: timedelta(minutes=10),
-            WorkflowState.ACQUIRING_DATA: timedelta(hours=2),
-            WorkflowState.ANALYZING_DATA: timedelta(hours=1)
+            WorkflowState.STARTUP: timedelta(minutes=5),
+            WorkflowState.GENERATION: timedelta(minutes=30),
+            WorkflowState.SETUP: timedelta(minutes=10),
+            WorkflowState.ACQUISITION: timedelta(hours=2),
+            WorkflowState.ANALYSIS: timedelta(hours=1)
         }
 
         self._setup_default_handlers()
@@ -106,12 +106,12 @@ class WorkflowOrchestrator:
         """Get valid transitions from current state"""
         transitions_map = {
             WorkflowState.UNINITIALIZED: {WorkflowTransition.INITIALIZE_SYSTEM},
-            WorkflowState.INITIALIZING: {WorkflowTransition.REPORT_ERROR, WorkflowTransition.REQUEST_SHUTDOWN},
+            WorkflowState.STARTUP: {WorkflowTransition.REPORT_ERROR, WorkflowTransition.REQUEST_SHUTDOWN},
             WorkflowState.READY: {
                 WorkflowTransition.START_STIMULUS_GENERATION,
                 WorkflowTransition.REQUEST_SHUTDOWN
             },
-            WorkflowState.GENERATING_STIMULUS: {
+            WorkflowState.GENERATION: {
                 WorkflowTransition.COMPLETE_STIMULUS_GENERATION,
                 WorkflowTransition.REPORT_ERROR,
                 WorkflowTransition.REQUEST_SHUTDOWN
@@ -121,7 +121,7 @@ class WorkflowOrchestrator:
                 WorkflowTransition.START_STIMULUS_GENERATION,  # Regenerate
                 WorkflowTransition.REQUEST_SHUTDOWN
             },
-            WorkflowState.SPATIAL_SETUP: {
+            WorkflowState.SETUP: {
                 WorkflowTransition.COMPLETE_SPATIAL_SETUP,
                 WorkflowTransition.REPORT_ERROR,
                 WorkflowTransition.REQUEST_SHUTDOWN
@@ -131,7 +131,7 @@ class WorkflowOrchestrator:
                 WorkflowTransition.START_SPATIAL_SETUP,  # Redo spatial setup
                 WorkflowTransition.REQUEST_SHUTDOWN
             },
-            WorkflowState.ACQUIRING_DATA: {
+            WorkflowState.ACQUISITION: {
                 WorkflowTransition.COMPLETE_ACQUISITION,
                 WorkflowTransition.REPORT_ERROR,
                 WorkflowTransition.REQUEST_SHUTDOWN
@@ -141,7 +141,7 @@ class WorkflowOrchestrator:
                 WorkflowTransition.START_ACQUISITION,  # Redo acquisition
                 WorkflowTransition.REQUEST_SHUTDOWN
             },
-            WorkflowState.ANALYZING_DATA: {
+            WorkflowState.ANALYSIS: {
                 WorkflowTransition.COMPLETE_ANALYSIS,
                 WorkflowTransition.REPORT_ERROR,
                 WorkflowTransition.REQUEST_SHUTDOWN
@@ -154,7 +154,7 @@ class WorkflowOrchestrator:
                 WorkflowTransition.PERFORM_RECOVERY,
                 WorkflowTransition.REQUEST_SHUTDOWN
             },
-            WorkflowState.SHUTDOWN: set()  # No transitions from shutdown
+            # WorkflowState.SHUTDOWN: set()  # No shutdown state in enum
         }
 
         return transitions_map.get(self._current_state, set())
@@ -341,7 +341,7 @@ class WorkflowOrchestrator:
 
     async def _initialize_system(self) -> bool:
         """Initialize system and transition to READY state"""
-        await self._change_state(WorkflowState.INITIALIZING)
+        await self._change_state(WorkflowState.STARTUP)
 
         # Check hardware system readiness
         ready, issues = self.hardware_system.is_system_ready_for_acquisition()
@@ -376,7 +376,7 @@ class WorkflowOrchestrator:
 
     async def _start_stimulus_generation(self, parameters: CombinedParameters) -> bool:
         """Start stimulus generation process"""
-        await self._change_state(WorkflowState.GENERATING_STIMULUS)
+        await self._change_state(WorkflowState.GENERATION)
 
         # Validate parameters
         if not self._validate_parameters(parameters):
@@ -403,7 +403,7 @@ class WorkflowOrchestrator:
 
     async def _start_spatial_setup(self) -> bool:
         """Start spatial calibration setup"""
-        await self._change_state(WorkflowState.SPATIAL_SETUP)
+        await self._change_state(WorkflowState.SETUP)
 
         # Ensure hardware is ready for spatial setup
         cameras = self.hardware_system.get_cameras()
@@ -428,7 +428,7 @@ class WorkflowOrchestrator:
 
     async def _start_acquisition(self) -> bool:
         """Start data acquisition process"""
-        await self._change_state(WorkflowState.ACQUIRING_DATA)
+        await self._change_state(WorkflowState.ACQUISITION)
 
         # Validate acquisition readiness
         if not self._current_dataset:
@@ -470,7 +470,7 @@ class WorkflowOrchestrator:
 
     async def _start_analysis(self) -> bool:
         """Start data analysis process"""
-        await self._change_state(WorkflowState.ANALYZING_DATA)
+        await self._change_state(WorkflowState.ANALYSIS)
 
         if not self._current_session:
             domain_error = self.error_handler.create_error(
@@ -525,7 +525,7 @@ class WorkflowOrchestrator:
 
     async def _request_shutdown(self) -> bool:
         """Request system shutdown"""
-        await self._change_state(WorkflowState.SHUTDOWN)
+        # await self._change_state(WorkflowState.SHUTDOWN)  # No shutdown state available
         return True
 
     def _validate_parameters(self, parameters: CombinedParameters) -> bool:
@@ -609,9 +609,9 @@ class WorkflowOrchestrator:
             # Cleanup resources
             await self._cleanup_workflow()
 
-        self._state_entry_handlers[WorkflowState.INITIALIZING] = on_enter_initializing
+        self._state_entry_handlers[WorkflowState.STARTUP] = on_enter_initializing
         self._state_entry_handlers[WorkflowState.ERROR] = on_enter_error
-        self._state_entry_handlers[WorkflowState.SHUTDOWN] = on_enter_shutdown
+        # self._state_entry_handlers[WorkflowState.SHUTDOWN] = on_enter_shutdown  # No shutdown state
 
     async def _save_workflow_state(self):
         """Save current workflow state for recovery"""

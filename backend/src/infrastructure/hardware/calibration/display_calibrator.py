@@ -7,7 +7,7 @@ including gamma correction, color calibration, and spatial mapping.
 
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional, Any, Union
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
 from pathlib import Path
 import numpy as np
 import json
@@ -37,8 +37,7 @@ class ColorSpace(Enum):
     DCI_P3 = "DCI-P3"
 
 
-@dataclass
-class GammaCorrection:
+class GammaCorrection(BaseModel):
     """Gamma correction parameters"""
     red_gamma: float
     green_gamma: float
@@ -71,14 +70,13 @@ class GammaCorrection:
         )
 
 
-@dataclass
-class ColorProfile:
+class ColorProfile(BaseModel):
     """Color profile calibration"""
     color_space: ColorSpace
     white_point: Tuple[float, float]  # CIE xy coordinates
     primaries: np.ndarray  # RGB primary coordinates (3x2)
     color_matrix: np.ndarray  # 3x3 transformation matrix
-    max_luminance: float  # cd/m²
+    max_luminance: float  # cd/mï¿½
     measurement_date: datetime
 
     def to_dict(self) -> Dict[str, Any]:
@@ -105,13 +103,12 @@ class ColorProfile:
         )
 
 
-@dataclass
-class SpatialMapping:
+class SpatialMapping(BaseModel):
     """Spatial calibration mapping"""
     display_corners: np.ndarray  # 4x2 array of corner coordinates
     mapping_matrix: np.ndarray  # Perspective transformation matrix
     distortion_coefficients: Optional[np.ndarray] = None
-    pixel_pitch: Tuple[float, float] = (0.0, 0.0)  # ¼m per pixel
+    pixel_pitch: Tuple[float, float] = (0.0, 0.0)  # ï¿½m per pixel
     measurement_date: Optional[datetime] = None
 
     def __post_init__(self):
@@ -140,8 +137,7 @@ class SpatialMapping:
         )
 
 
-@dataclass
-class UniformityCorrection:
+class UniformityCorrection(BaseModel):
     """Display uniformity correction"""
     correction_map: np.ndarray  # Spatial correction factors
     vignetting_correction: np.ndarray  # Radial correction
@@ -171,8 +167,7 @@ class UniformityCorrection:
         )
 
 
-@dataclass
-class DisplayCalibrationResult:
+class DisplayCalibrationResult(BaseModel):
     """Complete display calibration result"""
     display_id: str
     gamma_correction: Optional[GammaCorrection] = None
@@ -352,7 +347,7 @@ class DisplayCalibrator:
                 # Use target values for testing/simulation
                 measured_primaries = target_params["primaries"]
                 measured_white_point = target_params["white_point"]
-                max_luminance = 100.0  # cd/m²
+                max_luminance = 100.0  # cd/mï¿½
 
             # Calculate color transformation matrix
             color_matrix = self._calculate_color_matrix(
@@ -501,7 +496,7 @@ class DisplayCalibrator:
     def _estimate_luminance(self, test_levels: np.ndarray, gamma: float) -> np.ndarray:
         """Estimate luminance values using gamma model"""
         normalized_levels = test_levels / 255.0
-        return np.power(normalized_levels, gamma) * 100.0  # Assume 100 cd/m² max
+        return np.power(normalized_levels, gamma) * 100.0  # Assume 100 cd/mï¿½ max
 
     def _fit_gamma_curves(
         self, test_levels: np.ndarray, luminance_values: np.ndarray, target_gamma: float
@@ -543,7 +538,7 @@ class DisplayCalibrator:
     async def _measure_max_luminance(self, display: Display, measurement_func: callable) -> float:
         """Measure maximum display luminance"""
         # Would display white at maximum level and measure
-        return 100.0  # cd/m²
+        return 100.0  # cd/mï¿½
 
     def _calculate_color_matrix(
         self,
@@ -587,7 +582,7 @@ class DisplayCalibrator:
     ) -> Tuple[float, float]:
         """Calculate pixel pitch in micrometers"""
         # Simplified calculation
-        return (25.4, 25.4)  # Assume ~25.4 ¼m/pixel (100 DPI)
+        return (25.4, 25.4)  # Assume ~25.4 ï¿½m/pixel (100 DPI)
 
     def _calculate_distortion(
         self,

@@ -8,7 +8,7 @@ Consolidates all error handling patterns to eliminate massive DRY violations.
 from __future__ import annotations
 from typing import Dict, Any, Optional, Type, Union, Protocol, runtime_checkable
 from enum import Enum
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -41,8 +41,7 @@ class ErrorRecoveryStrategy(Enum):
     GRACEFUL_DEGRADATION = "degrade"  # Continue with reduced functionality
 
 
-@dataclass(frozen=True)
-class DomainError:
+class DomainError(BaseModel):
     """
     Immutable domain error representation
 
@@ -53,9 +52,11 @@ class DomainError:
     category: ErrorCategory
     severity: ErrorSeverity
     recovery_strategy: ErrorRecoveryStrategy
-    context: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.now)
-    cause: Optional[DomainError] = None
+    context: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.now)
+    cause: Optional['DomainError'] = None
+
+    model_config = {"frozen": True}
 
     def with_context(self, **context_data) -> DomainError:
         """Create new error with additional context"""

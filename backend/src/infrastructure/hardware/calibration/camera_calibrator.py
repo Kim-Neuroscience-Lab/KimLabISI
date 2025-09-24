@@ -7,7 +7,8 @@ including intrinsic/extrinsic parameter estimation and validation.
 
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional, Any, Union
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
+from typing import Any
 from pathlib import Path
 import numpy as np
 import json
@@ -37,8 +38,7 @@ class CalibrationStatus(Enum):
     EXPIRED = "expired"
 
 
-@dataclass
-class CalibrationPattern:
+class CalibrationPattern(BaseModel):
     """Calibration pattern specification"""
     pattern_type: CalibrationPatternType
     width: int  # Number of internal corners/circles horizontally
@@ -47,15 +47,17 @@ class CalibrationPattern:
     marker_size: float = 0.0  # Size of ArUco markers (for ChArUco)
 
 
-@dataclass
-class CameraIntrinsics:
+class CameraIntrinsics(BaseModel):
     """Camera intrinsic parameters"""
-    camera_matrix: np.ndarray  # 3x3 camera matrix
-    distortion_coefficients: np.ndarray  # Distortion coefficients
+    camera_matrix: Any = Field(description="3x3 camera matrix as numpy array")
+    distortion_coefficients: Any = Field(description="Distortion coefficients as numpy array")
     image_width: int
     image_height: int
     reprojection_error: float
     calibration_date: datetime
+
+    class Config:
+        arbitrary_types_allowed = True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -81,8 +83,7 @@ class CameraIntrinsics:
         )
 
 
-@dataclass
-class CalibrationResult:
+class CalibrationResult(BaseModel):
     """Complete calibration result"""
     intrinsics: CameraIntrinsics
     status: CalibrationStatus
@@ -142,21 +143,10 @@ class CameraCalibrator:
                 detectors[CalibrationPatternType.CHARUCO_BOARD] = self._detect_charuco_corners
 
         except ImportError:
-            logger.warning("OpenCV not available - using mock pattern detectors")
-            detectors = self._create_mock_detectors()
+            logger.error("OpenCV is required for camera calibration but not available")
+            raise CameraCalibrationError("OpenCV dependency required for camera calibration")
 
         return detectors
-
-    def _create_mock_detectors(self) -> Dict[CalibrationPatternType, Any]:
-        """Create mock pattern detectors for testing"""
-        def mock_detector(*args, **kwargs):
-            # Return mock detection result
-            return True, np.random.rand(54, 1, 2).astype(np.float32)
-
-        return {
-            pattern_type: mock_detector
-            for pattern_type in CalibrationPatternType
-        }
 
     async def calibrate_camera(
         self,
@@ -330,15 +320,8 @@ class CameraCalibrator:
             reprojection_error = ret
 
         except ImportError:
-            # Mock calibration for testing
-            logger.warning("OpenCV not available - using mock calibration")
-            camera_matrix = np.array([
-                [1000.0, 0.0, image_size[0] / 2],
-                [0.0, 1000.0, image_size[1] / 2],
-                [0.0, 0.0, 1.0]
-            ])
-            dist_coeffs = np.zeros(5)
-            reprojection_error = 0.1
+            logger.error("OpenCV is required for camera calibration but not available")
+            raise CameraCalibrationError("OpenCV dependency required for camera calibration")
 
         return CameraIntrinsics(
             camera_matrix=camera_matrix,
@@ -390,8 +373,8 @@ class CameraCalibrator:
             return np.sqrt(total_error / total_points) if total_points > 0 else float('inf')
 
         except ImportError:
-            # Mock validation for testing
-            return intrinsics.reprojection_error
+            logger.error("OpenCV is required for validation but not available")
+            raise CameraCalibrationError("OpenCV dependency required for validation")
 
     def _detect_charuco_corners(self, image: np.ndarray, pattern: CalibrationPattern):
         """Detect ChArUco board corners (requires OpenCV with ArUco)"""
@@ -417,8 +400,8 @@ class CameraCalibrator:
             return False, None
 
         except (ImportError, AttributeError):
-            # Fallback to mock detection
-            return True, np.random.rand(pattern.width * pattern.height, 1, 2).astype(np.float32)
+            logger.error("OpenCV ArUco module is required for ChArUco detection but not available")
+            return False, np.array([])
 
     async def load_calibration(self, camera_id: str) -> Optional[CalibrationResult]:
         """Load existing calibration for camera"""
@@ -504,7 +487,7 @@ class CameraCalibrator:
 
         return CalibrationStatus.NOT_CALIBRATED
 
-    def list_calibrated_cameras(self) -> List[str]:
+    async def list_calibrated_cameras(self) -> List[str]:
         """List all cameras with valid calibrations"""
         calibrated_cameras = []
 

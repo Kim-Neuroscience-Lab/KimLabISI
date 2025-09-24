@@ -13,7 +13,9 @@ import logging
 import asyncio
 import psutil
 import time
-from dataclasses import dataclass
+import numpy as np
+from scipy import stats
+from pydantic import BaseModel
 
 from ...domain.entities.hardware import HardwareSystem
 from ...domain.services.workflow_orchestrator import WorkflowOrchestrator
@@ -41,8 +43,7 @@ class MonitoringMetric(Enum):
     APPLICATION_HEALTH = "application_health"
 
 
-@dataclass
-class Alert:
+class Alert(BaseModel):
     """System alert"""
     id: str
     timestamp: datetime
@@ -54,8 +55,7 @@ class Alert:
     resolved: bool = False
 
 
-@dataclass
-class PerformanceMetrics:
+class PerformanceMetrics(BaseModel):
     """System performance metrics snapshot"""
     timestamp: datetime
     cpu_percent: float
@@ -584,8 +584,8 @@ class MonitoringService:
         first_half = values[:len(values)//2]
         second_half = values[len(values)//2:]
 
-        first_avg = sum(first_half) / len(first_half)
-        second_avg = sum(second_half) / len(second_half)
+        first_avg = np.mean(first_half)
+        second_avg = np.mean(second_half)
 
         if first_avg == 0:
             change_percent = 0.0

@@ -20,11 +20,11 @@ from pathlib import Path
 
 # Use consolidated parameter system instead of duplicate stimulus_params
 # from ...domain.value_objects.stimulus_params import (
-#     StimulusParams, VisualFieldParams, RetinotopyProtocol
+#     StimulusParams, VisualFieldParams, AcquisitionProtocolParams
 # )
-from ...domain.entities.workflow_state import WorkflowState, HardwareRequirement
+from ...domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from ...domain.entities.parameters import ParameterManager
-from ...domain.value_objects.parameters import CombinedParameters
+from ...domain.value_objects.parameters import CombinedParameters, AcquisitionProtocolParams
 from ..algorithms.pattern_generators import PatternGenerator
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class StimulusGenerationError(Exception):
 class StimulusSequence:
     """Represents a complete stimulus sequence"""
 
-    def __init__(self, protocol: RetinotopyProtocol, generator: PatternGenerator, combined_parameters: CombinedParameters):
+    def __init__(self, protocol: AcquisitionProtocolParams, generator: PatternGenerator, combined_parameters: CombinedParameters):
         """
         Initialize stimulus sequence
 
@@ -121,7 +121,7 @@ class StimulusGenerationUseCase:
         self._current_sequence: Optional[StimulusSequence] = None
         self._generator: Optional[PatternGenerator] = None
 
-    async def create_stimulus_sequence(self, protocol: RetinotopyProtocol, parameter_set_id: str = "marshel_2011_defaults") -> StimulusSequence:
+    async def create_stimulus_sequence(self, protocol: AcquisitionProtocolParams, parameter_set_id: str = "marshel_2011_defaults") -> StimulusSequence:
         """
         Create a new stimulus sequence from protocol
 
@@ -190,7 +190,7 @@ class StimulusGenerationUseCase:
             raise StimulusGenerationError(f"Stimulus validation failed: {e}")
 
     async def generate_preview_frames(self,
-                                    protocol: RetinotopyProtocol,
+                                    protocol: AcquisitionProtocolParams,
                                     num_frames: int = 10,
                                     parameter_set_id: str = "marshel_2011_defaults") -> List[np.ndarray]:
         """
@@ -234,7 +234,7 @@ class StimulusGenerationUseCase:
             raise StimulusGenerationError(f"Preview generation failed: {e}")
 
     async def export_stimulus_video(self,
-                                  protocol: RetinotopyProtocol,
+                                  protocol: AcquisitionProtocolParams,
                                   output_path: Path,
                                   frame_skip: int = 1,
                                   parameter_set_id: str = "marshel_2011_defaults") -> Path:
@@ -367,7 +367,7 @@ class StimulusGenerationUseCase:
 
 def create_horizontal_bar_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
                                                   cycle_duration: Optional[float] = None,
-                                                  num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+                                                  num_cycles: Optional[int] = None) -> AcquisitionProtocolParams:
     """Create a horizontal bar retinotopy protocol using parameter system
 
     Args:
@@ -400,7 +400,7 @@ def create_horizontal_bar_protocol_from_parameters(parameter_set_id: str = "mars
             updates['num_cycles'] = num_cycles
         stimulus_params = stimulus_params.model_copy(update=updates)
 
-    return RetinotopyProtocol(
+    return AcquisitionProtocolParams(
         protocol_name="Horizontal Bar Retinotopy",
         description="Phase-encoded horizontal bar for vertical retinotopy mapping",
         stimulus_params=stimulus_params,
@@ -412,7 +412,7 @@ def create_horizontal_bar_protocol_from_parameters(parameter_set_id: str = "mars
 
 def create_vertical_bar_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
                                                 cycle_duration: Optional[float] = None,
-                                                num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+                                                num_cycles: Optional[int] = None) -> AcquisitionProtocolParams:
     """Create a vertical bar retinotopy protocol using parameter system
 
     Args:
@@ -445,7 +445,7 @@ def create_vertical_bar_protocol_from_parameters(parameter_set_id: str = "marshe
             updates['num_cycles'] = num_cycles
         stimulus_params = stimulus_params.model_copy(update=updates)
 
-    return RetinotopyProtocol(
+    return AcquisitionProtocolParams(
         protocol_name="Vertical Bar Retinotopy",
         description="Phase-encoded vertical bar for horizontal retinotopy mapping",
         stimulus_params=stimulus_params,
@@ -457,7 +457,7 @@ def create_vertical_bar_protocol_from_parameters(parameter_set_id: str = "marshe
 
 def create_polar_wedge_protocol_from_parameters(parameter_set_id: str = "marshel_2011_defaults",
                                               cycle_duration: Optional[float] = None,
-                                              num_cycles: Optional[int] = None) -> RetinotopyProtocol:
+                                              num_cycles: Optional[int] = None) -> AcquisitionProtocolParams:
     """Create a polar wedge retinotopy protocol using parameter system
 
     Args:
@@ -490,7 +490,7 @@ def create_polar_wedge_protocol_from_parameters(parameter_set_id: str = "marshel
             updates['num_cycles'] = num_cycles
         stimulus_params = stimulus_params.model_copy(update=updates)
 
-    return RetinotopyProtocol(
+    return AcquisitionProtocolParams(
         protocol_name="Polar Wedge Retinotopy",
         description="Phase-encoded polar wedge for polar angle mapping",
         stimulus_params=stimulus_params,

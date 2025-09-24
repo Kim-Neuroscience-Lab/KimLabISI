@@ -11,11 +11,8 @@ import asyncio
 from typing import Set, Dict, Any
 from unittest.mock import Mock, AsyncMock
 
-from src.domain.entities.workflow_state import (
-    WorkflowStateMachine,
-    WorkflowState,
-    HardwareRequirement
-)
+from src.domain.entities.workflow_state_machine import WorkflowStateMachine
+from src.domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from src.infrastructure.hardware.factory import HardwareFactory, HardwareCapability
 from src.infrastructure.communication.ipc_server import IPCServer
 from src.application.handlers.command_handler import CommandHandler
@@ -34,33 +31,33 @@ def mock_hardware_capabilities():
         HardwareRequirement.DISPLAY: HardwareCapability(
             hardware_type=HardwareRequirement.DISPLAY,
             available=True,
-            mock=True,
-            details={"type": "mock_display", "platform": "test"}
+            simulated=True,
+            details={"type": "mock_display", "platform": "test"},
         ),
         HardwareRequirement.GPU: HardwareCapability(
             hardware_type=HardwareRequirement.GPU,
             available=True,
-            mock=True,
-            details={"type": "mock_gpu", "model": "Test GPU"}
+            simulated=True,
+            details={"type": "mock_gpu", "model": "Test GPU"},
         ),
         HardwareRequirement.CAMERA: HardwareCapability(
             hardware_type=HardwareRequirement.CAMERA,
             available=True,
-            mock=True,
-            details={"type": "mock_camera", "model": "Test Camera"}
+            simulated=True,
+            details={"type": "mock_camera", "model": "Test Camera"},
         ),
         HardwareRequirement.STORAGE: HardwareCapability(
             hardware_type=HardwareRequirement.STORAGE,
             available=True,
-            mock=True,
-            details={"type": "mock_storage", "location": "test"}
+            simulated=True,
+            details={"type": "mock_storage", "location": "test"},
         ),
         HardwareRequirement.DEV_MODE_BYPASS: HardwareCapability(
             hardware_type=HardwareRequirement.DEV_MODE_BYPASS,
             available=True,
-            mock=False,
-            details={"enabled": "true"}
-        )
+            simulated=False,
+            details={"enabled": "true"},
+        ),
     }
 
 
@@ -81,7 +78,9 @@ def mock_hardware_factory(mock_hardware_capabilities):
     """Mock hardware factory for testing"""
     factory = Mock(spec=HardwareFactory)
     factory.detect_hardware_capabilities.return_value = mock_hardware_capabilities
-    factory.get_available_hardware_requirements.return_value = set(mock_hardware_capabilities.keys())
+    factory.get_available_hardware_requirements.return_value = set(
+        mock_hardware_capabilities.keys()
+    )
     factory.development_mode = True
     factory.platform_info.platform_type.value = "test"
     return factory
@@ -92,7 +91,7 @@ async def ipc_server():
     """IPC server instance for testing"""
     server = IPCServer()
     yield server
-    if hasattr(server, '_running') and server._running:
+    if hasattr(server, "_running") and server._running:
         await server.stop()
 
 
@@ -107,11 +106,7 @@ async def command_handler(mock_hardware_factory):
 @pytest.fixture
 def sample_command_data():
     """Sample command data for testing"""
-    return {
-        "command": "workflow.start",
-        "parameters": {},
-        "request_id": "test-request-123"
-    }
+    return {"command": "workflow.start", "parameters": {}, "request_id": "test-request-123"}
 
 
 @pytest.fixture
@@ -124,12 +119,13 @@ def sample_ipc_message():
         "payload": {
             "command": "workflow.start",
             "parameters": {},
-            "request_id": "test-request-123"
-        }
+            "request_id": "test-request-123",
+        },
     }
 
 
 # Hardware test fixtures
+
 
 @pytest.fixture
 def limited_hardware_capabilities():
@@ -138,8 +134,8 @@ def limited_hardware_capabilities():
         HardwareRequirement.DISPLAY: HardwareCapability(
             hardware_type=HardwareRequirement.DISPLAY,
             available=True,
-            mock=True,
-            details={"type": "mock_display"}
+            simulated=True,
+            details={"type": "mock_display"},
         )
     }
 
@@ -157,31 +153,32 @@ def production_hardware_capabilities():
         HardwareRequirement.DISPLAY: HardwareCapability(
             hardware_type=HardwareRequirement.DISPLAY,
             available=True,
-            mock=False,
-            details={"type": "directx12", "gpu": "RTX 4070"}
+            simulated=False,
+            details={"type": "directx12", "gpu": "RTX 4070"},
         ),
         HardwareRequirement.GPU: HardwareCapability(
             hardware_type=HardwareRequirement.GPU,
             available=True,
-            mock=False,
-            details={"type": "cuda", "model": "RTX 4070"}
+            simulated=False,
+            details={"type": "cuda", "model": "RTX 4070"},
         ),
         HardwareRequirement.CAMERA: HardwareCapability(
             hardware_type=HardwareRequirement.CAMERA,
             available=True,
-            mock=False,
-            details={"type": "pco_sdk", "model": "PCO Panda 4.2"}
+            simulated=False,
+            details={"type": "pco_sdk", "model": "PCO Panda 4.2"},
         ),
         HardwareRequirement.STORAGE: HardwareCapability(
             hardware_type=HardwareRequirement.STORAGE,
             available=True,
-            mock=False,
-            details={"type": "nvme", "model": "Samsung 990 PRO"}
-        )
+            simulated=False,
+            details={"type": "nvme", "model": "Samsung 990 PRO"},
+        ),
     }
 
 
 # Async test helpers
+
 
 @pytest.fixture
 def async_mock():
@@ -199,6 +196,7 @@ def mock_async_queue():
 
 
 # Test data fixtures
+
 
 @pytest.fixture
 def valid_workflow_states():
@@ -219,16 +217,16 @@ def test_transition_scenarios():
         {
             "from_state": WorkflowState.STARTUP,
             "to_state": WorkflowState.SETUP_READY,
-            "should_succeed": True
+            "should_succeed": True,
         },
         {
             "from_state": WorkflowState.SETUP_READY,
             "to_state": WorkflowState.SETUP,
-            "should_succeed": True
+            "should_succeed": True,
         },
         {
             "from_state": WorkflowState.STARTUP,
             "to_state": WorkflowState.ANALYSIS,
-            "should_succeed": False
-        }
+            "should_succeed": False,
+        },
     ]

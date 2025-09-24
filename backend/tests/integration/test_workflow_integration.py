@@ -10,7 +10,8 @@ import pytest_asyncio
 import asyncio
 from unittest.mock import patch, Mock
 
-from src.domain.entities.workflow_state import WorkflowStateMachine, WorkflowState, HardwareRequirement
+from src.domain.entities.workflow_state_machine import WorkflowStateMachine
+from src.domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from src.infrastructure.hardware.factory import HardwareFactory, HardwareCapability
 from src.infrastructure.communication.ipc_server import IPCServer, IPCMessage, MessageType
 from src.application.handlers.command_handler import CommandHandler

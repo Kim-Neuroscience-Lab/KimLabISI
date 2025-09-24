@@ -15,8 +15,8 @@ import asyncio
 import platform
 import time
 import pytest
-from src.domain.entities.workflow_state import (
-    WorkflowStateMachine,
+from src.domain.entities.workflow_state_machine import WorkflowStateMachine
+from src.domain.value_objects.workflow_state import (
     WorkflowState,
     HardwareRequirement,
     WorkflowTransition

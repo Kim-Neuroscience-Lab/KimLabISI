@@ -13,9 +13,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from pathlib import Path
 
-from ...domain.entities.workflow_state import (
-    WorkflowStateMachine, WorkflowState, WorkflowTransition,
-    HardwareRequirement, TransitionResult
+from ...domain.entities.workflow_state_machine import WorkflowStateMachine
+from ...domain.value_objects.workflow_state import (
+    WorkflowState, WorkflowTransition, HardwareRequirement
 )
 from ...domain.entities.parameters import ParameterManager
 from ...domain.value_objects.parameters import CombinedParameters

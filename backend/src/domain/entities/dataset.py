@@ -6,15 +6,18 @@ representing stimulus datasets, acquisition sessions, and analysis results follo
 Clean Architecture domain modeling principles.
 """
 
-from typing import Dict, List, Optional, Set, Any, Tuple
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 from enum import Enum
+import logging
+import numpy as np
 from joblib import hash as joblib_hash
 
-from ..value_objects.parameters import CombinedParameters, SpatialConfiguration
+from ..value_objects.parameters import CombinedParameters
 from ..value_objects.stream_config import StreamingProfile
-from ..services.error_handler import ErrorHandlingService, ISIDomainError
+
+logger = logging.getLogger(__name__)
 
 
 class DatasetType(Enum):
@@ -531,11 +534,11 @@ class AnalysisResult:
         correlation_scores = list(self.correlation_quality.values())
         unwrapping_scores = list(self.unwrapping_quality.values())
 
-        avg_correlation = sum(correlation_scores) / len(correlation_scores) if correlation_scores else 0.0
-        avg_unwrapping = sum(unwrapping_scores) / len(unwrapping_scores) if unwrapping_scores else 0.0
+        avg_correlation = np.mean(correlation_scores) if correlation_scores else 0.0
+        avg_unwrapping = np.mean(unwrapping_scores) if unwrapping_scores else 0.0
 
-        # Combined score with weighting
-        self.overall_quality_score = (avg_correlation * 0.6 + avg_unwrapping * 0.4)
+        # Combined score with weighting (convert numpy scalar to float)
+        self.overall_quality_score = float(avg_correlation * 0.6 + avg_unwrapping * 0.4)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""

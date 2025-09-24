@@ -10,8 +10,8 @@ from datetime import datetime
 from typing import Set
 from pydantic import ValidationError
 
-from src.domain.entities.workflow_state import (
-    WorkflowStateMachine,
+from src.domain.entities.workflow_state_machine import WorkflowStateMachine
+from src.domain.value_objects.workflow_state import (
     WorkflowState,
     HardwareRequirement,
     WorkflowTransition

@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
 
-from ...domain.services.error_handler import ErrorHandlingService, ISIDomainError, RecoveryStrategy
+from ...domain.services.error_handler import ErrorHandlingService, ISIDomainError, ErrorRecoveryStrategy
 from ...domain.services.workflow_orchestrator import WorkflowOrchestrator
 from ...application.services.monitoring_service import MonitoringService
 from ...application.services.state_persistence import StatePersistenceService
@@ -46,11 +46,11 @@ class ErrorRecoveryUseCase:
 
         # Recovery strategy mappings
         self._recovery_strategies = {
-            RecoveryStrategy.RETRY: self._retry_operation,
-            RecoveryStrategy.FALLBACK: self._execute_fallback,
-            RecoveryStrategy.USER_INTERVENTION: self._request_user_intervention,
-            RecoveryStrategy.SYSTEM_RESTART: self._restart_system,
-            RecoveryStrategy.GRACEFUL_DEGRADATION: self._graceful_degradation
+            ErrorRecoveryStrategy.RETRY: self._retry_operation,
+            ErrorRecoveryStrategy.FALLBACK: self._execute_fallback,
+            ErrorRecoveryStrategy.USER_INTERVENTION: self._request_user_intervention,
+            ErrorRecoveryStrategy.SYSTEM_RESTART: self._restart_system,
+            ErrorRecoveryStrategy.GRACEFUL_DEGRADATION: self._graceful_degradation
         }
 
     async def handle_system_error(
@@ -95,7 +95,7 @@ class ErrorRecoveryUseCase:
 
     async def _execute_recovery_strategy(
         self,
-        strategy: RecoveryStrategy,
+        strategy: ErrorRecoveryStrategy,
         error: ISIDomainError,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -103,7 +103,7 @@ class ErrorRecoveryUseCase:
 
         if strategy not in self._recovery_strategies:
             # Unknown strategy - default to user intervention
-            strategy = RecoveryStrategy.USER_INTERVENTION
+            strategy = ErrorRecoveryStrategy.USER_INTERVENTION
 
         recovery_handler = self._recovery_strategies[strategy]
         return await recovery_handler(error, context)

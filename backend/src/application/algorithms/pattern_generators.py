@@ -20,7 +20,7 @@ from scipy.spatial.distance import cdist
 
 # Use consolidated parameter system instead of duplicate stimulus_params
 # from ...domain.value_objects.stimulus_params import (
-#     StimulusType, MovementDirection, StimulusParams, VisualFieldParams
+#     StimulusType, MovementDirection, StimulusGenerationParams, VisualFieldParams
 # )
 from ...domain.value_objects.parameters import StimulusGenerationParams
 from ...domain.entities.parameters import ParameterManager
@@ -73,7 +73,7 @@ class PatternGenerator:
         self.Theta_radians = np.arctan2(self.Y_degrees, self.X_degrees)
         self.Theta_degrees = np.degrees(self.Theta_radians)
 
-    def generate_frame(self, stimulus_params: StimulusParams, frame_index: int) -> np.ndarray:
+    def generate_frame(self, stimulus_params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """
         Generate a single stimulus frame
 
@@ -104,7 +104,7 @@ class PatternGenerator:
         else:
             raise ValueError(f"Unsupported stimulus type: {stimulus_type}")
 
-    def _generate_horizontal_bar(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_horizontal_bar(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate horizontal bar stimulus with spherical altitude correction (Marshel et al.)"""
         # Calculate bar position for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
@@ -145,7 +145,7 @@ class PatternGenerator:
 
         return np.clip(frame, 0, 1)
 
-    def _generate_vertical_bar(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_vertical_bar(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate vertical bar stimulus with spherical azimuth correction (Marshel et al.)"""
         # Calculate bar position for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
@@ -186,7 +186,7 @@ class PatternGenerator:
 
         return np.clip(frame, 0, 1)
 
-    def _generate_polar_wedge(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_polar_wedge(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate polar wedge stimulus"""
         # Calculate wedge angle for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
@@ -219,7 +219,7 @@ class PatternGenerator:
 
         return np.clip(frame, 0, 1)
 
-    def _generate_expanding_ring(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_expanding_ring(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate expanding/contracting ring stimulus"""
         # Calculate ring radius for this frame
         progress = (frame_index % params.frames_per_cycle) / params.frames_per_cycle
@@ -252,7 +252,7 @@ class PatternGenerator:
 
         return np.clip(frame, 0, 1)
 
-    def _generate_checkerboard_pattern(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_checkerboard_pattern(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate counter-phase checkerboard pattern using parameter system"""
         # Use checkerboard size from parameter system
         checker_size_degrees = self.stimulus_params.checkerboard_size_degrees
@@ -281,18 +281,18 @@ class PatternGenerator:
 
         return pattern
 
-    def _generate_checkerboard(self, params: StimulusParams, frame_index: int) -> np.ndarray:
+    def _generate_checkerboard(self, params: StimulusGenerationParams, frame_index: int) -> np.ndarray:
         """Generate full-field checkerboard stimulus"""
         # Generate full-screen checkerboard with counter-phase flickering
         checkerboard = self._generate_checkerboard_pattern(params, frame_index)
         return np.clip(checkerboard, 0, 1)
 
-    def _generate_fixation_cross(self, params: StimulusParams) -> np.ndarray:
+    def _generate_fixation_cross(self, params: StimulusGenerationParams) -> np.ndarray:
         """Generate fixation cross only"""
         frame = np.full_like(self.X_degrees, params.background_luminance)
         return self._add_fixation_cross(frame, params)
 
-    def _add_fixation_cross(self, frame: np.ndarray, params: StimulusParams) -> np.ndarray:
+    def _add_fixation_cross(self, frame: np.ndarray, params: StimulusGenerationParams) -> np.ndarray:
         """Add fixation cross to existing frame"""
         cross_size_pixels = params.fixation_size_degrees * self.pixels_per_degree / 2
 
@@ -309,14 +309,14 @@ class PatternGenerator:
         return frame
 
 
-def create_horizontal_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+def create_horizontal_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusGenerationParams:
     """Create horizontal bar stimulus parameters using parameter system
 
     Args:
         parameter_set_id: Parameter set ID to load from parameter store
 
     Returns:
-        StimulusParams configured for horizontal bar stimulus
+        StimulusGenerationParams configured for horizontal bar stimulus
     """
     # Load parameters from parameter system
     pm = ParameterManager()
@@ -327,7 +327,7 @@ def create_horizontal_bar_params_from_parameter_system(parameter_set_id: str = "
     drift_speed = combined_params.stimulus_params.drift_speed_degrees_per_sec
     cycle_duration = vertical_field / drift_speed
 
-    return StimulusParams(
+    return StimulusGenerationParams(
         stimulus_type=StimulusType.HORIZONTAL_BAR,
         direction=MovementDirection.TOP_TO_BOTTOM,
         width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,
@@ -346,14 +346,14 @@ def create_horizontal_bar_params_from_parameter_system(parameter_set_id: str = "
     )
 
 
-def create_vertical_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+def create_vertical_bar_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusGenerationParams:
     """Create vertical bar stimulus parameters using parameter system
 
     Args:
         parameter_set_id: Parameter set ID to load from parameter store
 
     Returns:
-        StimulusParams configured for vertical bar stimulus
+        StimulusGenerationParams configured for vertical bar stimulus
     """
     # Load parameters from parameter system
     pm = ParameterManager()
@@ -364,7 +364,7 @@ def create_vertical_bar_params_from_parameter_system(parameter_set_id: str = "ma
     drift_speed = combined_params.stimulus_params.drift_speed_degrees_per_sec
     cycle_duration = horizontal_field / drift_speed
 
-    return StimulusParams(
+    return StimulusGenerationParams(
         stimulus_type=StimulusType.VERTICAL_BAR,
         direction=MovementDirection.LEFT_TO_RIGHT,
         width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,
@@ -383,14 +383,14 @@ def create_vertical_bar_params_from_parameter_system(parameter_set_id: str = "ma
     )
 
 
-def create_polar_wedge_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusParams:
+def create_polar_wedge_params_from_parameter_system(parameter_set_id: str = "marshel_2011_defaults") -> StimulusGenerationParams:
     """Create polar wedge stimulus parameters using parameter system
 
     Args:
         parameter_set_id: Parameter set ID to load from parameter store
 
     Returns:
-        StimulusParams configured for polar wedge stimulus
+        StimulusGenerationParams configured for polar wedge stimulus
     """
     # Load parameters from parameter system
     pm = ParameterManager()
@@ -400,7 +400,7 @@ def create_polar_wedge_params_from_parameter_system(parameter_set_id: str = "mar
     # Common values: 40-60 seconds for full rotation
     cycle_duration = 40.0  # 40 seconds for full 360° rotation
 
-    return StimulusParams(
+    return StimulusGenerationParams(
         stimulus_type=StimulusType.POLAR_WEDGE,
         direction=MovementDirection.CLOCKWISE,
         width_degrees=combined_params.spatial_config.field_of_view_vertical_degrees,

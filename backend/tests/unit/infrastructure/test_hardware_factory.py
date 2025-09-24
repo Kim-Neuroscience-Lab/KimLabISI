@@ -15,7 +15,7 @@ from src.infrastructure.hardware.factory import (
     HardwareCapability,
     PlatformInfo
 )
-from src.domain.entities.workflow_state import HardwareRequirement
+from src.domain.value_objects.workflow_state import HardwareRequirement
 
 
 class TestPlatformType:

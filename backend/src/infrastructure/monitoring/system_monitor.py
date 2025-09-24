@@ -7,15 +7,16 @@ including hardware metrics, process monitoring, and resource tracking.
 
 from __future__ import annotations
 from typing import Dict, List, Optional, Any, Union, Callable
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
-import time
+import timeit
 import platform
 import logging
 import threading
 from enum import Enum
 from pathlib import Path
 import json
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -35,15 +36,14 @@ class SystemMetricType(Enum):
     GPU_USAGE = "gpu_usage"
 
 
-@dataclass
-class SystemMetric:
+class SystemMetric(BaseModel):
     """Individual system metric"""
     metric_type: SystemMetricType
     value: Union[float, int, dict]
     unit: str
     timestamp: datetime
     source: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
@@ -69,8 +69,7 @@ class SystemMetric:
         )
 
 
-@dataclass
-class ProcessInfo:
+class ProcessInfo(BaseModel):
     """Process information"""
     pid: int
     name: str
@@ -81,7 +80,7 @@ class ProcessInfo:
     status: str
     create_time: float
     num_threads: int
-    cmdline: List[str] = field(default_factory=list)
+    cmdline: List[str] = Field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -99,8 +98,7 @@ class ProcessInfo:
         }
 
 
-@dataclass
-class DiskInfo:
+class DiskInfo(BaseModel):
     """Disk usage information"""
     device: str
     mountpoint: str
@@ -123,8 +121,7 @@ class DiskInfo:
         }
 
 
-@dataclass
-class NetworkStats:
+class NetworkStats(BaseModel):
     """Network statistics"""
     bytes_sent: int
     bytes_recv: int
@@ -258,7 +255,8 @@ class SystemMonitor:
 
         while not self._stop_event.is_set():
             try:
-                start_time = time.perf_counter()
+                # Use validated high-precision timing
+                start_time = timeit.default_timer()
 
                 # Collect all metrics
                 self._collect_cpu_metrics()
@@ -276,8 +274,8 @@ class SystemMonitor:
                 # Additional metrics based on platform
                 self._collect_platform_specific_metrics()
 
-                # Sleep until next collection
-                collection_time = time.perf_counter() - start_time
+                # Sleep until next collection using validated timing
+                collection_time = timeit.default_timer() - start_time
                 sleep_time = max(0, self.collection_interval - collection_time)
 
                 if self._stop_event.wait(timeout=sleep_time):
@@ -677,8 +675,9 @@ class SystemMonitor:
         except:
             pass
 
-        # Return mock value for testing
-        return 25.0
+        # Return default value if platform-specific method fails
+        logger.warning("Unable to determine CPU usage, returning 0")
+        return 0.0
 
     def _get_memory_usage_fallback(self) -> float:
         """Fallback memory usage calculation"""
@@ -702,8 +701,8 @@ class SystemMonitor:
         except:
             pass
 
-        # Return mock value for testing
-        return 45.0
+        # Return fallback value when GPU monitoring unavailable
+        return 0.0
 
     def is_monitoring(self) -> bool:
         """Check if monitoring is active"""

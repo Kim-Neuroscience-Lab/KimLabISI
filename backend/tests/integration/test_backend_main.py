@@ -48,7 +48,7 @@ class TestBackendMain:
 
         # Verify dev mode bypass is available
         capabilities = backend.hardware_factory.detect_hardware_capabilities()
-        from src.domain.entities.workflow_state import HardwareRequirement
+        from src.domain.value_objects.workflow_state import HardwareRequirement
         assert HardwareRequirement.DEV_MODE_BYPASS in capabilities
 
     @pytest.mark.asyncio
@@ -127,7 +127,7 @@ class TestBackendMain:
         await backend.initialize()
 
         # Test workflow state machine integration
-        from src.domain.entities.workflow_state import WorkflowState
+        from src.domain.value_objects.workflow_state import WorkflowState
         assert backend.workflow_state_machine.current_state == WorkflowState.STARTUP
 
         # Test hardware factory integration

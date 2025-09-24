@@ -20,7 +20,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
 
-from ...domain.entities.workflow_state import WorkflowStateMachine, WorkflowState
+from ...domain.entities.workflow_state_machine import WorkflowStateMachine
+from ...domain.value_objects.workflow_state import WorkflowState
 from ...domain.value_objects.parameters import CombinedParameters, ParameterSource
 from ...domain.repositories.experiment_repository import (
     ExperimentRepositoryInterface,

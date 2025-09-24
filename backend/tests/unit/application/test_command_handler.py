@@ -18,7 +18,7 @@ from src.application.handlers.command_handler import (
     HardwareStatusResponse
 )
 from src.infrastructure.communication.ipc_server import CommandMessage
-from src.domain.entities.workflow_state import WorkflowState, HardwareRequirement
+from src.domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from pydantic import ValidationError
 
 
