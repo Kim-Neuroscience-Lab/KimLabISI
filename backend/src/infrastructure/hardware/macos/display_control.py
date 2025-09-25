@@ -8,7 +8,7 @@ providing a minimal but working implementation of the display interface.
 import logging
 import asyncio
 from typing import Dict, Any, Optional, List, Tuple
-from ..abstract.display_interface import DisplayInterface, DisplayStatus
+from abstract.display_interface import DisplayInterface, DisplayStatus
 
 logger = logging.getLogger(__name__)
 

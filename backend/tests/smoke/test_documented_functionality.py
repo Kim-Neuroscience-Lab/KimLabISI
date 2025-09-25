@@ -30,7 +30,6 @@ from src.infrastructure.hardware.factory import (
 from src.infrastructure.communication.ipc_server import (
     IPCServer,
     IPCMessage,
-    CommandMessage,
     MessageType
 )
 from src.application.handlers.command_handler import CommandHandler
@@ -298,7 +297,7 @@ async def test_command_processing_pipeline():
     handler = CommandHandler()
 
     # Test workflow state query
-    cmd = CommandMessage(
+    cmd = IPCMessage(
         command="workflow.get_state",
         parameters={},
         request_id="test-123"
@@ -310,7 +309,7 @@ async def test_command_processing_pipeline():
     print("   ✅ Workflow state query processed successfully")
 
     # Test hardware detection command
-    hw_cmd = CommandMessage(
+    hw_cmd = IPCMessage(
         command="hardware.detect",
         parameters={},
         request_id="test-456"
@@ -324,7 +323,7 @@ async def test_command_processing_pipeline():
     print("   ✅ Hardware detection command processed successfully")
 
     # Test system health check
-    health_cmd = CommandMessage(
+    health_cmd = IPCMessage(
         command="system.health_check",
         parameters={},
         request_id="test-789"

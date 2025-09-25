@@ -15,10 +15,10 @@ import json
 import asyncio
 import shutil
 
-from ...domain.value_objects.workflow_state import WorkflowState
-from ...domain.value_objects.parameters import CombinedParameters
-from ...domain.entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
-from ...domain.entities.hardware import HardwareSystem
+from domain.value_objects.workflow_state import WorkflowState
+from domain.value_objects.parameters import CombinedParameters
+from domain.entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
+from domain.entities.hardware import HardwareSystem
 
 
 logger = logging.getLogger(__name__)

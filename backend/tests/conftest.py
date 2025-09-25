@@ -16,6 +16,12 @@ from src.domain.value_objects.workflow_state import WorkflowState, HardwareRequi
 from src.infrastructure.hardware.factory import HardwareFactory, HardwareCapability
 from src.infrastructure.communication.ipc_server import IPCServer
 from src.application.handlers.command_handler import CommandHandler
+from src.domain.value_objects.parameters import (
+    CombinedParameters,
+    StimulusGenerationParams,
+    AcquisitionProtocolParams,
+    SpatialConfiguration
+)
 
 
 @pytest.fixture(scope="session")
@@ -230,3 +236,78 @@ def test_transition_scenarios():
             "should_succeed": False,
         },
     ]
+
+
+# Parameter fixtures - centralized to eliminate duplication across test files
+
+
+@pytest.fixture
+def sample_spatial_config():
+    """Create sample spatial configuration for testing"""
+    return SpatialConfiguration(
+        camera_distance_mm=300.0,
+        display_distance_mm=250.0,
+        horizontal_degrees=128.0,
+        vertical_degrees=96.0
+    )
+
+
+@pytest.fixture
+def sample_stimulus_params():
+    """Create sample stimulus parameters for testing"""
+    return StimulusGenerationParams(
+        stimulus_type="drifting_bars",
+        directions=["LR", "RL", "TB", "BT"],
+        temporal_frequency_hz=0.1,
+        spatial_frequency_cpd=0.04,
+        cycles_per_trial=10
+    )
+
+
+@pytest.fixture
+def sample_protocol_params():
+    """Create sample protocol parameters for testing"""
+    return AcquisitionProtocolParams(
+        frame_rate_hz=30.0,
+        frame_width=1024,
+        frame_height=1024,
+        exposure_time_ms=33.0,
+        bit_depth=16
+    )
+
+
+@pytest.fixture
+def sample_parameters(sample_spatial_config, sample_stimulus_params, sample_protocol_params):
+    """Create sample combined parameters for testing"""
+    return CombinedParameters(
+        spatial_config=sample_spatial_config,
+        stimulus_params=sample_stimulus_params,
+        protocol_params=sample_protocol_params
+    )
+
+
+@pytest.fixture
+def minimal_parameters():
+    """Create minimal combined parameters for testing with reduced complexity"""
+    return CombinedParameters(
+        spatial_config=SpatialConfiguration(
+            camera_distance_mm=300.0,
+            display_distance_mm=250.0,
+            horizontal_degrees=64.0,
+            vertical_degrees=48.0
+        ),
+        stimulus_params=StimulusGenerationParams(
+            stimulus_type="drifting_bars",
+            directions=["LR", "RL"],
+            temporal_frequency_hz=0.1,
+            spatial_frequency_cpd=0.04,
+            cycles_per_trial=5
+        ),
+        protocol_params=AcquisitionProtocolParams(
+            frame_rate_hz=30.0,
+            frame_width=512,
+            frame_height=512,
+            exposure_time_ms=33.0,
+            bit_depth=16
+        )
+    )

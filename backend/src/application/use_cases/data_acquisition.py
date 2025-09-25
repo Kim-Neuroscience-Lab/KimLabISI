@@ -21,16 +21,17 @@ import time
 from enum import Enum
 from pydantic import BaseModel
 
-from ...domain.value_objects.parameters import CombinedParameters
-from ...domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
-from ...domain.repositories.data_repository import DataRepositoryInterface
-from ...domain.repositories.experiment_repository import (
+from domain.value_objects.parameters import CombinedParameters
+from domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
+from domain.repositories.data_repository import DataRepositoryInterface
+from domain.repositories.experiment_repository import (
     ExperimentRepositoryInterface, ExperimentSessionInterface, SessionStatus, SessionType
 )
-from ...domain.repositories.hardware_repository import (
-    HardwareFactoryInterface, CameraInterface, DisplayInterface, TimingInterface
-)
-from ..algorithms.pattern_generators import PatternGenerator
+from infrastructure.hardware.abstract.camera_interface import CameraInterface
+from infrastructure.hardware.abstract.display_interface import DisplayInterface
+from infrastructure.hardware.abstract.timing_interface import TimingInterface
+from infrastructure.hardware.factory import HardwareFactory
+from application.algorithms.pattern_generators import PatternGenerator
 from .stimulus_generation import StimulusGenerationUseCase, StimulusSequence
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class DataAcquisitionUseCase:
     """
 
     def __init__(self,
-                 hardware_factory: HardwareFactoryInterface,
+                 hardware_factory: HardwareFactory,
                  data_repository: DataRepositoryInterface,
                  experiment_repository: ExperimentRepositoryInterface,
                  stimulus_use_case: StimulusGenerationUseCase):

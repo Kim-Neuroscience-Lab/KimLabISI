@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Set
 from enum import Enum
 
-from ..value_objects.workflow_state import HardwareRequirement
+from domain.value_objects.workflow_state import HardwareRequirement
 
 
 class HardwareFactoryInterface(ABC):

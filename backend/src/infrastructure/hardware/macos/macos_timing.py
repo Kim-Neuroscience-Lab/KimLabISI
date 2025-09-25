@@ -1,7 +1,7 @@
 """macOS Timing Implementation"""
 
 from typing import Dict, Any
-from ..abstract.timing_interface import TimingInterface, TimingStatus
+from abstract.timing_interface import TimingInterface, TimingStatus
 
 
 class MacOSTiming(TimingInterface):

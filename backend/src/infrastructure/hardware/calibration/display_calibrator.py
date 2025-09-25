@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta
 from enum import Enum
 
-from ....domain.entities.hardware import Display
+from domain.entities.hardware import Display
 
 
 logger = logging.getLogger(__name__)

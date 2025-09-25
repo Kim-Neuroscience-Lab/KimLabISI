@@ -1,307 +1,201 @@
 /**
  * ISI Macroscope Control System - Main Application Component
  *
- * Thin client frontend that displays backend state and forwards user commands.
- * All business logic resides in the Python backend - this component only
- * handles display and user interaction routing.
+ * Refactored thin client frontend using proper architecture.
+ * Uses Zustand stores for state management and typed IPC communication.
+ * Contains NO business logic - only displays backend state.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
+import { getIPCClient } from './services/ipc-client';
+import { useConnectionStatus } from './stores/backend-mirror';
+import { useInteraction, useInteractionActions } from './stores/ui-store';
+import WorkflowContainer from './components/workflow/WorkflowContainer';
 import './App.css';
 
-// IPC types for communication with backend
-interface BackendState {
-  workflow_state: string;
-  hardware_status: Record<string, boolean>;
-  current_session?: string;
-  errors: string[];
-  system_health: string;
-}
-
-interface IPCMessage {
-  type: string;
-  command?: string;
-  data?: any;
-}
-
-// Declare window.electronAPI for TypeScript
-declare global {
-  interface Window {
-    electronAPI: {
-      sendCommand: (command: string, data?: any) => Promise<any>;
-      onStateUpdate: (callback: (state: BackendState) => void) => void;
-      removeAllListeners: (channel: string) => void;
-    };
-  }
-}
+// ============================================================================
+// MAIN APPLICATION COMPONENT
+// ============================================================================
 
 const App: React.FC = () => {
-  // UI state - mirrors backend state for display only
-  const [backendState, setBackendState] = useState<BackendState>({
-    workflow_state: 'STARTUP',
-    hardware_status: {},
-    errors: [],
-    system_health: 'UNKNOWN'
-  });
+  const connectionStatus = useConnectionStatus();
+  const interaction = useInteraction();
+  const interactionActions = useInteractionActions();
 
-  // UI-only state
-  const [isConnected, setIsConnected] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  // Initialize IPC client on mount
   useEffect(() => {
-    // Initialize connection to backend
-    initializeBackendConnection();
+    const ipcClient = getIPCClient();
+
+    // Set loading state while initializing
+    interactionActions.setLoading(true, 'Connecting to backend...');
+
+    // Check if connection is established after a short delay
+    const connectionCheckTimeout = setTimeout(() => {
+      if (!ipcClient.isConnected()) {
+        interactionActions.setLoading(false);
+      } else {
+        interactionActions.setLoading(false);
+      }
+    }, 3000); // 3 second timeout
+
+    // Monitor connection status changes
+    const connectionMonitor = setInterval(() => {
+      const isConnected = ipcClient.isConnected();
+      if (isConnected && interaction.isLoading && interaction.loadingMessage.includes('Connecting')) {
+        interactionActions.setLoading(false);
+      }
+    }, 1000);
 
     // Cleanup on unmount
     return () => {
-      if (window.electronAPI) {
-        window.electronAPI.removeAllListeners('state-update');
-      }
+      clearTimeout(connectionCheckTimeout);
+      clearInterval(connectionMonitor);
+      ipcClient.disconnect();
     };
-  }, []);
+  }, [interactionActions, interaction.isLoading, interaction.loadingMessage]);
 
-  const initializeBackendConnection = async () => {
-    try {
-      if (!window.electronAPI) {
-        setError('Electron IPC not available');
-        return;
-      }
-
-      // Set up state update listener
-      window.electronAPI.onStateUpdate((state: BackendState) => {
-        setBackendState(state);
-        setIsConnected(true);
-        setError(null);
-      });
-
-      // Request initial state
-      await sendCommand('get_system_status');
-
-    } catch (err) {
-      console.error('Failed to initialize backend connection:', err);
-      setError('Failed to connect to backend');
-      setIsConnected(false);
-    }
-  };
-
-  const sendCommand = async (command: string, data?: any): Promise<any> => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      if (!window.electronAPI) {
-        throw new Error('Electron IPC not available');
-      }
-
-      const result = await window.electronAPI.sendCommand(command, data);
-
-      if (result.success === false) {
-        setError(result.error_message || 'Command failed');
-      }
-
-      return result;
-    } catch (err) {
-      console.error(`Command ${command} failed:`, err);
-      setError(`Command failed: ${err}`);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Command handlers - forward user actions to backend
-  const handleStartSystem = async () => {
-    await sendCommand('start_system');
-  };
-
-  const handleStartSetup = async () => {
-    await sendCommand('start_spatial_setup');
-  };
-
-  const handleStartGeneration = async () => {
-    await sendCommand('start_stimulus_generation');
-  };
-
-  const handleStartAcquisition = async () => {
-    await sendCommand('start_acquisition');
-  };
-
-  const handleStartAnalysis = async () => {
-    const sessionId = backendState.current_session;
-    if (sessionId) {
-      await sendCommand('start_analysis', { session_id: sessionId });
-    }
-  };
-
-  const handleEmergencyStop = async () => {
-    await sendCommand('emergency_stop');
-  };
-
-  // Render current workflow state
-  const renderWorkflowState = () => {
-    const state = backendState.workflow_state;
-
+  // Show connection error if not connected
+  if (!connectionStatus.isConnected && !interaction.isLoading) {
     return (
-      <div className="workflow-state">
-        <h2>System Status: {state}</h2>
-
-        <div className="workflow-actions">
-          {state === 'STARTUP' && (
-            <button onClick={handleStartSystem} disabled={loading}>
-              Initialize System
-            </button>
-          )}
-
-          {state === 'SETUP_READY' && (
-            <button onClick={handleStartSetup} disabled={loading}>
-              Start Spatial Setup
-            </button>
-          )}
-
-          {state === 'GENERATION_READY' && (
-            <button onClick={handleStartGeneration} disabled={loading}>
-              Generate Stimuli
-            </button>
-          )}
-
-          {state === 'ACQUISITION_READY' && (
-            <button onClick={handleStartAcquisition} disabled={loading}>
-              Start Acquisition
-            </button>
-          )}
-
-          {state === 'ANALYSIS_READY' && (
-            <button onClick={handleStartAnalysis} disabled={loading}>
-              Analyze Data
-            </button>
-          )}
-
-          {(state === 'SETUP' || state === 'GENERATION' || state === 'ACQUISITION' || state === 'ANALYSIS') && (
-            <div className="active-workflow">
-              <p>Workflow in progress: {state}</p>
-              <button
-                onClick={handleEmergencyStop}
-                className="emergency-stop"
-                disabled={loading}
-              >
-                Emergency Stop
-              </button>
-            </div>
-          )}
-
-          {state === 'ERROR' && (
-            <div className="error-state">
-              <p>System in error state. Check logs for details.</p>
-              <button onClick={handleStartSystem} disabled={loading}>
-                Retry Initialization
-              </button>
-            </div>
-          )}
-
-          {state === 'DEGRADED' && (
-            <div className="degraded-state">
-              <p>System running in degraded mode. Some hardware unavailable.</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Render hardware status display
-  const renderHardwareStatus = () => {
-    return (
-      <div className="hardware-status">
-        <h3>Hardware Status</h3>
-        <div className="hardware-grid">
-          {Object.entries(backendState.hardware_status).map(([hardware, available]) => (
-            <div
-              key={hardware}
-              className={`hardware-item ${available ? 'available' : 'unavailable'}`}
-            >
-              <span className="hardware-name">{hardware.replace('_', ' ').toUpperCase()}</span>
-              <span className="hardware-indicator">
-                {available ? '' : ''}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  // Render system errors
-  const renderErrors = () => {
-    if (backendState.errors.length === 0 && !error) return null;
-
-    return (
-      <div className="error-display">
-        <h3>System Messages</h3>
-        {error && (
-          <div className="error-item frontend-error">
-            Frontend Error: {error}
+      <div className="app">
+        <header className="app-header">
+          <h1>ISI Macroscope Control System</h1>
+          <div className="connection-status disconnected">
+            Backend Disconnected
           </div>
-        )}
-        {backendState.errors.map((err, index) => (
-          <div key={index} className="error-item backend-error">
-            {err}
+        </header>
+
+        <main className="app-main">
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '60vh',
+            textAlign: 'center',
+            color: '#666'
+          }}>
+            <div style={{ fontSize: 18, marginBottom: 16 }}>
+              Unable to connect to backend
+            </div>
+            <div style={{ fontSize: 14, marginBottom: 24, maxWidth: 400, lineHeight: 1.6 }}>
+              Please ensure the Python backend is running and accessible.
+              The connection will automatically retry when the backend becomes available.
+            </div>
+            <div style={{
+              padding: 12,
+              backgroundColor: '#f9f9f9',
+              borderRadius: 4,
+              border: '1px solid #ddd',
+              fontSize: 12,
+              fontFamily: 'monospace',
+              color: '#666'
+            }}>
+              Health: {connectionStatus.health} | Last update: {
+                connectionStatus.lastUpdate > 0
+                  ? new Date(connectionStatus.lastUpdate).toLocaleTimeString()
+                  : 'Never'
+              }
+            </div>
           </div>
-        ))}
+        </main>
       </div>
     );
-  };
+  }
 
-  // Main render
+  // Show loading screen during initialization
+  if (interaction.isLoading) {
+    return (
+      <div className="app">
+        <header className="app-header">
+          <h1>ISI Macroscope Control System</h1>
+          <div className="connection-status connecting">
+            Initializing...
+          </div>
+        </header>
+
+        <main className="app-main">
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '60vh',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: 40,
+              height: 40,
+              border: '4px solid #e5e7eb',
+              borderTop: '4px solid #3b82f6',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: 16
+            }} />
+            <div style={{ fontSize: 16, color: '#374151', marginBottom: 8 }}>
+              {interaction.loadingMessage || 'Loading...'}
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280' }}>
+              Please wait while the system initializes
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Main application interface
   return (
     <div className="app">
+      {/* Header with connection status */}
       <header className="app-header">
         <h1>ISI Macroscope Control System</h1>
-        <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
-          {isConnected ? 'Connected to Backend' : 'Backend Disconnected'}
+        <div className={`connection-status ${connectionStatus.isConnected ? 'connected' : 'disconnected'}`}>
+          <span>{connectionStatus.isConnected ? 'Connected' : 'Disconnected'}</span>
+          <span className="connection-health" style={{
+            marginLeft: 8,
+            fontSize: 12,
+            opacity: 0.8,
+            color: getHealthColor(connectionStatus.health)
+          }}>
+            {connectionStatus.health}
+          </span>
         </div>
       </header>
 
+      {/* Main workflow container */}
       <main className="app-main">
-        {/* Connection error display */}
-        {!isConnected && (
-          <div className="connection-error">
-            <p>Unable to connect to backend. Please ensure the Python backend is running.</p>
-            <button onClick={initializeBackendConnection}>
-              Retry Connection
-            </button>
-          </div>
-        )}
-
-        {/* Main application interface */}
-        {isConnected && (
-          <>
-            {renderWorkflowState()}
-            {renderHardwareStatus()}
-            {renderErrors()}
-          </>
-        )}
+        <WorkflowContainer />
       </main>
 
-      {/* Loading overlay */}
-      {loading && (
-        <div className="loading-overlay">
-          <div className="loading-spinner">
-            <p>Processing command...</p>
+      {/* Footer with system info */}
+      <footer className="app-footer">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            Last update: {
+              connectionStatus.lastUpdate > 0
+                ? new Date(connectionStatus.lastUpdate).toLocaleTimeString()
+                : 'Never'
+            }
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            ISI Macroscope Control System v1.0
           </div>
         </div>
-      )}
-
-      <footer className="app-footer">
-        <p>System Health: <span className={`health-${backendState.system_health.toLowerCase()}`}>
-          {backendState.system_health}
-        </span></p>
-        {backendState.current_session && (
-          <p>Current Session: {backendState.current_session}</p>
-        )}
       </footer>
     </div>
   );
+};
+
+// Helper function to get health indicator color
+const getHealthColor = (health: string): string => {
+  switch (health) {
+    case 'EXCELLENT': return '#22c55e';
+    case 'GOOD': return '#84cc16';
+    case 'POOR': return '#f59e0b';
+    case 'DISCONNECTED': return '#ef4444';
+    default: return '#6b7280';
+  }
 };
 
 export default App;

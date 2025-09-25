@@ -12,15 +12,15 @@ from typing import Dict, List, Optional, Any, Union
 import logging
 import json
 
-from ...domain.value_objects.workflow_state import WorkflowState
-from ...domain.entities.hardware import HardwareSystem
-from ...domain.services.dataset_repository import (
+from domain.value_objects.workflow_state import WorkflowState
+from domain.entities.hardware import HardwareSystem
+from domain.services.dataset_repository import (
     StimulusDatasetRepository,
     AcquisitionSessionRepository,
     AnalysisResultRepository,
     SortOrder
 )
-from ...domain.services.workflow_orchestrator import WorkflowOrchestrator
+from domain.services.workflow_orchestrator import WorkflowOrchestrator
 
 
 logger = logging.getLogger(__name__)

@@ -15,9 +15,7 @@ from pathlib import Path
 from src.application.handlers.query_handler import (
     QueryHandler,
     QueryType,
-    QueryResult,
-    QueryError,
-    CacheEntry
+    QueryError
 )
 from src.domain.value_objects.workflow_state import WorkflowState
 from src.domain.value_objects.parameters import CombinedParameters

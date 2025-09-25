@@ -13,13 +13,9 @@ import asyncio
 from src.application.services.monitoring_service import (
     MonitoringService,
     Alert,
-    AlertSeverity,
-    AlertType,
-    PerformanceMetrics,
-    SystemHealth,
-    MonitoringError,
-    AlertThresholds,
-    HealthStatus
+    AlertLevel,
+    MonitoringMetric,
+    PerformanceMetrics
 )
 from src.domain.entities.hardware import HardwareSystem, Camera
 from src.domain.value_objects.workflow_state import WorkflowState
@@ -153,7 +149,7 @@ class TestMonitoringService:
             # Should generate CPU alert
             cpu_alerts = [alert for alert in alerts if alert.alert_type == AlertType.HIGH_CPU_USAGE]
             assert len(cpu_alerts) > 0
-            assert cpu_alerts[0].severity == AlertSeverity.HIGH
+            assert cpu_alerts[0].severity == AlertLevel.HIGH
 
     @pytest.mark.asyncio
     async def test_alert_generation_memory_threshold(self, monitoring_service):
@@ -208,7 +204,7 @@ class TestMonitoringService:
         alert = Alert(
             alert_id="test_alert_001",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.HIGH,
+            severity=AlertLevel.HIGH,
             message="CPU usage is 85.0%",
             timestamp=datetime.now(),
             component="system",
@@ -247,7 +243,7 @@ class TestMonitoringService:
         alert = Alert(
             alert_id="spam_alert",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.HIGH,
+            severity=AlertLevel.HIGH,
             message="CPU usage high",
             timestamp=datetime.now(),
             component="system"
@@ -268,7 +264,7 @@ class TestMonitoringService:
         alert = Alert(
             alert_id="cpu_alert",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.HIGH,
+            severity=AlertLevel.HIGH,
             message="CPU usage high",
             timestamp=datetime.now(),
             component="system"
@@ -390,7 +386,7 @@ class TestMonitoringService:
         alert = Alert(
             alert_id="escalation_test",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.MEDIUM,
+            severity=AlertLevel.MEDIUM,
             message="CPU usage elevated",
             timestamp=datetime.now() - timedelta(minutes=10),  # Old alert
             component="system"
@@ -453,7 +449,7 @@ class TestMonitoringService:
         alert = Alert(
             alert_id="custom_handler_test",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.HIGH,
+            severity=AlertLevel.HIGH,
             message="Test alert",
             timestamp=datetime.now(),
             component="system"
@@ -474,7 +470,7 @@ class TestAlert:
         alert = Alert(
             alert_id="test_alert_001",
             alert_type=AlertType.HIGH_CPU_USAGE,
-            severity=AlertSeverity.HIGH,
+            severity=AlertLevel.HIGH,
             message="CPU usage is 90%",
             timestamp=timestamp,
             component="system",
@@ -485,7 +481,7 @@ class TestAlert:
 
         assert alert.alert_id == "test_alert_001"
         assert alert.alert_type == AlertType.HIGH_CPU_USAGE
-        assert alert.severity == AlertSeverity.HIGH
+        assert alert.severity == AlertLevel.HIGH
         assert alert.message == "CPU usage is 90%"
         assert alert.timestamp == timestamp
         assert alert.component == "system"
@@ -498,7 +494,7 @@ class TestAlert:
         alert = Alert(
             alert_id="serialize_test",
             alert_type=AlertType.HARDWARE_FAILURE,
-            severity=AlertSeverity.CRITICAL,
+            severity=AlertLevel.CRITICAL,
             message="Hardware failure detected",
             timestamp=datetime.now(),
             component="camera_001"
@@ -508,7 +504,7 @@ class TestAlert:
 
         assert alert_dict["alert_id"] == "serialize_test"
         assert alert_dict["alert_type"] == AlertType.HARDWARE_FAILURE.value
-        assert alert_dict["severity"] == AlertSeverity.CRITICAL.value
+        assert alert_dict["severity"] == AlertLevel.CRITICAL.value
         assert alert_dict["message"] == "Hardware failure detected"
         assert alert_dict["component"] == "camera_001"
         assert "timestamp" in alert_dict
@@ -530,7 +526,7 @@ class TestAlert:
 
         assert alert.alert_id == "from_dict_test"
         assert alert.alert_type == AlertType.HIGH_MEMORY_USAGE
-        assert alert.severity == AlertSeverity.HIGH
+        assert alert.severity == AlertLevel.HIGH
         assert alert.message == "Memory usage critical"
         assert alert.component == "system"
         assert alert.threshold_value == 85.0
@@ -622,9 +618,9 @@ class TestEnums:
     """Test enum definitions"""
 
     def test_alert_severity_values(self):
-        """Test AlertSeverity enum values"""
+        """Test AlertLevel enum values"""
         expected = ["low", "medium", "high", "critical"]
-        actual = [severity.value for severity in AlertSeverity]
+        actual = [severity.value for severity in AlertLevel]
         for expected_val in expected:
             assert expected_val in actual
 

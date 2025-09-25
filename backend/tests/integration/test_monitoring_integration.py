@@ -16,8 +16,8 @@ import logging
 
 from src.application.services.monitoring_service import (
     MonitoringService,
-    AlertSeverity,
-    AlertType
+    AlertLevel,
+    MonitoringMetric
 )
 from src.infrastructure.monitoring.system_monitor import (
     SystemMonitor,
@@ -160,7 +160,7 @@ class TestMonitoringIntegration:
         error_data = call_args[0][0]
 
         assert error_data["alert_type"] == AlertType.HIGH_CPU_USAGE.value
-        assert error_data["severity"] == AlertSeverity.HIGH.value
+        assert error_data["severity"] == AlertLevel.HIGH.value
         assert "85.0%" in error_data["message"]
 
         await monitoring_service.stop()

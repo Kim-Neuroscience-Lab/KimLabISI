@@ -12,10 +12,10 @@ from typing import Dict, List, Optional, Any, Callable, Set
 import asyncio
 from pathlib import Path
 
-from ..value_objects.workflow_state import WorkflowState
-from ..value_objects.parameters import CombinedParameters, StimulusGenerationParams, AcquisitionProtocolParams
-from ..entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
-from ..entities.hardware import HardwareSystem, HardwareStatus
+from domain.value_objects.workflow_state import WorkflowState
+from domain.value_objects.parameters import CombinedParameters, StimulusGenerationParams, AcquisitionProtocolParams
+from domain.entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
+from domain.entities.hardware import HardwareSystem, HardwareStatus
 from .error_handler import ErrorHandlingService, ISIDomainError
 
 

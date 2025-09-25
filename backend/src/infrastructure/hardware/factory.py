@@ -23,7 +23,7 @@ from .abstract.camera_interface import CameraInterface
 from .abstract.gpu_interface import GPUInterface
 from .abstract.timing_interface import TimingInterface
 from .abstract.display_interface import DisplayInterface
-from ...domain.value_objects.workflow_state import HardwareRequirement
+from domain.value_objects.workflow_state import HardwareRequirement
 
 
 logger = logging.getLogger(__name__)

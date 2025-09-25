@@ -86,24 +86,28 @@ class TestBackendMain:
         assert "command_handler" in backend.ipc_server._handlers
         assert backend.ipc_server._handlers["command_handler"] == backend.command_handler
 
-    def test_system_info_structure(self):
-        """Test system info structure"""
+    @pytest.mark.asyncio
+    async def test_system_info_structure(self):
+        """Test system info structure through proper Clean Architecture CommandHandler"""
         backend = ISIMacroscopeBackend(development_mode=True, host="test", port=9999)
+        await backend.initialize()
 
-        info = backend.get_system_info()
+        # Test system info through CommandHandler (proper architecture)
+        from src.application.handlers.command_handler import CommandRequest
 
-        # Verify all expected fields
-        expected_fields = [
-            "backend_version", "development_mode", "host", "port",
-            "current_state", "hardware_capabilities"
-        ]
+        command_request = CommandRequest(
+            command_type="system.get_info",
+            parameters={},
+            request_id="test-system-info"
+        )
 
-        for field in expected_fields:
-            assert field in info
+        response = await backend.command_handler.handle_command(command_request)
 
-        assert info["development_mode"] is True
-        assert info["host"] == "test"
-        assert info["port"] == 9999
+        assert response.success is True
+        assert "platform_info" in response.data
+        assert "workflow_state" in response.data
+        assert "development_mode" in response.data
+        assert response.data["development_mode"] is True
 
     @pytest.mark.asyncio
     async def test_backend_stop_gracefully(self):

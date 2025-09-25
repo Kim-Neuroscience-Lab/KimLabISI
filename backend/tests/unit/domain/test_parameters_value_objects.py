@@ -24,10 +24,9 @@ from src.domain.value_objects.parameters import (
     StimulusGenerationParams,
     AcquisitionProtocolParams,
     CombinedParameters,
-    ParameterSource,
-    ParameterValidationError,
-    ParameterCompatibilityError
+    ParameterSource
 )
+from src.domain.services.error_handler import ISIDomainError
 
 
 class TestSpatialConfiguration:

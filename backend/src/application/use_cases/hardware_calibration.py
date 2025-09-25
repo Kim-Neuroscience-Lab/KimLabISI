@@ -8,10 +8,10 @@ display calibration, and timing synchronization following Clean Architecture pri
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from ...domain.services.error_handler import ErrorHandlingService, ISIDomainError
-from ...infrastructure.hardware.factory import HardwareFactory
-from ...infrastructure.hardware.calibration.camera_calibrator import CameraCalibrator
-from ...infrastructure.hardware.calibration.display_calibrator import DisplayCalibrator
+from domain.services.error_handler import ErrorHandlingService, ISIDomainError
+from infrastructure.hardware.factory import HardwareFactory
+from infrastructure.hardware.calibration.camera_calibrator import CameraCalibrator
+from infrastructure.hardware.calibration.display_calibrator import DisplayCalibrator
 
 
 class HardwareCalibrationUseCase:

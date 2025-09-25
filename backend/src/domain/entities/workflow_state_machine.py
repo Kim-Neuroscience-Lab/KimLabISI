@@ -14,7 +14,7 @@ Domain Entity Rules:
 from typing import Set, Optional, Dict
 from datetime import datetime
 
-from ..value_objects.workflow_state import WorkflowState, HardwareRequirement, WorkflowTransition
+from domain.value_objects.workflow_state import WorkflowState, HardwareRequirement, WorkflowTransition
 
 
 class WorkflowStateMachine:

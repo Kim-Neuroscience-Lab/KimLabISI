@@ -13,11 +13,11 @@ import logging
 import asyncio
 import json
 
-from ...infrastructure.communication.ipc_server import IPCServer
-from ...infrastructure.communication.message_dispatcher import MessageDispatcher
-from ..handlers.command_handler import CommandHandler
-from ..handlers.query_handler import QueryHandler
-from ..handlers.state_broadcaster import StateBroadcaster
+from infrastructure.communication.ipc_server import IPCServer
+from infrastructure.communication.message_dispatcher import MessageDispatcher
+from application.handlers.command_handler import CommandHandler
+from application.handlers.query_handler import QueryHandler
+from application.handlers.state_broadcaster import StateBroadcaster
 
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class CommunicationService:
             await self._setup_message_handlers()
 
             # Start IPC server
-            await self.ipc_server.start(port)
+            await self.ipc_server.start()
 
             # Start state broadcaster
             await self.state_broadcaster.start()
@@ -295,17 +295,21 @@ class CommunicationService:
     async def _setup_message_handlers(self):
         """Setup message routing handlers"""
 
-        # Register command handler
-        self.message_dispatcher.register_handler(
-            "command",
-            self._handle_command_message
-        )
+        # Register CommandHandler with MessageDispatcher for all command types
+        from infrastructure.communication.message_dispatcher import CommandType
+        for command_type in CommandType:
+            self.message_dispatcher.register_command_handler(command_type, self.command_handler)
 
-        # Register query handler
-        self.message_dispatcher.register_handler(
-            "query",
-            self._handle_query_message
-        )
+        # Register QueryHandler with MessageDispatcher for common query types
+        common_query_types = [
+            "system_status", "workflow_state", "hardware_status",
+            "configuration", "data_summary", "session_info"
+        ]
+        for query_type in common_query_types:
+            self.message_dispatcher.register_query_handler(query_type, self.query_handler)
+
+        # Register MessageDispatcher with IPC server as the main message handler
+        self.ipc_server.register_handler("main", self.message_dispatcher)
 
         # Register connection handlers
         self.ipc_server.on_message_received = self._handle_received_message

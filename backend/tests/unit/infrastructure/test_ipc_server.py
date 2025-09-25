@@ -10,7 +10,7 @@ import json
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any
 
-from src.infrastructure.communication.ipc_server import IPCServer, IPCMessage, MessageType
+from src.infrastructure.communication.ipc_server import IPCServer, IPCMessage, MessageType, IPCHandler
 from pydantic import ValidationError
 
 
@@ -158,9 +158,14 @@ class MockIPCHandler(IPCHandler):
         self.commands_handled = []
         self.queries_handled = []
 
-    async def handle_command(self, command: CommandMessage) -> Dict[str, Any]:
-        self.commands_handled.append(command)
-        return {"success": True, "command": command.command}
+    async def handle_message(self, message: IPCMessage) -> IPCMessage:
+        self.commands_handled.append(message)
+        return IPCMessage(
+            message_type=MessageType.RESPONSE,
+            message_id=f"response_{message.message_id}",
+            timestamp=message.timestamp,
+            payload={"success": True, "original_message": message.message_id}
+        )
 
     async def handle_query(self, query: Dict[str, Any]) -> Dict[str, Any]:
         self.queries_handled.append(query)

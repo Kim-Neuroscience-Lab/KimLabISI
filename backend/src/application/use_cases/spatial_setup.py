@@ -12,15 +12,15 @@ import math
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
-from ...domain.entities.workflow_state_machine import WorkflowStateMachine
-from ...domain.value_objects.workflow_state import (
+from domain.entities.workflow_state_machine import WorkflowStateMachine
+from domain.value_objects.workflow_state import (
     WorkflowState, WorkflowTransition, HardwareRequirement
 )
-from ...domain.entities.parameters import ParameterManager
-from ...domain.value_objects.parameters import (
+from domain.entities.parameters import ParameterManager
+from domain.value_objects.parameters import (
     SpatialConfiguration, CombinedParameters, ParameterSource
 )
-from ...infrastructure.hardware.factory import HardwareFactory
+from infrastructure.hardware.factory import HardwareFactory
 
 logger = logging.getLogger(__name__)
 

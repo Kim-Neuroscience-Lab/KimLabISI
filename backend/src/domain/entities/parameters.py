@@ -11,47 +11,45 @@ from datetime import datetime
 import json
 from abc import ABC, abstractmethod
 
-from ..value_objects.parameters import (
+from domain.value_objects.parameters import (
     SpatialConfiguration,
     StimulusGenerationParams,
     AcquisitionProtocolParams,
     CombinedParameters,
     ParameterSource,
     DirectionSequence,
-    BaselineMode
+    BaselineMode,
 )
-from ..services.parameter_validator import ParameterValidator
-from ..services.error_handler import ErrorHandlingService, ISIDomainError
+from domain.services.parameter_validator import ParameterValidator
+from domain.services.error_handler import ErrorHandlingService, ISIDomainError
 
 
 class ParameterStore(ABC):
     """Abstract base class for parameter storage implementations"""
 
     @abstractmethod
-    def load_parameters(self, parameter_set_id: str) -> CombinedParameters:
+    def load_parameters(self, parameter_set_id: str):
         """Load parameters by ID"""
-        pass
 
     @abstractmethod
-    def save_parameters(self, parameters: CombinedParameters, parameter_set_id: str) -> None:
+    def save_parameters(self, parameters: "CombinedParameters", parameter_set_id: str):
         """Save parameters with ID"""
-        pass
 
     @abstractmethod
     def list_parameter_sets(self) -> List[str]:
         """List available parameter set IDs"""
-        pass
 
     @abstractmethod
     def delete_parameter_set(self, parameter_set_id: str) -> None:
         """Delete a parameter set"""
-        pass
 
 
 class FileBasedParameterStore(ParameterStore):
     """File-based parameter storage for development and configuration management"""
 
-    def __init__(self, storage_directory: Path, error_handler: Optional[ErrorHandlingService] = None):
+    def __init__(
+        self, storage_directory: Path, error_handler: Optional[ErrorHandlingService] = None
+    ):
         self.storage_directory = Path(storage_directory)
         self.storage_directory.mkdir(parents=True, exist_ok=True)
         self.error_handler = error_handler or ErrorHandlingService()
@@ -66,12 +64,12 @@ class FileBasedParameterStore(ParameterStore):
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message=f"Parameter set '{parameter_set_id}' not found",
                 parameter_set_id=parameter_set_id,
-                file_path=str(file_path)
+                file_path=str(file_path),
             )
             raise ISIDomainError(domain_error)
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 data = json.load(f)
 
             # Reconstruct CombinedParameters from JSON
@@ -86,7 +84,7 @@ class FileBasedParameterStore(ParameterStore):
                 parameter_source=ParameterSource(data.get("parameter_source", "user_config")),
                 created_timestamp=data.get("created_timestamp"),
                 modified_timestamp=data.get("modified_timestamp"),
-                version=data.get("version", "1.0")
+                version=data.get("version", "1.0"),
             )
 
         except Exception as e:
@@ -95,7 +93,7 @@ class FileBasedParameterStore(ParameterStore):
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message=f"Failed to load parameter set '{parameter_set_id}'",
                 parameter_set_id=parameter_set_id,
-                operation="load"
+                operation="load",
             )
             raise ISIDomainError(domain_error)
 
@@ -110,7 +108,7 @@ class FileBasedParameterStore(ParameterStore):
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message="Cannot save invalid parameters",
                 parameter_set_id=parameter_set_id,
-                validation_warnings=warnings
+                validation_warnings=warnings,
             )
             raise ISIDomainError(domain_error)
 
@@ -127,10 +125,10 @@ class FileBasedParameterStore(ParameterStore):
                 "metadata": {
                     "generation_hash": parameters.generation_hash,
                     "combined_hash": parameters.combined_hash,
-                }
+                },
             }
 
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 json.dump(data, f, indent=2, sort_keys=True)
 
         except Exception as e:
@@ -139,7 +137,7 @@ class FileBasedParameterStore(ParameterStore):
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message=f"Failed to save parameter set '{parameter_set_id}'",
                 parameter_set_id=parameter_set_id,
-                operation="save"
+                operation="save",
             )
             raise ISIDomainError(domain_error)
 
@@ -158,7 +156,7 @@ class FileBasedParameterStore(ParameterStore):
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message=f"Parameter set '{parameter_set_id}' not found",
                 parameter_set_id=parameter_set_id,
-                operation="delete"
+                operation="delete",
             )
             raise ISIDomainError(domain_error)
 
@@ -237,7 +235,7 @@ class DefaultParameterFactory:
             protocol_params=protocol_params,
             parameter_source=ParameterSource.DEFAULT,
             created_timestamp=datetime.now().isoformat(),
-            version="1.0"
+            version="1.0",
         )
 
     @staticmethod
@@ -301,14 +299,18 @@ class DefaultParameterFactory:
             protocol_params=protocol_params,
             parameter_source=ParameterSource.DEFAULT,
             created_timestamp=datetime.now().isoformat(),
-            version="1.0"
+            version="1.0",
         )
 
 
 class ParameterManager:
     """High-level parameter management with validation and defaults"""
 
-    def __init__(self, storage_directory: Optional[Path] = None, error_handler: Optional[ErrorHandlingService] = None):
+    def __init__(
+        self,
+        storage_directory: Optional[Path] = None,
+        error_handler: Optional[ErrorHandlingService] = None,
+    ):
         if storage_directory is None:
             # Default storage location
             storage_directory = Path.home() / ".isi_macroscope" / "parameters"
@@ -337,7 +339,7 @@ class ParameterManager:
                 exception=e,
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message="Could not create default parameters",
-                operation="ensure_defaults_exist"
+                operation="ensure_defaults_exist",
             )
 
     def get_parameters(self, parameter_set_id: str) -> CombinedParameters:
@@ -352,7 +354,7 @@ class ParameterManager:
                 error_code="PARAMETER_VALIDATION_ERROR",
                 custom_message=f"Parameter warnings for '{parameter_set_id}': {warnings}",
                 parameter_set_id=parameter_set_id,
-                warnings=warnings
+                warnings=warnings,
             )
 
         return parameters

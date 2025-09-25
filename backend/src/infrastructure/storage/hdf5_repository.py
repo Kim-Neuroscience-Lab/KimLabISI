@@ -24,9 +24,9 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from ...domain.value_objects.parameters import CombinedParameters
-from ...domain.entities.parameters import ParameterManager
-from ...domain.repositories.data_repository import DataRepositoryInterface
+from domain.value_objects.parameters import CombinedParameters
+from domain.entities.parameters import ParameterManager
+from domain.repositories.data_repository import DataRepositoryInterface
 
 logger = logging.getLogger(__name__)
 

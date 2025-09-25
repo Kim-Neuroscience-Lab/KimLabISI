@@ -26,12 +26,18 @@ class ParameterValidator:
         self.cerberus_validator = Validator()
 
         # Setup schema for spatial constraints
-        self.spatial_schema = Schema({
-            'monitor_distance_cm': fields.Float(validate=validate.Range(min=5.0, max=20.0)),
-            'monitor_angle_degrees': fields.Float(validate=validate.Range(min=0.0, max=45.0)),
-            'field_of_view_horizontal_degrees': fields.Float(validate=validate.Range(min=0.0, max=180.0)),
-            'field_of_view_vertical_degrees': fields.Float(validate=validate.Range(min=0.0, max=180.0))
-        })
+        self.spatial_schema = Schema(
+            {
+                "monitor_distance_cm": fields.Float(validate=validate.Range(min=5.0, max=20.0)),
+                "monitor_angle_degrees": fields.Float(validate=validate.Range(min=0.0, max=45.0)),
+                "field_of_view_horizontal_degrees": fields.Float(
+                    validate=validate.Range(min=0.0, max=180.0)
+                ),
+                "field_of_view_vertical_degrees": fields.Float(
+                    validate=validate.Range(min=0.0, max=180.0)
+                ),
+            }
+        )
 
     def _load_validation_rules(self) -> Dict[str, Any]:
         """Load scientific validation rules and constraints"""
@@ -60,7 +66,7 @@ class ParameterValidator:
                 "min_frame_rate": 30.0,
                 "max_frame_rate": 120.0,
                 "recommended_frame_rate": 60.0,
-            }
+            },
         }
 
     def validate_combined_parameters(self, parameters) -> Tuple[bool, List[str]]:
@@ -74,12 +80,12 @@ class ParameterValidator:
 
         try:
             # Validate spatial configuration using Marshmallow schema
-            if hasattr(parameters, 'spatial_config'):
+            if hasattr(parameters, "spatial_config"):
                 spatial_data = {
-                    'monitor_distance_cm': parameters.spatial_config.monitor_distance_cm,
-                    'monitor_angle_degrees': parameters.spatial_config.monitor_angle_degrees,
-                    'field_of_view_horizontal_degrees': parameters.spatial_config.field_of_view_horizontal_degrees,
-                    'field_of_view_vertical_degrees': parameters.spatial_config.field_of_view_vertical_degrees
+                    "monitor_distance_cm": parameters.spatial_config.monitor_distance_cm,
+                    "monitor_angle_degrees": parameters.spatial_config.monitor_angle_degrees,
+                    "field_of_view_horizontal_degrees": parameters.spatial_config.field_of_view_horizontal_degrees,
+                    "field_of_view_vertical_degrees": parameters.spatial_config.field_of_view_vertical_degrees,
                 }
 
                 # Validate using the schema
@@ -87,7 +93,9 @@ class ParameterValidator:
                     self.spatial_schema.load(spatial_data)
                 except ma.ValidationError as e:
                     is_valid = False
-                    all_warnings.extend([f"Spatial validation error: {error}" for error in e.messages.values()])
+                    all_warnings.extend(
+                        [f"Spatial validation error: {error}" for error in e.messages.values()]
+                    )
 
         except Exception as e:
             is_valid = False
@@ -104,15 +112,17 @@ class ParameterValidator:
         compliance = {}
 
         # Monitor distance compliance
-        if hasattr(parameters, 'spatial_config'):
+        if hasattr(parameters, "spatial_config"):
             distance = parameters.spatial_config.monitor_distance_cm
             if abs(distance - 10.0) < 0.5:
                 compliance["monitor_distance"] = "matches Marshel et al. (10cm)"
             else:
-                compliance["monitor_distance"] = f"differs from Marshel et al. (10cm vs {distance}cm)"
+                compliance["monitor_distance"] = (
+                    f"differs from Marshel et al. (10cm vs {distance}cm)"
+                )
 
         # Bar width compliance
-        if hasattr(parameters, 'stimulus_params'):
+        if hasattr(parameters, "stimulus_params"):
             bar_width = parameters.stimulus_params.bar_width_degrees
             if abs(bar_width - 20.0) < 1.0:
                 compliance["bar_width"] = "matches Marshel et al. (20 degrees)"
@@ -125,7 +135,11 @@ class ParameterValidator:
 class ParameterCompatibilityChecker:
     """Checks parameter compatibility with existing datasets"""
 
-    def __init__(self, dataset_directory: Optional[Path] = None, error_handler: Optional[ErrorHandlingService] = None):
+    def __init__(
+        self,
+        dataset_directory: Optional[Path] = None,
+        error_handler: Optional[ErrorHandlingService] = None,
+    ):
         self.dataset_directory = dataset_directory
         self.error_handler = error_handler or ErrorHandlingService()
 
@@ -141,7 +155,7 @@ class ParameterCompatibilityChecker:
                 error_code="PARAMETER_COMPATIBILITY_ERROR",
                 custom_message=f"Could not check dataset compatibility with {dataset_path}",
                 dataset_path=str(dataset_path),
-                function="check_dataset_compatibility"
+                function="check_dataset_compatibility",
             )
             # For compatibility checking, we return False instead of raising
             return False

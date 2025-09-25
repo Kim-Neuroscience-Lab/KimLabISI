@@ -38,29 +38,7 @@ class TestWorkflowOrchestrator:
         hardware_system.get_displays.return_value = [Mock()]
         return hardware_system
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using sample_parameters fixture from conftest.py
 
     @pytest.fixture
     async def orchestrator(self, mock_hardware_system):

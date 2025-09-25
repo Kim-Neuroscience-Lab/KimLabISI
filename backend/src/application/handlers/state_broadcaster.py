@@ -13,9 +13,9 @@ import logging
 import asyncio
 import json
 
-from ...domain.value_objects.workflow_state import WorkflowState
-from ...domain.entities.hardware import HardwareSystem
-from ...infrastructure.communication.ipc_server import IPCServer
+from domain.value_objects.workflow_state import WorkflowState
+from domain.entities.hardware import HardwareSystem
+from infrastructure.communication.ipc_server import IPCServer
 
 
 logger = logging.getLogger(__name__)

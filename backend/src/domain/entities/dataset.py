@@ -14,8 +14,8 @@ import logging
 import numpy as np
 from joblib import hash as joblib_hash
 
-from ..value_objects.parameters import CombinedParameters
-from ..value_objects.stream_config import StreamingProfile
+from domain.value_objects.parameters import CombinedParameters
+from domain.value_objects.stream_config import StreamingProfile
 
 logger = logging.getLogger(__name__)
 

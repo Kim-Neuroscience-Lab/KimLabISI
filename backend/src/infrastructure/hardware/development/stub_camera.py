@@ -9,7 +9,7 @@ import logging
 import asyncio
 import numpy as np
 from typing import Dict, Any, Optional, List, Tuple
-from ..abstract.camera_interface import CameraInterface, CameraStatus
+from abstract.camera_interface import CameraInterface, CameraStatus
 
 logger = logging.getLogger(__name__)
 

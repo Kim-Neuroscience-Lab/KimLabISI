@@ -21,14 +21,14 @@
           "minimum": 0.0,
           "maximum": 45.0,
           "default": 20.0,
-          "description": "Monitor angle inward toward nose in degrees (Marshel et al.: 20°)"
+          "description": "Monitor angle inward toward nose in degrees (Marshel et al.: 20ï¿½)"
         },
         "monitor_height_degrees": {
           "type": "number",
           "minimum": -15.0,
-          "maximum": 15.0,
-          "default": 0.0,
-          "description": "Monitor elevation relative to eye level in degrees"
+          "maximum": 45.0,
+          "default": 30.0,
+          "description": "Horizontal monitor angle in degrees"
         },
         "monitor_roll_degrees": {
           "type": "number",
@@ -41,43 +41,29 @@
           "type": "number",
           "minimum": 10.0,
           "maximum": 100.0,
-          "default": 52.0,
+          "default": 60.96,
           "description": "Physical screen width in cm"
         },
         "screen_height_cm": {
           "type": "number",
           "minimum": 10.0,
           "maximum": 100.0,
-          "default": 52.0,
+          "default": 36.195,
           "description": "Physical screen height in cm"
         },
         "screen_width_pixels": {
           "type": "integer",
           "minimum": 640,
           "maximum": 4096,
-          "default": 2048,
+          "default": 2560,
           "description": "Screen resolution width in pixels"
         },
         "screen_height_pixels": {
           "type": "integer",
           "minimum": 480,
           "maximum": 4096,
-          "default": 2048,
+          "default": 1440,
           "description": "Screen resolution height in pixels"
-        },
-        "field_of_view_horizontal_degrees": {
-          "type": "number",
-          "minimum": 10.0,
-          "maximum": 180.0,
-          "default": 147.0,
-          "description": "Horizontal visual field coverage in degrees (Marshel et al.: 147°)"
-        },
-        "field_of_view_vertical_degrees": {
-          "type": "number",
-          "minimum": 10.0,
-          "maximum": 180.0,
-          "default": 153.0,
-          "description": "Vertical visual field coverage in degrees (Marshel et al.: 153°)"
         }
       },
       "required": [
@@ -86,9 +72,7 @@
         "screen_width_cm",
         "screen_height_cm",
         "screen_width_pixels",
-        "screen_height_pixels",
-        "field_of_view_horizontal_degrees",
-        "field_of_view_vertical_degrees"
+        "screen_height_pixels"
       ],
       "additionalProperties": false
     },
@@ -102,27 +86,21 @@
           "minimum": 1.0,
           "maximum": 45.0,
           "default": 20.0,
-          "description": "Bar width in degrees of visual angle (Marshel et al.: 20°)"
+          "description": "Bar width in degrees of visual angle (Marshel et al.: 20ï¿½)"
         },
         "drift_speed_degrees_per_sec": {
           "type": "number",
           "minimum": 1.0,
           "maximum": 50.0,
           "default": 9.0,
-          "description": "Bar drift speed in degrees per second (Marshel et al.: 8.5-9.5°/s)"
-        },
-        "pattern_type": {
-          "type": "string",
-          "enum": ["counter_phase_checkerboard", "solid", "grating"],
-          "default": "counter_phase_checkerboard",
-          "description": "Type of pattern within stimulus (Marshel et al.: counter-phase checkerboard)"
+          "description": "Bar drift speed in degrees per second (Marshel et al.: 8.5-9.5ï¿½/s)"
         },
         "checkerboard_size_degrees": {
           "type": "number",
           "minimum": 1.0,
           "maximum": 50.0,
           "default": 25.0,
-          "description": "Checkerboard square size in degrees (Marshel et al.: 25°)"
+          "description": "Checkerboard square size in degrees (Marshel et al.: 25ï¿½)"
         },
         "flicker_frequency_hz": {
           "type": "number",
@@ -145,41 +123,21 @@
           "default": 0.5,
           "description": "Background luminance (0-1)"
         },
-        "spherical_correction": {
-          "type": "boolean",
-          "default": true,
-          "description": "Apply spherical coordinate correction (Marshel et al. method)"
-        },
-        "coordinate_system": {
-          "type": "string",
-          "enum": ["spherical", "cartesian"],
-          "default": "spherical",
-          "description": "Coordinate system for stimulus generation"
-        },
-        "bit_depth": {
-          "type": "integer",
-          "enum": [8, 16],
-          "default": 8,
-          "description": "Bit depth for stimulus frames"
-        },
-        "compression_level": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9,
-          "default": 6,
-          "description": "HDF5 compression level (0=none, 9=max)"
+        "frame_rate_fps": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 120.0,
+          "default": 60.0,
+          "description": "Frame rate in frames per second"
         }
       },
       "required": [
         "bar_width_degrees",
         "drift_speed_degrees_per_sec",
-        "pattern_type",
         "checkerboard_size_degrees",
         "flicker_frequency_hz",
         "contrast",
-        "background_luminance",
-        "spherical_correction",
-        "coordinate_system"
+        "background_luminance"
       ],
       "additionalProperties": false
     },
@@ -188,20 +146,10 @@
       "title": "Parameter Metadata",
       "description": "Metadata for parameter tracking and validation",
       "properties": {
-        "parameter_source": {
-          "type": "string",
-          "enum": ["default", "user_config", "parameter_store", "session_loaded"],
-          "description": "Source of parameter values"
-        },
         "created_timestamp": {
           "type": "string",
           "format": "date-time",
           "description": "When parameters were created"
-        },
-        "modified_timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When parameters were last modified"
         },
         "version": {
           "type": "string",
@@ -212,11 +160,6 @@
           "type": "string",
           "pattern": "^[a-f0-9]{64}$",
           "description": "SHA256 hash for generation parameter matching"
-        },
-        "literature_reference": {
-          "type": "string",
-          "default": "Marshel et al. 2011",
-          "description": "Literature reference for parameter values"
         }
       },
       "additionalProperties": false
@@ -229,32 +172,24 @@
       "spatial_config": {
         "monitor_distance_cm": 10.0,
         "monitor_angle_degrees": 20.0,
-        "monitor_height_degrees": 0.0,
+        "monitor_height_degrees": 30.0,
         "monitor_roll_degrees": 0.0,
-        "screen_width_cm": 52.0,
-        "screen_height_cm": 52.0,
-        "screen_width_pixels": 2048,
-        "screen_height_pixels": 2048,
-        "field_of_view_horizontal_degrees": 147.0,
-        "field_of_view_vertical_degrees": 153.0
+        "screen_width_cm": 60.96,
+        "screen_height_cm": 36.195,
+        "screen_width_pixels": 2560,
+        "screen_height_pixels": 1440
       },
       "stimulus_params": {
         "bar_width_degrees": 20.0,
         "drift_speed_degrees_per_sec": 9.0,
-        "pattern_type": "counter_phase_checkerboard",
         "checkerboard_size_degrees": 25.0,
         "flicker_frequency_hz": 6.0,
+        "frame_rate_fps": 60.0,
         "contrast": 0.5,
-        "background_luminance": 0.5,
-        "spherical_correction": true,
-        "coordinate_system": "spherical",
-        "bit_depth": 8,
-        "compression_level": 6
+        "background_luminance": 0.5
       },
       "metadata": {
-        "parameter_source": "default",
-        "version": "1.0",
-        "literature_reference": "Marshel et al. 2011"
+        "version": "1.0"
       }
     }
   ]

@@ -6,23 +6,19 @@ using the literature-based algorithms for retinotopic mapping.
 """
 
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Any, Union
-from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
-import scipy.fft
-import scipy.ndimage
-from scipy.signal import find_peaks
 
-from ..entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
-from ..value_objects.parameters import CombinedParameters
-from .stimulus_calculator import StimulusSequence
+
 from .error_handler import ErrorHandlingService, ISIDomainError
+from ..entities.dataset import AcquisitionSession, StimulusDataset, AnalysisResult
 
 
 class AnalysisStage(Enum):
     """Stages of ISI analysis pipeline"""
+
     PREPROCESSING = "preprocessing"
     FOURIER_ANALYSIS = "fourier_analysis"
     PHASE_UNWRAPPING = "phase_unwrapping"
@@ -34,13 +30,12 @@ class AnalysisStage(Enum):
 
 class AnalysisQuality(Enum):
     """Quality levels for analysis results"""
-    EXCELLENT = "excellent"    # >90% reliable pixels, high coherence
-    GOOD = "good"             # >70% reliable pixels, good coherence
+
+    EXCELLENT = "excellent"  # >90% reliable pixels, high coherence
+    GOOD = "good"  # >70% reliable pixels, good coherence
     ACCEPTABLE = "acceptable"  # >50% reliable pixels, moderate coherence
-    POOR = "poor"             # <50% reliable pixels, low coherence
-    FAILED = "failed"         # Analysis failed or unusable
-
-
+    POOR = "poor"  # <50% reliable pixels, low coherence
+    FAILED = "failed"  # Analysis failed or unusable
 
 
 class RetinotopicMap:
@@ -55,7 +50,7 @@ class RetinotopicMap:
         coherence_maps: Dict[str, List[List[float]]],
         sign_map: List[List[float]],
         quality_metrics: Dict[str, Any],
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ):
         self.azimuth_map = azimuth_map
         self.elevation_map = elevation_map
@@ -113,7 +108,7 @@ class RetinotopicMap:
         reliable_mask = [[False for _ in range(width)] for _ in range(height)]
 
         for direction, coherence_map in self.coherence_maps.items():
-            reliable_mask |= (coherence_map > coherence_threshold)
+            reliable_mask |= np.array(coherence_map) > coherence_threshold
 
         # Identify visual areas based on sign map patterns
         # Convert sign map to numpy array for operations
@@ -132,7 +127,7 @@ class RetinotopicMap:
             "positive_sign": positive_regions,
             "negative_sign": negative_regions,
             "weak_sign": weak_sign_regions,
-            "reliable_mapping": reliable_mask
+            "reliable_mapping": reliable_mask,
         }
 
         # Visual areas identified
@@ -149,10 +144,12 @@ class ISIAnalyzer:
     and Zhuang et al. 2017.
     """
 
-    def __init__(self,
-                 error_handler: Optional[ErrorHandlingService] = None,
-                 use_gpu: bool = True,
-                 cache_intermediate_results: bool = True):
+    def __init__(
+        self,
+        error_handler: Optional[ErrorHandlingService] = None,
+        use_gpu: bool = True,
+        cache_intermediate_results: bool = True,
+    ):
         self.error_handler = error_handler or ErrorHandlingService()
         self.use_gpu = use_gpu
         self.cache_intermediate_results = cache_intermediate_results
@@ -168,15 +165,15 @@ class ISIAnalyzer:
             "reliable_coherence": 0.3,
             "excellent_coherence": 0.7,
             "minimum_coverage": 0.1,
-            "reliable_coverage": 0.5
+            "reliable_coverage": 0.5,
         }
 
     async def analyze_isi_data(
         self,
-        acquisition_session: AcquisitionSession,
-        stimulus_dataset: StimulusDataset,
-        analysis_parameters: Optional[Dict[str, Any]] = None
-    ) -> AnalysisResult:
+        acquisition_session: "AcquisitionSession",
+        stimulus_dataset: "StimulusDataset",
+        analysis_parameters: Optional[Dict[str, Any]] = None,
+    ) -> "AnalysisResult":
         """
         Perform complete ISI retinotopic mapping analysis
 
@@ -193,7 +190,9 @@ class ISIAnalyzer:
         try:
             # Initialize analysis
             analysis_start_time = datetime.now()
-            analysis_id = f"analysis_{acquisition_session.session_id}_{int(analysis_start_time.timestamp())}"
+            analysis_id = (
+                f"analysis_{acquisition_session.session_id}_{int(analysis_start_time.timestamp())}"
+            )
 
             # Validate inputs
             self._validate_analysis_inputs(acquisition_session, stimulus_dataset)
@@ -236,8 +235,12 @@ class ISIAnalyzer:
             # Generate analysis result
             await self._set_stage(AnalysisStage.COMPLETE)
             analysis_result = await self._create_analysis_result(
-                analysis_id, acquisition_session, stimulus_dataset,
-                retinotopic_map, quality_results, analysis_start_time
+                analysis_id,
+                acquisition_session,
+                stimulus_dataset,
+                retinotopic_map,
+                quality_results,
+                analysis_start_time,
             )
 
             # Clear intermediate results if not caching
@@ -254,14 +257,14 @@ class ISIAnalyzer:
                 error_code="ISI_ANALYSIS_ERROR",
                 custom_message="ISI analysis failed",
                 session_id=acquisition_session.session_id,
-                analysis_stage=self._current_stage.value
+                analysis_stage=self._current_stage.value,
             )
             raise ISIDomainError(domain_error)
 
     async def analyze_stimulus_selectivity(
         self,
-        retinotopic_map: RetinotopicMap,
-        analysis_parameters: Optional[Dict[str, Any]] = None
+        retinotopic_map: "RetinotopicMap",
+        analysis_parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Analyze stimulus selectivity and response properties
@@ -308,7 +311,7 @@ class ISIAnalyzer:
                 exception=e,
                 error_code="ISI_ANALYSIS_ERROR",
                 custom_message="Selectivity analysis failed",
-                analysis_type="selectivity"
+                analysis_type="selectivity",
             )
             raise ISIDomainError(domain_error)
 
@@ -319,7 +322,7 @@ class ISIAnalyzer:
             "stage_progress": self._stage_progress,
             "overall_progress": self._calculate_overall_progress(),
             "intermediate_results_cached": len(self._intermediate_results),
-            "gpu_enabled": self.use_gpu
+            "gpu_enabled": self.use_gpu,
         }
 
     async def _set_stage(self, stage: AnalysisStage):
@@ -337,7 +340,7 @@ class ISIAnalyzer:
             AnalysisStage.SIGN_MAP_CALCULATION: 0.2,
             AnalysisStage.QUALITY_ASSESSMENT: 0.05,
             AnalysisStage.VISUALIZATION: 0.04,
-            AnalysisStage.COMPLETE: 0.01
+            AnalysisStage.COMPLETE: 0.01,
         }
 
         completed_weight = 0.0
@@ -350,17 +353,13 @@ class ISIAnalyzer:
 
         return min(1.0, completed_weight)
 
-    def _validate_analysis_inputs(
-        self,
-        session: AcquisitionSession,
-        dataset: StimulusDataset
-    ):
+    def _validate_analysis_inputs(self, session: AcquisitionSession, dataset: StimulusDataset):
         """Validate inputs for analysis"""
-        if not session.is_complete():
+        if not session.is_ready_for_analysis():
             domain_error = self.error_handler.create_error(
                 error_code="SESSION_VALIDATION_ERROR",
                 custom_message="Acquisition session is incomplete",
-                session_id=session.session_id
+                session_id=session.session_id,
             )
             raise ISIDomainError(domain_error)
 
@@ -368,7 +367,7 @@ class ISIAnalyzer:
             domain_error = self.error_handler.create_error(
                 error_code="DATASET_ERROR",
                 custom_message="Stimulus dataset is incomplete",
-                dataset_id=dataset.dataset_id
+                dataset_id=dataset.dataset_id,
             )
             raise ISIDomainError(domain_error)
 
@@ -377,24 +376,25 @@ class ISIAnalyzer:
                 error_code="DATA_ACQUISITION_ERROR",
                 custom_message="No frames in acquisition session",
                 session_id=session.session_id,
-                frame_count=session.frame_count
+                frame_count=session.frame_count,
             )
             raise ISIDomainError(domain_error)
 
         # Check parameter compatibility (basic check)
-        if session.parameters.stimulus_params.stimulus_type != dataset.parameters.stimulus_params.stimulus_type:
+        if (
+            session.parameters.stimulus_params.stimulus_type
+            != dataset.parameters.stimulus_params.stimulus_type
+        ):
             domain_error = self.error_handler.create_error(
                 error_code="PARAMETER_COMPATIBILITY_ERROR",
                 custom_message="Stimulus type mismatch between session and dataset",
                 session_stimulus_type=session.parameters.stimulus_params.stimulus_type,
-                dataset_stimulus_type=dataset.parameters.stimulus_params.stimulus_type
+                dataset_stimulus_type=dataset.parameters.stimulus_params.stimulus_type,
             )
             raise ISIDomainError(domain_error)
 
     async def _load_and_preprocess_data(
-        self,
-        session: AcquisitionSession,
-        dataset: StimulusDataset
+        self, session: AcquisitionSession, dataset: StimulusDataset
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Load and preprocess ISI frames and stimulus timing"""
 
@@ -404,16 +404,20 @@ class ISIAnalyzer:
 
         # Simulate frame data (time, height, width)
         frame_count = session.frame_count
-        height, width = session.parameters.acquisition_params.frame_height, session.parameters.acquisition_params.frame_width
+        height, width = (
+            session.parameters.acquisition_params.frame_height,
+            session.parameters.acquisition_params.frame_width,
+        )
 
         # This would actually load from session.data_files["raw_frames"]
         frames = np.random.randint(100, 4000, size=(frame_count, height, width), dtype=np.uint16)
 
         # Extract stimulus timing from dataset
         stimulus_timing = {
-            "frame_timestamps": np.arange(frame_count) / session.parameters.acquisition_params.frame_rate_hz,
+            "frame_timestamps": np.arange(frame_count)
+            / session.parameters.acquisition_params.frame_rate_hz,
             "stimulus_phases": dataset.metadata.get("stimulus_phases", {}),
-            "direction_sequence": dataset.parameters.stimulus_params.directions
+            "direction_sequence": dataset.parameters.stimulus_params.directions,
         }
 
         # Basic preprocessing: convert to float and apply any corrections
@@ -431,7 +435,7 @@ class ISIAnalyzer:
         self,
         frames: np.ndarray,
         stimulus_timing: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Perform Fourier analysis using literature-based algorithms"""
 
@@ -451,8 +455,8 @@ class ISIAnalyzer:
                 "algorithm": "Kalatsky & Stryker 2003",
                 "stimulus_frequency_hz": 0.1,
                 "sampling_frequency_hz": 30.0,
-                "gpu_acceleration": self.use_gpu
-            }
+                "gpu_acceleration": self.use_gpu,
+            },
         }
 
         # Generate results for each direction
@@ -474,9 +478,7 @@ class ISIAnalyzer:
         return fourier_results
 
     async def _perform_phase_unwrapping(
-        self,
-        fourier_results: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None
+        self, fourier_results: Dict[str, Any], parameters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Perform phase unwrapping using literature-based algorithms"""
 
@@ -490,41 +492,49 @@ class ISIAnalyzer:
             "unwrapping_metadata": {
                 "algorithm": "Marshel et al. 2011 bidirectional",
                 "backend": "scikit-image",
-                "gpu_acceleration": self.use_gpu
-            }
+                "gpu_acceleration": self.use_gpu,
+            },
         }
 
         # Process direction pairs for bidirectional unwrapping
-        direction_pairs = [
-            ("LR", "RL"),  # Horizontal pair
-            ("TB", "BT")   # Vertical pair
-        ]
+        direction_pairs = [("LR", "RL"), ("TB", "BT")]  # Horizontal pair  # Vertical pair
 
         for forward_dir, reverse_dir in direction_pairs:
-            if forward_dir in fourier_results["phase_maps"] and reverse_dir in fourier_results["phase_maps"]:
+            if (
+                forward_dir in fourier_results["phase_maps"]
+                and reverse_dir in fourier_results["phase_maps"]
+            ):
 
                 # Simulate bidirectional phase unwrapping
                 forward_phase = fourier_results["phase_maps"][forward_dir]
-                reverse_phase = fourier_results["phase_maps"][reverse_dir]
-                forward_amplitude = fourier_results["amplitude_maps"][forward_dir]
-                reverse_amplitude = fourier_results["amplitude_maps"][reverse_dir]
+                # reverse_phase = fourier_results["phase_maps"][reverse_dir]
+                # forward_amplitude = fourier_results["amplitude_maps"][forward_dir]
+                # reverse_amplitude = fourier_results["amplitude_maps"][reverse_dir]
 
                 # Simulate unwrapped coordinates
                 if forward_dir == "LR":  # Horizontal
-                    coordinate_map = np.random.uniform(-60, 60, forward_phase.shape)  # Azimuth degrees
+                    coordinate_map = np.random.uniform(
+                        -60, 60, forward_phase.shape
+                    )  # Azimuth degrees
                     coord_type = "azimuth"
                 else:  # Vertical
-                    coordinate_map = np.random.uniform(-45, 45, forward_phase.shape)  # Elevation degrees
+                    coordinate_map = np.random.uniform(
+                        -45, 45, forward_phase.shape
+                    )  # Elevation degrees
                     coord_type = "elevation"
 
                 # Create quality mask
-                combined_coherence = (fourier_results["coherence_maps"][forward_dir] +
-                                    fourier_results["coherence_maps"][reverse_dir]) / 2
+                combined_coherence = (
+                    fourier_results["coherence_maps"][forward_dir]
+                    + fourier_results["coherence_maps"][reverse_dir]
+                ) / 2
                 quality_mask = combined_coherence > self._quality_thresholds["minimum_coherence"]
 
                 unwrapping_results["retinotopic_coordinates"][coord_type] = coordinate_map
                 unwrapping_results["quality_masks"][coord_type] = quality_mask
-                unwrapping_results["unwrapped_phase_maps"][f"{forward_dir}_{reverse_dir}"] = coordinate_map
+                unwrapping_results["unwrapped_phase_maps"][
+                    f"{forward_dir}_{reverse_dir}"
+                ] = coordinate_map
 
         # Store intermediate result
         if self.cache_intermediate_results:
@@ -534,9 +544,7 @@ class ISIAnalyzer:
         return unwrapping_results
 
     async def _calculate_sign_maps(
-        self,
-        unwrapping_results: Dict[str, Any],
-        parameters: Optional[Dict[str, Any]] = None
+        self, unwrapping_results: Dict[str, Any], parameters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Calculate visual field sign maps using literature-based algorithms"""
 
@@ -549,8 +557,8 @@ class ISIAnalyzer:
             "calculation_metadata": {
                 "algorithm": "Zhuang et al. 2017",
                 "gradient_method": "numpy.gradient",
-                "smoothing_applied": True
-            }
+                "smoothing_applied": True,
+            },
         }
 
         # Get retinotopic coordinates
@@ -569,17 +577,18 @@ class ISIAnalyzer:
             sign_map_results["sign_map"] = sign_map.tolist()
             sign_map_results["gradient_maps"] = {
                 "azimuth_gradients": {"x": az_grad_x.tolist(), "y": az_grad_y.tolist()},
-                "elevation_gradients": {"x": el_grad_x.tolist(), "y": el_grad_y.tolist()}
+                "elevation_gradients": {"x": el_grad_x.tolist(), "y": el_grad_y.tolist()},
             }
         else:
             # Create domain error for incomplete coordinates instead of logging
             domain_error = self.error_handler.create_error(
                 error_code="ISI_ANALYSIS_ERROR",
                 custom_message="Incomplete retinotopic coordinates for sign map calculation",
-                available_coordinates=list(unwrapping_results["retinotopic_coordinates"].keys())
+                available_coordinates=list(unwrapping_results["retinotopic_coordinates"].keys()),
             )
             # For missing coordinates, return empty sign map instead of computation
             sign_map_results["sign_map"] = []
+            raise ISIDomainError(domain_error)
 
         # Store intermediate result
         if self.cache_intermediate_results:
@@ -592,7 +601,7 @@ class ISIAnalyzer:
         self,
         fourier_results: Dict[str, Any],
         unwrapping_results: Dict[str, Any],
-        sign_map_results: Dict[str, Any]
+        sign_map_results: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Assess overall analysis quality and reliability"""
 
@@ -602,7 +611,7 @@ class ISIAnalyzer:
             "overall_quality": AnalysisQuality.ACCEPTABLE,
             "quality_metrics": {},
             "reliability_maps": {},
-            "quality_issues": []
+            "quality_issues": [],
         }
 
         # Calculate quality metrics
@@ -637,7 +646,7 @@ class ISIAnalyzer:
             "reliable_pixel_fraction": float(reliable_fraction),
             "sign_map_std": float(sign_map_std),
             "sign_map_range": float(sign_map_range),
-            "coverage_score": float(reliable_fraction * mean_coherence)
+            "coverage_score": float(reliable_fraction * mean_coherence),
         }
 
         # Determine overall quality
@@ -667,7 +676,7 @@ class ISIAnalyzer:
         self,
         unwrapping_results: Dict[str, Any],
         sign_map_results: Dict[str, Any],
-        quality_results: Dict[str, Any]
+        quality_results: Dict[str, Any],
     ) -> RetinotopicMap:
         """Create comprehensive retinotopic map object"""
 
@@ -687,10 +696,10 @@ class ISIAnalyzer:
             "algorithms_used": {
                 "fourier_analysis": "Kalatsky & Stryker 2003",
                 "phase_unwrapping": "Marshel et al. 2011",
-                "sign_map": "Zhuang et al. 2017"
+                "sign_map": "Zhuang et al. 2017",
             },
             "gpu_acceleration": self.use_gpu,
-            "quality_assessment": quality_results["overall_quality"].value
+            "quality_assessment": quality_results["overall_quality"].value,
         }
 
         retinotopic_map = RetinotopicMap(
@@ -701,7 +710,7 @@ class ISIAnalyzer:
             coherence_maps=coherence_maps,
             sign_map=sign_map_results["sign_map"],
             quality_metrics=quality_results["quality_metrics"],
-            metadata=metadata
+            metadata=metadata,
         )
 
         # Retinotopic map created
@@ -714,7 +723,7 @@ class ISIAnalyzer:
         dataset: StimulusDataset,
         retinotopic_map: RetinotopicMap,
         quality_results: Dict[str, Any],
-        start_time: datetime
+        start_time: datetime,
     ) -> AnalysisResult:
         """Create final analysis result entity"""
 
@@ -727,7 +736,7 @@ class ISIAnalyzer:
             dataset_id=dataset.dataset_id,
             session_id=session.session_id,
             parameters=session.parameters,
-            base_path=session.base_path
+            base_path=session.base_path,
         )
 
         # Set analysis data
@@ -736,7 +745,7 @@ class ISIAnalyzer:
         analysis_result.coherence_map = retinotopic_map.coherence_maps
         analysis_result.retinotopic_map = {
             "azimuth": retinotopic_map.azimuth_map,
-            "elevation": retinotopic_map.elevation_map
+            "elevation": retinotopic_map.elevation_map,
         }
         analysis_result.visual_field_sign = retinotopic_map.sign_map
 
@@ -745,13 +754,15 @@ class ISIAnalyzer:
         analysis_result.quality_score = retinotopic_map.quality_metrics.get("coverage_score", 0.0)
 
         # Set metadata
-        analysis_result.metadata.update({
-            "processing_duration_s": processing_duration.total_seconds(),
-            "analysis_stages_completed": [stage.value for stage in AnalysisStage],
-            "retinotopic_mapping": retinotopic_map.metadata,
-            "visual_field_coverage": retinotopic_map.visual_field_coverage_degrees,
-            "quality_issues": quality_results.get("quality_issues", [])
-        })
+        analysis_result.metadata.update(
+            {
+                "processing_duration_s": processing_duration.total_seconds(),
+                "analysis_stages_completed": [stage.value for stage in AnalysisStage],
+                "retinotopic_mapping": retinotopic_map.metadata,
+                "visual_field_coverage": retinotopic_map.visual_field_coverage_degrees,
+                "quality_issues": quality_results.get("quality_issues", []),
+            }
+        )
 
         # Mark as complete
         analysis_result.mark_as_complete()
@@ -768,7 +779,11 @@ class ISIAnalyzer:
         for direction, amplitude_map in retinotopic_map.amplitude_maps.items():
             amp_array = np.array(amplitude_map)
             coherence_map = retinotopic_map.coherence_maps.get(direction, np.ones_like(amp_array))
-            coh_array = np.array(coherence_map) if not isinstance(coherence_map, np.ndarray) else coherence_map
+            coh_array = (
+                np.array(coherence_map)
+                if not isinstance(coherence_map, np.ndarray)
+                else coherence_map
+            )
             reliable_mask = coh_array > self._quality_thresholds["reliable_coherence"]
 
             if np.any(reliable_mask):
@@ -776,17 +791,21 @@ class ISIAnalyzer:
                 selectivity_metrics[direction] = {
                     "mean_amplitude": float(mean_amplitude),
                     "responsive_pixels": int(np.sum(reliable_mask)),
-                    "peak_response": float(np.max(amp_array[reliable_mask]))
+                    "peak_response": float(np.max(amp_array[reliable_mask])),
                 }
 
         return selectivity_metrics
 
-    def _calculate_spatial_frequency_tuning(self, retinotopic_map: RetinotopicMap) -> Dict[str, Any]:
+    def _calculate_spatial_frequency_tuning(
+        self, retinotopic_map: RetinotopicMap
+    ) -> Dict[str, Any]:
         """Calculate spatial frequency tuning curves"""
         # Placeholder implementation
         return {"spatial_frequency_tuning": "not_implemented"}
 
-    def _calculate_temporal_frequency_response(self, retinotopic_map: RetinotopicMap) -> Dict[str, Any]:
+    def _calculate_temporal_frequency_response(
+        self, retinotopic_map: RetinotopicMap
+    ) -> Dict[str, Any]:
         """Calculate temporal frequency response properties"""
         # Placeholder implementation
         return {"temporal_frequency_response": "not_implemented"}
@@ -797,7 +816,7 @@ class ISIAnalyzer:
         magnitude_analysis = {
             "amplitude_statistics": {},
             "coherence_statistics": {},
-            "response_distribution": {}
+            "response_distribution": {},
         }
 
         # Analyze amplitude distributions
@@ -805,7 +824,11 @@ class ISIAnalyzer:
         for direction, amplitude_map in retinotopic_map.amplitude_maps.items():
             amp_array = np.array(amplitude_map)
             coherence_map = retinotopic_map.coherence_maps.get(direction, np.ones_like(amp_array))
-            coh_array = np.array(coherence_map) if not isinstance(coherence_map, np.ndarray) else coherence_map
+            coh_array = (
+                np.array(coherence_map)
+                if not isinstance(coherence_map, np.ndarray)
+                else coherence_map
+            )
             reliable_mask = coh_array > self._quality_thresholds["minimum_coherence"]
 
             if np.any(reliable_mask):
@@ -816,7 +839,7 @@ class ISIAnalyzer:
                     "mean": float(np.mean(reliable_amplitudes)),
                     "std": float(np.std(reliable_amplitudes)),
                     "median": float(np.median(reliable_amplitudes)),
-                    "max": float(np.max(reliable_amplitudes))
+                    "max": float(np.max(reliable_amplitudes)),
                 }
 
         # Overall amplitude statistics
@@ -824,7 +847,7 @@ class ISIAnalyzer:
             magnitude_analysis["response_distribution"] = {
                 "overall_mean": float(np.mean(all_amplitudes)),
                 "overall_std": float(np.std(all_amplitudes)),
-                "dynamic_range": float(np.max(all_amplitudes) - np.min(all_amplitudes))
+                "dynamic_range": float(np.max(all_amplitudes) - np.min(all_amplitudes)),
             }
 
         return magnitude_analysis
@@ -836,7 +859,7 @@ class ISIAnalyzer:
             "field_coverage": retinotopic_map.visual_field_coverage_degrees,
             "topographic_organization": {},
             "visual_areas": retinotopic_map.get_visual_areas(),
-            "retinotopic_quality": retinotopic_map.overall_quality.value
+            "retinotopic_quality": retinotopic_map.overall_quality.value,
         }
 
         # Analyze topographic organization
@@ -851,8 +874,10 @@ class ISIAnalyzer:
             sign_array = np.array(retinotopic_map.sign_map)
             organization_analysis["topographic_organization"] = {
                 "azimuth_gradient_magnitude": float(np.mean(np.sqrt(az_grad_x**2 + az_grad_y**2))),
-                "elevation_gradient_magnitude": float(np.mean(np.sqrt(el_grad_x**2 + el_grad_y**2))),
-                "topographic_smoothness": float(1.0 / (1.0 + np.std(sign_array)))
+                "elevation_gradient_magnitude": float(
+                    np.mean(np.sqrt(el_grad_x**2 + el_grad_y**2))
+                ),
+                "topographic_smoothness": float(1.0 / (1.0 + np.std(sign_array))),
             }
 
         return organization_analysis

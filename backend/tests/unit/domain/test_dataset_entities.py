@@ -18,8 +18,13 @@ from src.domain.entities.dataset import (
     AcquisitionSession,
     AnalysisResult,
     DatasetStatus,
-    SessionStatus,
-    AnalysisStatus
+    CompressionType
+)
+from src.domain.value_objects.stream_config import (
+    StreamingProfile,
+    CameraStreamConfig,
+    DisplayStreamConfig,
+    StatusStreamConfig
 )
 from src.domain.value_objects.parameters import (
     CombinedParameters,
@@ -32,29 +37,7 @@ from src.domain.value_objects.parameters import (
 class TestStimulusDataset:
     """Test StimulusDataset entity"""
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using sample_parameters fixture from conftest.py
 
     @pytest.fixture
     def temp_base_path(self):
@@ -74,8 +57,8 @@ class TestStimulusDataset:
         assert dataset.parameters == sample_parameters
         assert dataset.base_path == temp_base_path
         assert dataset.status == DatasetStatus.GENERATING
-        assert dataset.creation_timestamp is not None
-        assert not dataset.is_complete()
+        assert dataset.created_timestamp is not None
+        assert dataset.status != DatasetStatus.COMPLETED
 
     def test_stimulus_dataset_file_management(self, sample_parameters, temp_base_path):
         """Test dataset file management"""
@@ -89,10 +72,10 @@ class TestStimulusDataset:
         test_file_path = temp_base_path / "test_stimulus.h5"
         test_file_path.touch()  # Create empty file
 
-        dataset.add_data_file("stimulus_patterns", test_file_path)
+        dataset.add_direction_file("LR", test_file_path, frame_count=100)
 
-        assert "stimulus_patterns" in dataset.data_files
-        assert dataset.data_files["stimulus_patterns"] == test_file_path
+        assert "LR" in dataset.direction_files
+        assert dataset.direction_files["LR"] == test_file_path
 
     def test_stimulus_dataset_completion(self, sample_parameters, temp_base_path):
         """Test dataset completion workflow"""
@@ -103,25 +86,25 @@ class TestStimulusDataset:
         )
 
         # Should not be complete initially
-        assert not dataset.is_complete()
+        assert not dataset.status == DatasetStatus.COMPLETED
         assert dataset.status == DatasetStatus.GENERATING
 
-        # Add required files
-        test_files = ["stimulus_patterns.h5", "timing_data.json", "metadata.json"]
-        for filename in test_files:
+        # Add required files for valid directions
+        test_files = [("LR", "lr_patterns.h5"), ("RL", "rl_patterns.h5"), ("TB", "tb_patterns.h5")]
+        for direction, filename in test_files:
             file_path = temp_base_path / filename
             file_path.touch()
-            dataset.add_data_file(filename.split('.')[0], file_path)
+            dataset.add_direction_file(direction, file_path, frame_count=100)
 
         # Mark as complete
-        dataset.mark_as_complete()
+        dataset.mark_completed()
 
-        assert dataset.is_complete()
-        assert dataset.status == DatasetStatus.COMPLETE
-        assert dataset.completion_timestamp is not None
+        assert dataset.status == DatasetStatus.READY
+        assert dataset.generation_progress == 1.0
+        assert dataset.modified_timestamp is not None
 
     def test_stimulus_dataset_parameter_compatibility(self, sample_parameters, temp_base_path):
-        """Test parameter compatibility checking"""
+        """Test parameter compatibility checking for HDF5 stimulus reuse"""
         dataset = StimulusDataset(
             dataset_id="test_dataset_004",
             parameters=sample_parameters,
@@ -129,27 +112,38 @@ class TestStimulusDataset:
         )
 
         # Should be compatible with same parameters
-        compatibility = dataset.check_parameter_compatibility(sample_parameters)
-        assert compatibility["compatible"] == True
-        assert compatibility["compatibility_score"] == 1.0
+        compatibility = dataset.is_compatible_with_parameters(sample_parameters)
+        assert compatibility == True
 
-        # Test with different parameters
-        different_params = CombinedParameters(
+        # Test with different stimulus parameters (affects generation_hash)
+        different_stimulus_params = CombinedParameters(
             stimulus_params=StimulusGenerationParams(
                 stimulus_type="checkerboard",  # Different stimulus type
-                directions=["LR", "RL"],
-                temporal_frequency_hz=0.2,     # Different frequency
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
+                directions=["TB", "BT"],       # Different directions
+                temporal_frequency_hz=0.5,     # Very different frequency
+                spatial_frequency_cpd=0.1,     # Very different spatial frequency
+                cycles_per_trial=20             # Different cycle count
             ),
-            acquisition_params=sample_parameters.acquisition_params,
-            spatial_config=sample_parameters.spatial_config
+            protocol_params=sample_parameters.protocol_params,  # Same protocol
+            spatial_config=sample_parameters.spatial_config      # Same spatial config
         )
 
-        compatibility = dataset.check_parameter_compatibility(different_params)
-        assert compatibility["compatible"] == False
-        assert compatibility["compatibility_score"] < 1.0
-        assert len(compatibility["differences"]) > 0
+        compatibility = dataset.is_compatible_with_parameters(different_stimulus_params)
+        assert compatibility == False  # Different stimulus params = different generation_hash
+
+        # Test with same stimulus/spatial but different protocol (should be compatible for reuse)
+        different_protocol_params = CombinedParameters(
+            stimulus_params=sample_parameters.stimulus_params,     # Same stimulus
+            spatial_config=sample_parameters.spatial_config,      # Same spatial
+            protocol_params=AcquisitionProtocolParams(
+                duration_s=120,              # Different duration
+                trial_count=8,               # Different trial count
+                recording_mode="high_speed"  # Different mode
+            )
+        )
+
+        compatibility = dataset.is_compatible_with_parameters(different_protocol_params)
+        assert compatibility == True  # Same generation_hash = can reuse HDF5 files
 
     def test_stimulus_dataset_serialization(self, sample_parameters, temp_base_path):
         """Test dataset serialization and deserialization"""
@@ -160,8 +154,9 @@ class TestStimulusDataset:
         )
 
         # Add some data
-        original_dataset.add_data_file("test_file", temp_base_path / "test.h5")
-        original_dataset.metadata["test_key"] = "test_value"
+        test_file = temp_base_path / "test.h5"
+        test_file.touch()
+        original_dataset.add_direction_file("LR", test_file, frame_count=100)
 
         # Convert to dict and back
         dataset_dict = original_dataset.to_dict()
@@ -170,55 +165,41 @@ class TestStimulusDataset:
         assert dataset_dict["dataset_id"] == "test_dataset_005"
         assert dataset_dict["status"] == DatasetStatus.GENERATING.value
         assert "parameters" in dataset_dict
-        assert "data_files" in dataset_dict
+        assert "direction_files" in dataset_dict
 
-    @patch('src.domain.entities.dataset.h5py')
-    def test_stimulus_dataset_hdf5_integration(self, mock_h5py, sample_parameters, temp_base_path):
-        """Test HDF5 file integration"""
-        # Mock HDF5 file operations
-        mock_file = MagicMock()
-        mock_h5py.File.return_value.__enter__.return_value = mock_file
-
+    def test_stimulus_dataset_hdf5_file_management(self, sample_parameters, temp_base_path):
+        """Test HDF5 file management in stimulus dataset"""
         dataset = StimulusDataset(
             dataset_id="test_dataset_hdf5",
             parameters=sample_parameters,
             base_path=temp_base_path
         )
 
-        # Test data existence check
-        dataset.add_data_file("patterns", temp_base_path / "patterns.h5")
+        # Test adding HDF5 files for different directions
+        directions = ["LR", "RL", "TB", "BT"]
+        for direction in directions:
+            hdf5_file = temp_base_path / f"{direction.lower()}_patterns.h5"
+            hdf5_file.touch()  # Create empty HDF5 file
+            dataset.add_direction_file(direction, hdf5_file, frame_count=1000)
 
-        # Since we're mocking, we can't actually test file operations
-        # but we can verify the file was added to the dataset
-        assert "patterns" in dataset.data_files
+        # Verify all HDF5 files were added
+        assert len(dataset.direction_files) == 4
+        for direction in directions:
+            assert direction in dataset.direction_files
+            assert dataset.direction_files[direction].suffix == ".h5"
+            assert dataset.frame_counts[direction] == 1000
+
+        # Test file size tracking (would be populated by infrastructure layer)
+        for direction in directions:
+            file_size = dataset.direction_files[direction].stat().st_size
+            dataset.file_sizes[direction] = file_size
+            assert dataset.file_sizes[direction] >= 0
 
 
 class TestAcquisitionSession:
     """Test AcquisitionSession entity"""
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using sample_parameters fixture from conftest.py
 
     @pytest.fixture
     def temp_base_path(self):
@@ -228,53 +209,110 @@ class TestAcquisitionSession:
 
     def test_acquisition_session_creation(self, sample_parameters, temp_base_path):
         """Test creating an acquisition session"""
-        session = AcquisitionSession(
-            session_id="test_session_001",
+        # Create a stimulus dataset first
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
+        )
+
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_001",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path,
+            streaming_profile=streaming_profile
         )
 
         assert session.session_id == "test_session_001"
-        assert session.dataset_id == "test_dataset_001"
-        assert session.parameters == sample_parameters
-        assert session.base_path == temp_base_path
-        assert session.status == SessionStatus.PREPARING
-        assert not session.is_complete()
+        assert session.stimulus_dataset.dataset_id == "test_dataset_001"
+        assert session.session_path == temp_base_path
+        assert session.status == DatasetStatus.READY
+        assert not session.status == DatasetStatus.COMPLETED
 
     def test_acquisition_session_frame_tracking(self, sample_parameters, temp_base_path):
         """Test frame counting and tracking"""
-        session = AcquisitionSession(
-            session_id="test_session_002",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
+        )
+
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_002",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path,
+            streaming_profile=streaming_profile
         )
 
         # Start acquisition
         session.start_acquisition()
-        assert session.status == SessionStatus.ACQUIRING
-        assert session.start_timestamp is not None
+        assert session.status == DatasetStatus.PROCESSING
+        assert session.started_timestamp is not None
 
         # Add frames
         for i in range(100):
             session.add_frame(timestamp=i * 0.033)  # 30 FPS
 
         assert session.frame_count == 100
-        assert len(session.frame_timestamps) == 100
+        assert len(session.frame_metadata) >= 100
 
         # Check frame rate calculation
-        frame_rate = session.calculate_actual_frame_rate()
+        frame_rate = session.calculate_frame_rate()
         assert frame_rate is not None
         assert 29.0 < frame_rate < 31.0  # Should be close to 30 FPS
 
     def test_acquisition_session_quality_metrics(self, sample_parameters, temp_base_path):
         """Test quality metrics calculation"""
-        session = AcquisitionSession(
-            session_id="test_session_003",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
+        )
+
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_003",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path,
+            streaming_profile=streaming_profile
         )
 
         session.start_acquisition()
@@ -300,11 +338,30 @@ class TestAcquisitionSession:
 
     def test_acquisition_session_completion(self, sample_parameters, temp_base_path):
         """Test session completion workflow"""
-        session = AcquisitionSession(
-            session_id="test_session_004",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
+        )
+
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_004",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path,
+            streaming_profile=streaming_profile
         )
 
         # Start and add some frames
@@ -313,40 +370,17 @@ class TestAcquisitionSession:
             session.add_frame(timestamp=i * 0.033)
 
         session.stop_acquisition()
-        session.mark_as_complete()
+        session.complete_session()
 
-        assert session.is_complete()
-        assert session.status == SessionStatus.COMPLETE
-        assert session.end_timestamp is not None
-        assert session.duration_s > 0
+        assert session.status == DatasetStatus.COMPLETED
+        assert session.completed_timestamp is not None
+        assert session.session_duration > 0
 
 
 class TestAnalysisResult:
     """Test AnalysisResult entity"""
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using sample_parameters fixture from conftest.py
 
     @pytest.fixture
     def temp_base_path(self):
@@ -356,119 +390,190 @@ class TestAnalysisResult:
 
     def test_analysis_result_creation(self, sample_parameters, temp_base_path):
         """Test creating an analysis result"""
-        result = AnalysisResult(
-            analysis_id="test_analysis_001",
+
+        # Create prerequisite objects
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
-            session_id="test_session_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
         )
 
-        assert result.analysis_id == "test_analysis_001"
-        assert result.dataset_id == "test_dataset_001"
-        assert result.session_id == "test_session_001"
-        assert result.parameters == sample_parameters
-        assert result.status == AnalysisStatus.ANALYZING
-        assert not result.is_complete()
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_001",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path / "sessions",
+            streaming_profile=streaming_profile
+        )
+
+        result = AnalysisResult(
+            result_id="test_analysis_001",
+            session=session,
+            analysis_parameters={"algorithm": "fourier", "smoothing": 2.0}
+        )
+
+        assert result.result_id == "test_analysis_001"
+        assert result.session.session_id == "test_session_001"
+        assert result.analysis_parameters["algorithm"] == "fourier"
+        assert result.status == DatasetStatus.ANALYZING
+        assert not result.status == DatasetStatus.COMPLETED
 
     def test_analysis_result_data_assignment(self, sample_parameters, temp_base_path):
         """Test analysis data assignment"""
-        result = AnalysisResult(
-            analysis_id="test_analysis_002",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
-            session_id="test_session_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
         )
 
-        # Add analysis data
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
+        session = AcquisitionSession(
+            session_id="test_session_001",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path / "sessions",
+            streaming_profile=streaming_profile
+        )
+
+        result = AnalysisResult(
+            result_id="test_analysis_002",
+            session=session,
+            analysis_parameters={"algorithm": "fourier", "smoothing": 2.0}
+        )
+
+        # Add analysis data using proper methods
         phase_map = np.random.random((512, 512)).astype(np.float32)
         amplitude_map = np.random.random((512, 512)).astype(np.float32)
 
-        result.phase_map = {"horizontal": phase_map}
-        result.amplitude_map = {"horizontal": amplitude_map}
-        result.quality_score = 0.85
+        result.add_retinotopic_map("horizontal", phase_map, amplitude_map, 0.85)
 
-        assert result.phase_map is not None
-        assert result.amplitude_map is not None
-        assert result.quality_score == 0.85
+        assert "horizontal" in result.retinotopic_maps
+        assert result.correlation_quality["horizontal"] == 0.85
 
     def test_analysis_result_quality_assessment(self, sample_parameters, temp_base_path):
         """Test analysis quality assessment"""
-        result = AnalysisResult(
-            analysis_id="test_analysis_003",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
-            session_id="test_session_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
         )
 
-        # Set quality metrics
-        result.quality_metrics = {
-            "coherence_mean": 0.7,
-            "coverage_fraction": 0.8,
-            "snr_db": 15.0
-        }
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
 
-        result.quality_score = 0.75
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
 
-        # Test quality assessment
-        quality_level = result.get_quality_level()
-        assert quality_level in ["excellent", "good", "acceptable", "poor"]
+        session = AcquisitionSession(
+            session_id="test_session_001",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path / "sessions",
+            streaming_profile=streaming_profile
+        )
+
+        result = AnalysisResult(
+            result_id="test_analysis_003",
+            session=session,
+            analysis_parameters={"algorithm": "fourier", "smoothing": 2.0}
+        )
+
+        # Add some retinotopic maps to calculate quality
+        phase_map = np.random.random((100, 100))
+        amplitude_map = np.random.random((100, 100))
+        result.add_retinotopic_map("horizontal", phase_map, amplitude_map, 0.75)
+        result.add_retinotopic_map("vertical", phase_map, amplitude_map, 0.80)
+
+        # Test overall quality calculation
+        result._calculate_overall_quality()
+        assert result.overall_quality_score > 0.0
 
     def test_analysis_result_completion(self, sample_parameters, temp_base_path):
         """Test analysis result completion"""
-        result = AnalysisResult(
-            analysis_id="test_analysis_004",
+
+        dataset = StimulusDataset(
             dataset_id="test_dataset_001",
-            session_id="test_session_001",
             parameters=sample_parameters,
-            base_path=temp_base_path
+            base_path=temp_base_path / "datasets"
         )
 
-        # Add required analysis data
-        result.phase_map = {"horizontal": np.random.random((100, 100))}
-        result.amplitude_map = {"horizontal": np.random.random((100, 100))}
-        result.retinotopic_map = {
-            "azimuth": np.random.random((100, 100)),
-            "elevation": np.random.random((100, 100))
-        }
-        result.visual_field_sign = np.random.random((100, 100))
-        result.quality_score = 0.8
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
 
-        result.mark_as_complete()
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
 
-        assert result.is_complete()
-        assert result.status == AnalysisStatus.COMPLETE
-        assert result.completion_timestamp is not None
+        session = AcquisitionSession(
+            session_id="test_session_001",
+            stimulus_dataset=dataset,
+            session_path=temp_base_path / "sessions",
+            streaming_profile=streaming_profile
+        )
+
+        result = AnalysisResult(
+            result_id="test_analysis_004",
+            session=session,
+            analysis_parameters={"algorithm": "fourier", "smoothing": 2.0}
+        )
+
+        # Add required analysis data using proper methods
+        phase_map = np.random.random((100, 100))
+        amplitude_map = np.random.random((100, 100))
+        result.add_retinotopic_map("horizontal", phase_map, amplitude_map, 0.8)
+        result.add_retinotopic_map("vertical", phase_map, amplitude_map, 0.8)
+
+        # Set combined maps
+        azimuth_map = np.random.random((100, 100))
+        elevation_map = np.random.random((100, 100))
+        result.set_combined_maps(azimuth_map, elevation_map)
+
+        # Set visual field sign
+        sign_map = np.random.random((100, 100))
+        areas = [{"area": "V1", "size": 100}]
+        result.set_visual_field_sign(sign_map, areas, 0.8)
+
+        result.complete_analysis()
+
+        assert result.status == DatasetStatus.COMPLETED
+        assert result.analysis_completed is not None
 
 
 class TestDatasetIntegration:
     """Test integration between dataset entities"""
-
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
 
     @pytest.fixture
     def temp_base_path(self):
@@ -485,14 +590,26 @@ class TestDatasetIntegration:
             parameters=sample_parameters,
             base_path=temp_base_path / "datasets"
         )
-        dataset.mark_as_complete()
+        dataset.mark_completed()
 
         # Create acquisition session
+        # Create streaming profile with required configurations
+        camera_config = CameraStreamConfig(stream_id="test_camera")
+        display_config = DisplayStreamConfig(stream_id="test_display")
+        status_config = StatusStreamConfig(stream_id="test_status")
+
+        streaming_profile = StreamingProfile(
+            profile_name="test_profile",
+            camera_stream=camera_config,
+            display_stream=display_config,
+            status_stream=status_config
+        )
+
         session = AcquisitionSession(
             session_id="chain_session_001",
-            dataset_id=dataset.dataset_id,
-            parameters=sample_parameters,
-            base_path=temp_base_path / "sessions"
+            stimulus_dataset=dataset,
+            session_path=temp_base_path / "sessions",
+            streaming_profile=streaming_profile
         )
 
         # Add frames and complete session
@@ -500,35 +617,32 @@ class TestDatasetIntegration:
         for i in range(1000):
             session.add_frame(timestamp=i * 0.033)
         session.stop_acquisition()
-        session.mark_as_complete()
+        session.complete_session()
 
         # Create analysis result
         analysis = AnalysisResult(
-            analysis_id="chain_analysis_001",
-            dataset_id=dataset.dataset_id,
-            session_id=session.session_id,
-            parameters=sample_parameters,
-            base_path=temp_base_path / "analyses"
+            result_id="chain_analysis_001",
+            session=session,
+            analysis_parameters={"algorithm": "fourier", "smoothing": 2.0}
         )
 
         # Complete analysis
-        analysis.phase_map = {"horizontal": np.random.random((100, 100))}
-        analysis.amplitude_map = {"horizontal": np.random.random((100, 100))}
-        analysis.quality_score = 0.8
-        analysis.mark_as_complete()
+        phase_map = np.random.random((100, 100))
+        amplitude_map = np.random.random((100, 100))
+        analysis.add_retinotopic_map("horizontal", phase_map, amplitude_map, 0.8)
+        analysis.complete_analysis()
 
         # Verify the chain
-        assert dataset.is_complete()
-        assert session.is_complete()
-        assert analysis.is_complete()
+        assert dataset.status == DatasetStatus.COMPLETEDD
+        assert session.status == DatasetStatus.COMPLETED  # This might need to be set in the test
+        assert analysis.status == DatasetStatus.COMPLETED
 
         # Verify references
-        assert session.dataset_id == dataset.dataset_id
-        assert analysis.dataset_id == dataset.dataset_id
-        assert analysis.session_id == session.session_id
+        assert session.stimulus_dataset.dataset_id == dataset.dataset_id
+        assert analysis.session.session_id == session.session_id
 
         # Verify parameter consistency
-        dataset_compat = dataset.check_parameter_compatibility(session.parameters)
+        dataset_compat = dataset.is_compatible_with_parameters(sample_parameters)
         assert dataset_compat["compatible"] == True
 
 

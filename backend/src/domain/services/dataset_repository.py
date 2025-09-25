@@ -9,24 +9,24 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 import json
-import os
+import shutil
 
-from ..entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
-from .error_handler import ErrorHandlingService, ISIDomainError
+
+from src.domain.entities.dataset import StimulusDataset, AcquisitionSession, AnalysisResult
+from .error_handler import DomainError, ErrorHandlingService, ISIDomainError
 
 
 class SortOrder(Enum):
     """Sorting options for repository queries"""
+
     NEWEST_FIRST = "newest_first"
     OLDEST_FIRST = "oldest_first"
     NAME_ASC = "name_ascending"
     NAME_DESC = "name_descending"
     SIZE_ASC = "size_ascending"
     SIZE_DESC = "size_descending"
-
-
 
 
 class DatasetMetadata:
@@ -38,7 +38,7 @@ class DatasetMetadata:
         file_path: Path,
         creation_timestamp: datetime,
         file_size_bytes: int,
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ):
         self.dataset_id = dataset_id
         self.file_path = file_path
@@ -53,7 +53,7 @@ class DatasetMetadata:
             "file_path": str(self.file_path),
             "creation_timestamp": self.creation_timestamp.isoformat(),
             "file_size_bytes": self.file_size_bytes,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -99,7 +99,7 @@ class StimulusDatasetRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to save stimulus dataset",
                 dataset_id=dataset.dataset_id,
-                operation="save"
+                operation="save",
             )
             raise ISIDomainError(domain_error)
 
@@ -121,7 +121,7 @@ class StimulusDatasetRepository:
                     error_code="REPOSITORY_ERROR",
                     custom_message=f"Dataset {dataset_id} not found",
                     dataset_id=dataset_id,
-                    operation="load"
+                    operation="load",
                 )
                 raise ISIDomainError(domain_error)
 
@@ -135,14 +135,12 @@ class StimulusDatasetRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to load dataset",
                 dataset_id=dataset_id,
-                operation="load"
+                operation="load",
             )
             raise ISIDomainError(domain_error)
 
     def list_datasets(
-        self,
-        sort_order: SortOrder = SortOrder.NEWEST_FIRST,
-        limit: Optional[int] = None
+        self, sort_order: SortOrder = SortOrder.NEWEST_FIRST, limit: Optional[int] = None
     ) -> List[DatasetMetadata]:
         """
         List available stimulus datasets
@@ -167,7 +165,7 @@ class StimulusDatasetRepository:
 
                 try:
                     # Load basic metadata without full dataset
-                    with open(dataset_file, 'r') as f:
+                    with open(dataset_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
 
                     metadata = DatasetMetadata(
@@ -179,8 +177,8 @@ class StimulusDatasetRepository:
                             "stimulus_type": data["parameters"]["stimulus_params"]["stimulus_type"],
                             "directions": data["parameters"]["stimulus_params"]["directions"],
                             "status": data["status"],
-                            "file_count": len(data.get("data_files", {}))
-                        }
+                            "file_count": len(data.get("data_files", {})),
+                        },
                     )
                     datasets.append(metadata)
 
@@ -203,7 +201,7 @@ class StimulusDatasetRepository:
                 exception=e,
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to list datasets",
-                operation="list"
+                operation="list",
             )
             raise ISIDomainError(domain_error)
 
@@ -226,6 +224,7 @@ class StimulusDatasetRepository:
 
             # Remove dataset directory and all contents
             import shutil
+
             shutil.rmtree(dataset_dir)
 
             # Dataset deleted successfully
@@ -237,7 +236,7 @@ class StimulusDatasetRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to delete dataset",
                 dataset_id=dataset_id,
-                operation="delete"
+                operation="delete",
             )
             raise ISIDomainError(domain_error)
 
@@ -262,10 +261,12 @@ class StimulusDatasetRepository:
             "base_path": str(self.base_path),
             "dataset_count": dataset_count,
             "total_size_bytes": total_size,
-            "total_size_mb": round(total_size / (1024 * 1024), 2)
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
         }
 
-    def _sort_datasets(self, datasets: List[DatasetMetadata], sort_order: SortOrder) -> List[DatasetMetadata]:
+    def _sort_datasets(
+        self, datasets: List[DatasetMetadata], sort_order: SortOrder
+    ) -> List[DatasetMetadata]:
         """Sort dataset list by specified order"""
         if sort_order == SortOrder.NEWEST_FIRST:
             return sorted(datasets, key=lambda d: d.creation_timestamp, reverse=True)
@@ -317,7 +318,7 @@ class AcquisitionSessionRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to save session",
                 session_id=session.session_id,
-                operation="save"
+                operation="save",
             )
             raise ISIDomainError(domain_error)
 
@@ -331,7 +332,7 @@ class AcquisitionSessionRepository:
                     error_code="REPOSITORY_ERROR",
                     custom_message=f"Session {session_id} not found",
                     session_id=session_id,
-                    operation="load"
+                    operation="load",
                 )
                 raise ISIDomainError(domain_error)
 
@@ -345,14 +346,12 @@ class AcquisitionSessionRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to load session",
                 session_id=session_id,
-                operation="load"
+                operation="load",
             )
             raise ISIDomainError(domain_error)
 
     def list_sessions(
-        self,
-        sort_order: SortOrder = SortOrder.NEWEST_FIRST,
-        limit: Optional[int] = None
+        self, sort_order: SortOrder = SortOrder.NEWEST_FIRST, limit: Optional[int] = None
     ) -> List[DatasetMetadata]:
         """List available acquisition sessions"""
         try:
@@ -368,7 +367,7 @@ class AcquisitionSessionRepository:
 
                 try:
                     # Load basic metadata
-                    with open(session_file, 'r') as f:
+                    with open(session_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
 
                     metadata = DatasetMetadata(
@@ -381,8 +380,8 @@ class AcquisitionSessionRepository:
                             "duration_s": data.get("duration_s", 0),
                             "status": data["status"],
                             "quality_score": data.get("quality_score", 0),
-                            "dataset_id": data.get("dataset_id")
-                        }
+                            "dataset_id": data.get("dataset_id"),
+                        },
                     )
                     sessions.append(metadata)
 
@@ -405,7 +404,7 @@ class AcquisitionSessionRepository:
                 exception=e,
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to list sessions",
-                operation="list"
+                operation="list",
             )
             raise ISIDomainError(domain_error)
 
@@ -420,6 +419,7 @@ class AcquisitionSessionRepository:
 
             # Remove session directory and all contents
             import shutil
+
             shutil.rmtree(session_dir)
 
             # Session deleted successfully
@@ -431,7 +431,7 @@ class AcquisitionSessionRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to delete session",
                 session_id=session_id,
-                operation="delete"
+                operation="delete",
             )
             raise ISIDomainError(domain_error)
 
@@ -440,7 +440,9 @@ class AcquisitionSessionRepository:
         session_file = self.sessions_path / session_id / "session.json"
         return session_file.exists()
 
-    def _sort_datasets(self, datasets: List[DatasetMetadata], sort_order: SortOrder) -> List[DatasetMetadata]:
+    def _sort_datasets(
+        self, datasets: List[DatasetMetadata], sort_order: SortOrder
+    ) -> List[DatasetMetadata]:
         """Sort dataset list by specified order"""
         if sort_order == SortOrder.NEWEST_FIRST:
             return sorted(datasets, key=lambda d: d.creation_timestamp, reverse=True)
@@ -492,7 +494,7 @@ class AnalysisResultRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to save analysis",
                 analysis_id=analysis.analysis_id,
-                operation="save"
+                operation="save",
             )
             raise ISIDomainError(domain_error)
 
@@ -506,7 +508,7 @@ class AnalysisResultRepository:
                     error_code="REPOSITORY_ERROR",
                     custom_message=f"Analysis {analysis_id} not found",
                     analysis_id=analysis_id,
-                    operation="load"
+                    operation="load",
                 )
                 raise ISIDomainError(domain_error)
 
@@ -520,14 +522,12 @@ class AnalysisResultRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to load analysis",
                 analysis_id=analysis_id,
-                operation="load"
+                operation="load",
             )
             raise ISIDomainError(domain_error)
 
     def list_analyses(
-        self,
-        sort_order: SortOrder = SortOrder.NEWEST_FIRST,
-        limit: Optional[int] = None
+        self, sort_order: SortOrder = SortOrder.NEWEST_FIRST, limit: Optional[int] = None
     ) -> List[DatasetMetadata]:
         """List available analysis results"""
         try:
@@ -543,7 +543,7 @@ class AnalysisResultRepository:
 
                 try:
                     # Load basic metadata
-                    with open(analysis_file, 'r') as f:
+                    with open(analysis_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
 
                     metadata = DatasetMetadata(
@@ -556,8 +556,10 @@ class AnalysisResultRepository:
                             "dataset_id": data.get("dataset_id"),
                             "status": data["status"],
                             "quality_score": data.get("quality_score", 0),
-                            "processing_duration_s": data.get("metadata", {}).get("processing_duration_s", 0)
-                        }
+                            "processing_duration_s": data.get("metadata", {}).get(
+                                "processing_duration_s", 0
+                            ),
+                        },
                     )
                     analyses.append(metadata)
 
@@ -580,7 +582,7 @@ class AnalysisResultRepository:
                 exception=e,
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to list analyses",
-                operation="list"
+                operation="list",
             )
             raise ISIDomainError(domain_error)
 
@@ -593,8 +595,6 @@ class AnalysisResultRepository:
                 # Analysis not found for deletion
                 return False
 
-            # Remove analysis directory and all contents
-            import shutil
             shutil.rmtree(analysis_dir)
 
             # Analysis result deleted successfully
@@ -606,7 +606,7 @@ class AnalysisResultRepository:
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to delete analysis",
                 analysis_id=analysis_id,
-                operation="delete"
+                operation="delete",
             )
             raise ISIDomainError(domain_error)
 
@@ -618,16 +618,24 @@ class AnalysisResultRepository:
     def find_by_session(self, session_id: str) -> List[DatasetMetadata]:
         """Find all analyses for a specific session"""
         all_analyses = self.list_analyses()
-        return [analysis for analysis in all_analyses
-                if analysis.metadata.get("session_id") == session_id]
+        return [
+            analysis
+            for analysis in all_analyses
+            if analysis.metadata.get("session_id") == session_id
+        ]
 
     def find_by_dataset(self, dataset_id: str) -> List[DatasetMetadata]:
         """Find all analyses for a specific dataset"""
         all_analyses = self.list_analyses()
-        return [analysis for analysis in all_analyses
-                if analysis.metadata.get("dataset_id") == dataset_id]
+        return [
+            analysis
+            for analysis in all_analyses
+            if analysis.metadata.get("dataset_id") == dataset_id
+        ]
 
-    def _sort_datasets(self, datasets: List[DatasetMetadata], sort_order: SortOrder) -> List[DatasetMetadata]:
+    def _sort_datasets(
+        self, datasets: List[DatasetMetadata], sort_order: SortOrder
+    ) -> List[DatasetMetadata]:
         """Sort dataset list by specified order"""
         if sort_order == SortOrder.NEWEST_FIRST:
             return sorted(datasets, key=lambda d: d.creation_timestamp, reverse=True)
@@ -665,22 +673,20 @@ class DatasetRepositoryManager:
             stimulus_info = self.stimulus_datasets.get_storage_info()
 
             # Get session and analysis counts
-            session_count = len(self.acquisition_sessions.list_sessions(limit=1000))  # Reasonable limit
+            session_count = len(
+                self.acquisition_sessions.list_sessions(limit=1000)
+            )  # Reasonable limit
             analysis_count = len(self.analysis_results.list_analyses(limit=1000))
 
             return {
                 "base_path": str(self.base_path),
                 "stimulus_datasets": {
                     "count": stimulus_info["dataset_count"],
-                    "total_size_mb": stimulus_info["total_size_mb"]
+                    "total_size_mb": stimulus_info["total_size_mb"],
                 },
-                "acquisition_sessions": {
-                    "count": session_count
-                },
-                "analysis_results": {
-                    "count": analysis_count
-                },
-                "last_updated": datetime.now().isoformat()
+                "acquisition_sessions": {"count": session_count},
+                "analysis_results": {"count": analysis_count},
+                "last_updated": datetime.now().isoformat(),
             }
 
         except Exception as e:
@@ -688,20 +694,19 @@ class DatasetRepositoryManager:
                 exception=e,
                 error_code="REPOSITORY_ERROR",
                 custom_message="Failed to get system overview",
-                operation="system_overview"
+                operation="system_overview",
             )
             raise ISIDomainError(domain_error)
 
     def cleanup_orphaned_data(self) -> Dict[str, int]:
         """Clean up orphaned data (analyses without sessions, etc.)"""
         try:
-            cleanup_stats = {
-                "orphaned_analyses_removed": 0,
-                "invalid_files_removed": 0
-            }
+            cleanup_stats = {"orphaned_analyses_removed": 0, "invalid_files_removed": 0}
 
             # Get all sessions for reference
-            session_ids = {metadata.dataset_id for metadata in self.acquisition_sessions.list_sessions()}
+            session_ids = {
+                metadata.dataset_id for metadata in self.acquisition_sessions.list_sessions()
+            }
 
             # Check analyses for orphaned references
             all_analyses = self.analysis_results.list_analyses()
@@ -717,10 +722,10 @@ class DatasetRepositoryManager:
             return cleanup_stats
 
         except Exception as e:
-            domain_error = self.error_handler.handle_exception(
+            domain_error: DomainError = self.error_handler.handle_exception(
                 exception=e,
                 error_code="REPOSITORY_ERROR",
                 custom_message="Cleanup failed",
-                operation="cleanup"
+                operation="cleanup",
             )
             raise ISIDomainError(domain_error)

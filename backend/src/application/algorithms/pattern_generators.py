@@ -22,9 +22,9 @@ from scipy.spatial.distance import cdist
 # from ...domain.value_objects.stimulus_params import (
 #     StimulusType, MovementDirection, StimulusGenerationParams, VisualFieldParams
 # )
-from ...domain.value_objects.parameters import StimulusGenerationParams
-from ...domain.entities.parameters import ParameterManager
-from ...domain.value_objects.parameters import CombinedParameters
+from domain.value_objects.parameters import StimulusGenerationParams
+from domain.entities.parameters import ParameterManager
+from domain.value_objects.parameters import CombinedParameters
 from .spherical_transform import SphericalTransform, create_spherical_transform_from_spatial_config
 
 

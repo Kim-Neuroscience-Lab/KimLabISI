@@ -11,7 +11,7 @@ import json
 import websockets
 import logging
 import pytest
-from main import ISIMacroscopeBackend
+from src.isi_control.main import ISIMacroscopeBackend
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List, Callable
 import logging
 from datetime import datetime, timedelta
 
-from ...domain.services.error_handler import (
+from domain.services.error_handler import (
     ErrorHandlingService,
     DomainError,
     ISIDomainError,

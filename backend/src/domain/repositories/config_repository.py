@@ -12,16 +12,19 @@ from pathlib import Path
 from datetime import datetime
 from enum import Enum
 
-from ..value_objects.parameters import CombinedParameters
+from src.domain.entities.parameters import CombinedParameters
+
+from domain.value_objects.parameters import CombinedParameters
 
 
 class ConfigurationScope(Enum):
     """Scope of configuration settings"""
-    SYSTEM = "system"           # System-wide configuration
-    USER = "user"              # User-specific configuration
-    SESSION = "session"        # Session-specific configuration
-    HARDWARE = "hardware"      # Hardware-specific configuration
-    CALIBRATION = "calibration" # Calibration data and settings
+
+    SYSTEM = "system"  # System-wide configuration
+    USER = "user"  # User-specific configuration
+    SESSION = "session"  # Session-specific configuration
+    HARDWARE = "hardware"  # Hardware-specific configuration
+    CALIBRATION = "calibration"  # Calibration data and settings
 
 
 class ConfigurationInterface(ABC):
@@ -29,10 +32,7 @@ class ConfigurationInterface(ABC):
 
     @abstractmethod
     async def get_configuration(
-        self,
-        scope: ConfigurationScope,
-        key: str,
-        default: Optional[Any] = None
+        self, scope: ConfigurationScope, key: str, default: Optional[Any] = None
     ) -> Any:
         """
         Retrieve a configuration value
@@ -48,12 +48,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def set_configuration(
-        self,
-        scope: ConfigurationScope,
-        key: str,
-        value: Any
-    ) -> None:
+    async def set_configuration(self, scope: ConfigurationScope, key: str, value: Any) -> None:
         """
         Set a configuration value
 
@@ -65,10 +60,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_all_configurations(
-        self,
-        scope: ConfigurationScope
-    ) -> Dict[str, Any]:
+    async def get_all_configurations(self, scope: ConfigurationScope) -> Dict[str, Any]:
         """
         Get all configuration values for a scope
 
@@ -81,11 +73,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def delete_configuration(
-        self,
-        scope: ConfigurationScope,
-        key: str
-    ) -> bool:
+    async def delete_configuration(self, scope: ConfigurationScope, key: str) -> bool:
         """
         Delete a configuration value
 
@@ -99,11 +87,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def configuration_exists(
-        self,
-        scope: ConfigurationScope,
-        key: str
-    ) -> bool:
+    async def configuration_exists(self, scope: ConfigurationScope, key: str) -> bool:
         """
         Check if a configuration key exists
 
@@ -118,9 +102,7 @@ class ConfigurationInterface(ABC):
 
     @abstractmethod
     async def backup_configuration(
-        self,
-        scope: ConfigurationScope,
-        backup_name: Optional[str] = None
+        self, scope: ConfigurationScope, backup_name: Optional[str] = None
     ) -> str:
         """
         Create a backup of configuration for a scope
@@ -135,11 +117,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def restore_configuration(
-        self,
-        scope: ConfigurationScope,
-        backup_name: str
-    ) -> bool:
+    async def restore_configuration(self, scope: ConfigurationScope, backup_name: str) -> bool:
         """
         Restore configuration from a backup
 
@@ -153,10 +131,7 @@ class ConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def list_backups(
-        self,
-        scope: ConfigurationScope
-    ) -> List[Dict[str, Any]]:
+    async def list_backups(self, scope: ConfigurationScope) -> List[Dict[str, Any]]:
         """
         List available backups for a configuration scope
 
@@ -178,7 +153,7 @@ class ParameterConfigurationInterface(ABC):
         parameters: CombinedParameters,
         name: str,
         description: Optional[str] = None,
-        tags: Optional[List[str]] = None
+        tags: Optional[List[str]] = None,
     ) -> str:
         """
         Save experimental parameters as a named configuration
@@ -195,10 +170,7 @@ class ParameterConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def load_parameters(
-        self,
-        name: str
-    ) -> CombinedParameters:
+    async def load_parameters(self, name: str) -> CombinedParameters:
         """
         Load experimental parameters by name
 
@@ -215,8 +187,7 @@ class ParameterConfigurationInterface(ABC):
 
     @abstractmethod
     async def list_parameter_configurations(
-        self,
-        tags: Optional[List[str]] = None
+        self, tags: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
         List available parameter configurations
@@ -230,10 +201,7 @@ class ParameterConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def delete_parameters(
-        self,
-        name: str
-    ) -> bool:
+    async def delete_parameters(self, name: str) -> bool:
         """
         Delete a parameter configuration
 
@@ -246,10 +214,7 @@ class ParameterConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def validate_parameters(
-        self,
-        parameters: CombinedParameters
-    ) -> Dict[str, Any]:
+    async def validate_parameters(self, parameters: CombinedParameters) -> Dict[str, Any]:
         """
         Validate parameter configuration
 
@@ -270,7 +235,7 @@ class CalibrationConfigurationInterface(ABC):
         self,
         component: str,
         calibration_data: Dict[str, Any],
-        valid_until: Optional[datetime] = None
+        valid_until: Optional[datetime] = None,
     ) -> str:
         """
         Save calibration data for a hardware component
@@ -287,9 +252,7 @@ class CalibrationConfigurationInterface(ABC):
 
     @abstractmethod
     async def load_calibration_data(
-        self,
-        component: str,
-        validate_expiration: bool = True
+        self, component: str, validate_expiration: bool = True
     ) -> Dict[str, Any]:
         """
         Load calibration data for a hardware component
@@ -308,10 +271,7 @@ class CalibrationConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def is_calibration_valid(
-        self,
-        component: str
-    ) -> bool:
+    async def is_calibration_valid(self, component: str) -> bool:
         """
         Check if calibration is valid and current
 
@@ -324,10 +284,7 @@ class CalibrationConfigurationInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_calibration_status(
-        self,
-        component: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_calibration_status(self, component: Optional[str] = None) -> Dict[str, Any]:
         """
         Get calibration status for components
 
@@ -343,24 +300,29 @@ class CalibrationConfigurationInterface(ABC):
 # Domain exceptions for configuration management
 class ConfigurationError(Exception):
     """Base exception for configuration-related errors"""
+
     pass
 
 
 class ConfigurationNotFoundError(ConfigurationError):
     """Raised when a requested configuration is not found"""
+
     pass
 
 
 class CalibrationNotFoundError(ConfigurationError):
     """Raised when requested calibration data is not found"""
+
     pass
 
 
 class CalibrationExpiredError(ConfigurationError):
     """Raised when calibration data has expired"""
+
     pass
 
 
 class ConfigurationValidationError(ConfigurationError):
     """Raised when configuration validation fails"""
+
     pass

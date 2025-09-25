@@ -22,8 +22,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 import uuid
 
-from ...domain.value_objects.parameters import CombinedParameters, ParameterSource
-from ...domain.entities.parameters import ParameterManager
+from domain.value_objects.parameters import CombinedParameters, ParameterSource
+from domain.entities.parameters import ParameterManager
 from .hdf5_repository import HDF5Repository, HDF5SessionManager
 
 logger = logging.getLogger(__name__)

@@ -135,6 +135,15 @@ class IPCServer:
         self._running = False
         logger.info("IPC server stopped")
 
+    def is_connected(self) -> bool:
+        """Check if IPC server is connected and running"""
+        return self._running
+
+    @property
+    def is_running(self) -> bool:
+        """Check if IPC server is running"""
+        return self._running
+
     async def send_state_update(self, state_type: str, state_data: Dict[str, Any]) -> None:
         """
         Send state update to frontend
@@ -179,6 +188,20 @@ class IPCServer:
         )
 
         await self._send_to_frontend(notification)
+
+    async def send_message(self, message_json: str) -> None:
+        """
+        Send raw JSON message to frontend (used by StateBroadcaster)
+
+        Args:
+            message_json: JSON string message to send
+        """
+        try:
+            sys.stdout.write(message_json + "\n")
+            sys.stdout.flush()
+            logger.debug("Sent raw message to frontend")
+        except Exception as e:
+            logger.error(f"Failed to send raw message to frontend: {e}")
 
     async def _process_stdin_messages(self) -> None:
         """Process incoming messages from Electron frontend via stdin"""

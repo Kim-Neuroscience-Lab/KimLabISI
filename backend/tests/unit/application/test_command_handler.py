@@ -17,7 +17,7 @@ from src.application.handlers.command_handler import (
     WorkflowStateResponse,
     HardwareStatusResponse
 )
-from src.infrastructure.communication.ipc_server import CommandMessage
+from src.infrastructure.communication.ipc_server import IPCMessage
 from src.domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
 from pydantic import ValidationError
 
@@ -245,7 +245,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_workflow_start(self, command_handler, mock_workflow_state_machine):
         """Test handling workflow start command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.start",
             parameters={},
             request_id="req-123"
@@ -261,7 +261,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_workflow_transition(self, command_handler, mock_workflow_state_machine):
         """Test handling workflow transition command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.transition",
             parameters={"target_state": "setup"},
             request_id="req-123"
@@ -276,7 +276,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_workflow_transition_missing_parameter(self, command_handler):
         """Test handling workflow transition command with missing target_state"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.transition",
             parameters={},  # Missing target_state
             request_id="req-123"
@@ -290,7 +290,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_workflow_get_state(self, command_handler, mock_workflow_state_machine):
         """Test handling workflow get state command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.get_state",
             parameters={},
             request_id="req-123"
@@ -311,7 +311,7 @@ class TestCommandHandler:
         mock_transition.model_dump.return_value = {"transition": "data"}
         mock_workflow_state_machine.transition_history = [mock_transition]
 
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.get_history",
             parameters={},
             request_id="req-123"
@@ -326,7 +326,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_hardware_detect(self, command_handler, mock_hardware_factory):
         """Test handling hardware detect command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="hardware.detect",
             parameters={},
             request_id="req-123"
@@ -342,7 +342,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_hardware_get_status(self, command_handler, mock_hardware_factory):
         """Test handling hardware get status command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="hardware.get_status",
             parameters={},
             request_id="req-123"
@@ -358,7 +358,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_system_health_check(self, command_handler, mock_hardware_factory):
         """Test handling system health check command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="system.health_check",
             parameters={},
             request_id="req-123"
@@ -374,7 +374,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_system_get_info(self, command_handler, mock_hardware_factory, mock_workflow_state_machine):
         """Test handling system get info command"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="system.get_info",
             parameters={},
             request_id="req-123"
@@ -390,7 +390,7 @@ class TestCommandHandler:
     @pytest.mark.asyncio
     async def test_handle_command_invalid_command(self, command_handler):
         """Test handling invalid command type"""
-        command = CommandMessage(
+        command = IPCMessage(
             command="invalid.command",
             parameters={},
             request_id="req-123"
@@ -405,7 +405,7 @@ class TestCommandHandler:
     async def test_handle_command_exception_handling(self, command_handler, mock_workflow_state_machine):
         """Test command handling with exception"""
         # Test with invalid command parameters that would cause a validation error
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.transition",  # This requires target_state parameter
             parameters={"invalid_param": "value"},  # Missing required target_state
             request_id="req-123"
@@ -445,7 +445,7 @@ class TestCommandHandler:
         """Test workflow start when transition fails"""
         # With real dependencies, workflow.start should actually succeed
         # This test now verifies successful operation instead of failure
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.start",
             parameters={},
             request_id="req-123"
@@ -461,7 +461,7 @@ class TestCommandHandler:
     async def test_workflow_transition_failure(self, command_handler, mock_workflow_state_machine):
         """Test workflow transition when transition fails"""
         # Test with an actually invalid state name
-        command = CommandMessage(
+        command = IPCMessage(
             command="workflow.transition",
             parameters={"target_state": "invalid_state"},
             request_id="req-123"
@@ -479,7 +479,7 @@ class TestCommandHandler:
         mock_hardware_factory.create_camera_interface.side_effect = Exception("Camera error")
         mock_hardware_factory.create_gpu_interface.side_effect = Exception("GPU error")
 
-        command = CommandMessage(
+        command = IPCMessage(
             command="system.health_check",
             parameters={},
             request_id="req-123"
@@ -520,7 +520,7 @@ class TestCommandHandler:
         with patch.object(command_handler, '_route_command') as mock_route:
             mock_route.side_effect = ValueError("No handler for command")
 
-            command = CommandMessage(
+            command = IPCMessage(
                 command="workflow.start",
                 parameters={},
                 request_id="req-123"

@@ -19,9 +19,9 @@ from src.domain.services.dataset_repository import (
     AnalysisResultRepository,
     DatasetRepositoryManager,
     DatasetMetadata,
-    SortOrder,
-    RepositoryError
+    SortOrder
 )
+from src.domain.services.error_handler import ISIDomainError
 from src.domain.entities.dataset import (
     StimulusDataset,
     AcquisitionSession,
@@ -82,29 +82,7 @@ class TestStimulusDatasetRepository:
         with tempfile.TemporaryDirectory() as temp_dir:
             yield Path(temp_dir)
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL", "TB", "BT"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=10
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=1024,
-                frame_height=1024,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using sample_parameters fixture from conftest.py
 
     def test_repository_initialization(self, temp_base_path):
         """Test repository initialization"""
@@ -114,17 +92,17 @@ class TestStimulusDatasetRepository:
         assert repo.datasets_path == temp_base_path / "stimulus_datasets"
         assert repo.datasets_path.exists()
 
-    def test_save_and_load_dataset(self, temp_base_path, sample_parameters):
+    def test_save_and_load_dataset(self, temp_base_path, minimal_parameters):
         """Test saving and loading datasets"""
         repo = StimulusDatasetRepository(temp_base_path)
 
         # Create test dataset
         dataset = StimulusDataset(
             dataset_id="test_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "data"
         )
-        dataset.mark_as_complete()
+        dataset.mark_completed()
 
         # Save dataset
         saved_path = repo.save(dataset)
@@ -136,7 +114,7 @@ class TestStimulusDatasetRepository:
         assert loaded_dataset.dataset_id == dataset.dataset_id
         assert loaded_dataset.parameters.stimulus_params.stimulus_type == dataset.parameters.stimulus_params.stimulus_type
 
-    def test_dataset_existence_check(self, temp_base_path, sample_parameters):
+    def test_dataset_existence_check(self, temp_base_path, minimal_parameters):
         """Test dataset existence checking"""
         repo = StimulusDatasetRepository(temp_base_path)
 
@@ -146,7 +124,7 @@ class TestStimulusDatasetRepository:
         # Create and save dataset
         dataset = StimulusDataset(
             dataset_id="test_dataset_002",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "data"
         )
         repo.save(dataset)
@@ -154,7 +132,7 @@ class TestStimulusDatasetRepository:
         # Should exist now
         assert repo.exists("test_dataset_002") == True
 
-    def test_list_datasets(self, temp_base_path, sample_parameters):
+    def test_list_datasets(self, temp_base_path, minimal_parameters):
         """Test listing datasets"""
         repo = StimulusDatasetRepository(temp_base_path)
 
@@ -166,10 +144,10 @@ class TestStimulusDatasetRepository:
         for i in range(3):
             dataset = StimulusDataset(
                 dataset_id=f"test_dataset_{i:03d}",
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "data" / f"dataset_{i}"
             )
-            dataset.mark_as_complete()
+            dataset.mark_completed()
             repo.save(dataset)
 
         # List all datasets
@@ -183,7 +161,7 @@ class TestStimulusDatasetRepository:
         limited_datasets = repo.list_datasets(limit=2)
         assert len(limited_datasets) == 2
 
-    def test_sorting_options(self, temp_base_path, sample_parameters):
+    def test_sorting_options(self, temp_base_path, minimal_parameters):
         """Test different sorting options"""
         repo = StimulusDatasetRepository(temp_base_path)
 
@@ -197,11 +175,11 @@ class TestStimulusDatasetRepository:
         for dataset_id, timestamp in datasets_info:
             dataset = StimulusDataset(
                 dataset_id=dataset_id,
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "data"
             )
             dataset.creation_timestamp = timestamp
-            dataset.mark_as_complete()
+            dataset.mark_completed()
             repo.save(dataset)
 
         # Test newest first (default)
@@ -219,14 +197,14 @@ class TestStimulusDatasetRepository:
         assert datasets[0].dataset_id == "dataset_a"
         assert datasets[2].dataset_id == "dataset_c"
 
-    def test_delete_dataset(self, temp_base_path, sample_parameters):
+    def test_delete_dataset(self, temp_base_path, minimal_parameters):
         """Test deleting datasets"""
         repo = StimulusDatasetRepository(temp_base_path)
 
         # Create and save dataset
         dataset = StimulusDataset(
             dataset_id="test_dataset_delete",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "data"
         )
         repo.save(dataset)
@@ -245,7 +223,7 @@ class TestStimulusDatasetRepository:
         success = repo.delete("nonexistent")
         assert success == False
 
-    def test_storage_info(self, temp_base_path, sample_parameters):
+    def test_storage_info(self, temp_base_path, minimal_parameters):
         """Test storage information"""
         repo = StimulusDatasetRepository(temp_base_path)
 
@@ -258,7 +236,7 @@ class TestStimulusDatasetRepository:
         for i in range(2):
             dataset = StimulusDataset(
                 dataset_id=f"test_dataset_{i}",
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "data"
             )
             repo.save(dataset)
@@ -273,7 +251,7 @@ class TestStimulusDatasetRepository:
         repo = StimulusDatasetRepository(temp_base_path)
 
         # Try to load non-existent dataset
-        with pytest.raises(RepositoryError):
+        with pytest.raises(ISIDomainError):
             repo.load("nonexistent_dataset")
 
         # Try to save dataset with invalid data (mock the save to fail)
@@ -281,7 +259,7 @@ class TestStimulusDatasetRepository:
             dataset = Mock()
             dataset.dataset_id = "test_fail"
 
-            with pytest.raises(RepositoryError):
+            with pytest.raises(ISIDomainError):
                 repo.save(dataset)
 
 
@@ -294,31 +272,9 @@ class TestAcquisitionSessionRepository:
         with tempfile.TemporaryDirectory() as temp_dir:
             yield Path(temp_dir)
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=5
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=512,
-                frame_height=512,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using minimal_parameters fixture from conftest.py
 
-    def test_session_repository_basic_operations(self, temp_base_path, sample_parameters):
+    def test_session_repository_basic_operations(self, temp_base_path, minimal_parameters):
         """Test basic session repository operations"""
         repo = AcquisitionSessionRepository(temp_base_path)
 
@@ -326,7 +282,7 @@ class TestAcquisitionSessionRepository:
         session = AcquisitionSession(
             session_id="test_session_001",
             dataset_id="test_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "sessions"
         )
         session.start_acquisition()
@@ -346,7 +302,7 @@ class TestAcquisitionSessionRepository:
         assert repo.exists("test_session_001") == True
         assert repo.exists("nonexistent") == False
 
-    def test_session_listing(self, temp_base_path, sample_parameters):
+    def test_session_listing(self, temp_base_path, minimal_parameters):
         """Test session listing with metadata"""
         repo = AcquisitionSessionRepository(temp_base_path)
 
@@ -355,7 +311,7 @@ class TestAcquisitionSessionRepository:
             session = AcquisitionSession(
                 session_id=f"session_{i:03d}",
                 dataset_id=f"dataset_{i:03d}",
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "sessions"
             )
             session.frame_count = (i + 1) * 100  # Different frame counts
@@ -383,31 +339,9 @@ class TestAnalysisResultRepository:
         with tempfile.TemporaryDirectory() as temp_dir:
             yield Path(temp_dir)
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=5
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=512,
-                frame_height=512,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using minimal_parameters fixture from conftest.py
 
-    def test_analysis_repository_basic_operations(self, temp_base_path, sample_parameters):
+    def test_analysis_repository_basic_operations(self, temp_base_path, minimal_parameters):
         """Test basic analysis repository operations"""
         repo = AnalysisResultRepository(temp_base_path)
 
@@ -416,7 +350,7 @@ class TestAnalysisResultRepository:
             analysis_id="test_analysis_001",
             dataset_id="test_dataset_001",
             session_id="test_session_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "analyses"
         )
         analysis.quality_score = 0.85
@@ -435,7 +369,7 @@ class TestAnalysisResultRepository:
         # Check existence
         assert repo.exists("test_analysis_001") == True
 
-    def test_analysis_relationship_queries(self, temp_base_path, sample_parameters):
+    def test_analysis_relationship_queries(self, temp_base_path, minimal_parameters):
         """Test analysis relationship queries"""
         repo = AnalysisResultRepository(temp_base_path)
 
@@ -451,7 +385,7 @@ class TestAnalysisResultRepository:
                 analysis_id=analysis_id,
                 dataset_id=dataset_id,
                 session_id=session_id,
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "analyses"
             )
             analysis.mark_as_complete()
@@ -480,29 +414,7 @@ class TestDatasetRepositoryManager:
         with tempfile.TemporaryDirectory() as temp_dir:
             yield Path(temp_dir)
 
-    @pytest.fixture
-    def sample_parameters(self):
-        """Create sample parameters for testing"""
-        return CombinedParameters(
-            stimulus_params=StimulusGenerationParams(
-                stimulus_type="drifting_bars",
-                directions=["LR", "RL"],
-                temporal_frequency_hz=0.1,
-                spatial_frequency_cpd=0.04,
-                cycles_per_trial=5
-            ),
-            acquisition_params=AcquisitionProtocolParams(
-                frame_rate_hz=30.0,
-                frame_width=512,
-                frame_height=512,
-                exposure_time_ms=33.0,
-                bit_depth=16
-            ),
-            spatial_config=SpatialConfiguration(
-                camera_distance_mm=300.0,
-                display_distance_mm=250.0
-            )
-        )
+    # Using minimal_parameters fixture from conftest.py
 
     def test_manager_initialization(self, temp_base_path):
         """Test repository manager initialization"""
@@ -513,7 +425,7 @@ class TestDatasetRepositoryManager:
         assert isinstance(manager.acquisition_sessions, AcquisitionSessionRepository)
         assert isinstance(manager.analysis_results, AnalysisResultRepository)
 
-    def test_system_overview(self, temp_base_path, sample_parameters):
+    def test_system_overview(self, temp_base_path, minimal_parameters):
         """Test system overview functionality"""
         manager = DatasetRepositoryManager(temp_base_path)
 
@@ -527,7 +439,7 @@ class TestDatasetRepositoryManager:
         # Stimulus dataset
         dataset = StimulusDataset(
             dataset_id="overview_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "datasets"
         )
         manager.stimulus_datasets.save(dataset)
@@ -536,7 +448,7 @@ class TestDatasetRepositoryManager:
         session = AcquisitionSession(
             session_id="overview_session_001",
             dataset_id="overview_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "sessions"
         )
         manager.acquisition_sessions.save(session)
@@ -546,7 +458,7 @@ class TestDatasetRepositoryManager:
             analysis_id="overview_analysis_001",
             dataset_id="overview_dataset_001",
             session_id="overview_session_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "analyses"
         )
         manager.analysis_results.save(analysis)
@@ -558,7 +470,7 @@ class TestDatasetRepositoryManager:
         assert overview["analysis_results"]["count"] == 1
         assert "last_updated" in overview
 
-    def test_cleanup_orphaned_data(self, temp_base_path, sample_parameters):
+    def test_cleanup_orphaned_data(self, temp_base_path, minimal_parameters):
         """Test orphaned data cleanup"""
         manager = DatasetRepositoryManager(temp_base_path)
 
@@ -566,7 +478,7 @@ class TestDatasetRepositoryManager:
         session = AcquisitionSession(
             session_id="cleanup_session_001",
             dataset_id="cleanup_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "sessions"
         )
         manager.acquisition_sessions.save(session)
@@ -576,7 +488,7 @@ class TestDatasetRepositoryManager:
             analysis_id="cleanup_analysis_valid",
             dataset_id="cleanup_dataset_001",
             session_id="cleanup_session_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "analyses"
         )
         manager.analysis_results.save(valid_analysis)
@@ -585,7 +497,7 @@ class TestDatasetRepositoryManager:
             analysis_id="cleanup_analysis_orphaned",
             dataset_id="cleanup_dataset_001",
             session_id="nonexistent_session",  # This session doesn't exist
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "analyses"
         )
         manager.analysis_results.save(orphaned_analysis)
@@ -610,12 +522,12 @@ class TestDatasetRepositoryManager:
 
         # Mock a failure in the stimulus repository
         with patch.object(manager.stimulus_datasets, 'get_storage_info', side_effect=Exception("Storage error")):
-            with pytest.raises(RepositoryError):
+            with pytest.raises(ISIDomainError):
                 manager.get_system_overview()
 
         # Mock failure in cleanup
         with patch.object(manager.acquisition_sessions, 'list_sessions', side_effect=Exception("List error")):
-            with pytest.raises(RepositoryError):
+            with pytest.raises(ISIDomainError):
                 manager.cleanup_orphaned_data()
 
 
@@ -639,7 +551,7 @@ class TestRepositoryIntegration:
                 spatial_frequency_cpd=0.04,
                 cycles_per_trial=5
             ),
-            acquisition_params=AcquisitionProtocolParams(
+            protocol_params=AcquisitionProtocolParams(
                 frame_rate_hz=30.0,
                 frame_width=512,
                 frame_height=512,
@@ -652,24 +564,24 @@ class TestRepositoryIntegration:
             )
         )
 
-    def test_complete_workflow_persistence(self, temp_base_path, sample_parameters):
+    def test_complete_workflow_persistence(self, temp_base_path, minimal_parameters):
         """Test complete workflow data persistence"""
         manager = DatasetRepositoryManager(temp_base_path)
 
         # Step 1: Create and save stimulus dataset
         dataset = StimulusDataset(
             dataset_id="workflow_dataset_001",
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "datasets"
         )
-        dataset.mark_as_complete()
+        dataset.mark_completed()
         dataset_path = manager.stimulus_datasets.save(dataset)
 
         # Step 2: Create and save acquisition session
         session = AcquisitionSession(
             session_id="workflow_session_001",
             dataset_id=dataset.dataset_id,
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "sessions"
         )
         session.start_acquisition()
@@ -684,7 +596,7 @@ class TestRepositoryIntegration:
             analysis_id="workflow_analysis_001",
             dataset_id=dataset.dataset_id,
             session_id=session.session_id,
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "analyses"
         )
         analysis.quality_score = 0.8
@@ -712,7 +624,7 @@ class TestRepositoryIntegration:
         assert overview["acquisition_sessions"]["count"] == 1
         assert overview["analysis_results"]["count"] == 1
 
-    def test_cross_repository_queries(self, temp_base_path, sample_parameters):
+    def test_cross_repository_queries(self, temp_base_path, minimal_parameters):
         """Test queries across different repositories"""
         manager = DatasetRepositoryManager(temp_base_path)
 
@@ -723,7 +635,7 @@ class TestRepositoryIntegration:
         # Dataset
         dataset = StimulusDataset(
             dataset_id=dataset_id,
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "datasets"
         )
         manager.stimulus_datasets.save(dataset)
@@ -732,7 +644,7 @@ class TestRepositoryIntegration:
         session = AcquisitionSession(
             session_id=session_id,
             dataset_id=dataset_id,
-            parameters=sample_parameters,
+            parameters=minimal_parameters,
             base_path=temp_base_path / "sessions"
         )
         manager.acquisition_sessions.save(session)
@@ -743,7 +655,7 @@ class TestRepositoryIntegration:
                 analysis_id=f"cross_analysis_{i:03d}",
                 dataset_id=dataset_id,
                 session_id=session_id,
-                parameters=sample_parameters,
+                parameters=minimal_parameters,
                 base_path=temp_base_path / "analyses"
             )
             manager.analysis_results.save(analysis)

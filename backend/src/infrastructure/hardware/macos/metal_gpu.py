@@ -1,7 +1,7 @@
 """Metal GPU Implementation for macOS"""
 
 from typing import Dict, Any, Optional
-from ..abstract.gpu_interface import GPUInterface, GPUStatus
+from abstract.gpu_interface import GPUInterface, GPUStatus
 
 
 class MetalGPU(GPUInterface):

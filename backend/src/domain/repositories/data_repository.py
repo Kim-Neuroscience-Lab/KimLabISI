@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List, Tuple, Union
 from pathlib import Path
 
-from ..value_objects.parameters import CombinedParameters
+from domain.value_objects.parameters import CombinedParameters
 
 # Domain-appropriate type aliases instead of numpy
 DataType = Union[str, int, float]  # Generic data type specification

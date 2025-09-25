@@ -14,10 +14,11 @@ import asyncio
 from src.application.services.communication_service import (
     CommunicationService,
     ConnectionState,
+    CommunicationError
+)
+from src.infrastructure.communication.ipc_server import (
     MessageType,
-    CommunicationError,
-    MessageHandler,
-    ConnectionMetrics
+    IPCMessage
 )
 from src.domain.value_objects.workflow_state import WorkflowState
 

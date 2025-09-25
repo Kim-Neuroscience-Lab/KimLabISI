@@ -22,10 +22,10 @@ from pathlib import Path
 # from ...domain.value_objects.stimulus_params import (
 #     StimulusParams, VisualFieldParams, AcquisitionProtocolParams
 # )
-from ...domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
-from ...domain.entities.parameters import ParameterManager
-from ...domain.value_objects.parameters import CombinedParameters, AcquisitionProtocolParams
-from ..algorithms.pattern_generators import PatternGenerator
+from domain.value_objects.workflow_state import WorkflowState, HardwareRequirement
+from domain.entities.parameters import ParameterManager
+from domain.value_objects.parameters import CombinedParameters, AcquisitionProtocolParams
+from application.algorithms.pattern_generators import PatternGenerator
 
 logger = logging.getLogger(__name__)
 

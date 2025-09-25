@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
-from ..value_objects.parameters import CombinedParameters
+from domain.value_objects.parameters import CombinedParameters
 
 
 class SessionStatus(Enum):

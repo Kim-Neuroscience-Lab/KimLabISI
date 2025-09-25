@@ -16,9 +16,9 @@ from datetime import datetime
 
 from src.application.services.communication_service import (
     CommunicationService,
-    ConnectionState,
-    MessageType
+    ConnectionState
 )
+from src.infrastructure.communication.ipc_server import MessageType
 from src.application.handlers.state_broadcaster import (
     StateBroadcaster,
     BroadcastType
