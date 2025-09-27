@@ -1,0 +1,95 @@
+{
+  "name": "isi-macroscope-frontend",
+  "version": "1.0.0",
+  "description": "ISI Macroscope Control System - Electron Frontend (Thin Client)",
+  "main": "electron/main.js",
+  "author": "ISI Lab",
+  "license": "MIT",
+  "private": true,
+  "homepage": "./",
+  "scripts": {
+    "start": "electron .",
+    "dev": "npm run build:all && NODE_ENV=development electron . --dev",
+    "build": "vite build",
+    "build:electron": "tsc electron/main.ts electron/preload.ts --outDir electron --module commonjs --target es2020 --esModuleInterop --skipLibCheck",
+    "build:all": "npm run build && npm run build:electron",
+    "test": "echo 'Frontend tests would go here'",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.9.2",
+    "vite": "^7.1.7",
+    "ws": "^8.14.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "electron": "^27.3.11",
+    "electron-builder": "^24.6.0",
+    "typescript": "^5.9.2"
+  },
+  "build": {
+    "appId": "com.isilab.macroscope",
+    "productName": "ISI Macroscope Control System",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  },
+  "keywords": [
+    "electron",
+    "isi",
+    "macroscope",
+    "neuroscience",
+    "thin-client",
+    "control-system"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/isilab/macroscope-control"
+  }
+}

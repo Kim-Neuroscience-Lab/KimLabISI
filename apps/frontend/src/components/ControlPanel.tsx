@@ -471,7 +471,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
 
         if (response && response.cameras && Array.isArray(response.cameras)) {
-          setAvailableCameras(response.cameras)
+          // Extract camera names from backend camera objects
+          const cameraNames = response.cameras
+            .filter(camera => camera.is_available)
+            .map(camera => camera.name)
+          setAvailableCameras(cameraNames)
           return
         }
       } catch (error) {

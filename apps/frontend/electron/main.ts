@@ -43,7 +43,7 @@ class PythonBackendManager {
 
   start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log('Starting Python backend...')
+      console.log('Starting Python backend with fixed paths...')
 
       // Start Python process with IPC communication
       const isDevelopment = process.env.NODE_ENV !== 'production' || process.env.VITE_DEV_SERVER_URL
@@ -54,10 +54,10 @@ class PythonBackendManager {
       this.process = spawn('poetry', ['run', 'python', 'src/isi_control/main.py'], {
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: backendDir,
-        shell: true,
         env: {
           ...process.env,
-          PYTHONPATH: 'src'
+          PYTHONPATH: 'src',
+          PATH: process.env.PATH + ':/usr/local/bin:/opt/homebrew/bin:~/.local/bin'
         }
       })
 

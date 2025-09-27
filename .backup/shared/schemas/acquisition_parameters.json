@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ISI Macroscope Acquisition Parameters",
+  "description": "JSON schema for acquisition protocol parameters following ADR-0007 parameter separation",
+  "type": "object",
+  "properties": {
+    "protocol_params": {
+      "type": "object",
+      "title": "Acquisition Protocol Parameters",
+      "description": "Parameters controlling experimental execution (do not affect stimulus content)",
+      "properties": {
+        "num_cycles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 10,
+          "description": "Number of stimulus cycles (Marshel et al.: 10 drifts per direction)"
+        },
+        "repetitions_per_direction": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1,
+          "description": "Number of repetitions for each direction"
+        },
+        "frame_rate": {
+          "type": "number",
+          "minimum": 30.0,
+          "maximum": 120.0,
+          "default": 60.0,
+          "description": "Display frame rate in Hz"
+        },
+        "session_name_pattern": {
+          "type": "string",
+          "default": "ISI_Mapping_{timestamp}",
+          "description": "Session naming pattern with placeholders"
+        },
+        "export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["hdf5", "png", "tiff", "mat", "csv"]
+          },
+          "default": ["hdf5", "png"],
+          "description": "Data export formats for analysis"
+        }
+      },
+      "required": [
+        "num_cycles",
+        "repetitions_per_direction",
+        "frame_rate",
+        "session_name_pattern",
+        "export_formats"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": ["protocol_params"],
+  "additionalProperties": false
+}
