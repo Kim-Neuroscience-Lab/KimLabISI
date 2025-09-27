@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles for scientific interface */
+@layer base {
+  html {
+    @apply bg-sci-secondary-900 text-sci-secondary-100;
+  }
+
+  body {
+    @apply font-sans antialiased;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-sci-secondary-800;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-sci-secondary-600 rounded;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-sci-secondary-500;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Status indicator */
+  .status-indicator {
+    @apply w-3 h-3 rounded-full inline-block;
+  }
+
+  .status-indicator.online {
+    @apply bg-sci-success-500 animate-pulse-slow;
+  }
+
+  .status-indicator.offline {
+    @apply bg-sci-secondary-600;
+  }
+
+  .status-indicator.error {
+    @apply bg-sci-danger-500 animate-pulse;
+  }
+
+  .status-indicator.warning {
+    @apply bg-sci-accent-500;
+  }
+
+  /* Scientific button styles */
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-sci-secondary-900;
+  }
+
+  .btn-primary {
+    @apply bg-sci-primary-600 text-white hover:bg-sci-primary-700 focus:ring-sci-primary-500;
+  }
+
+  .btn-secondary {
+    @apply bg-sci-secondary-600 text-sci-secondary-100 hover:bg-sci-secondary-700 focus:ring-sci-secondary-500;
+  }
+
+  .btn-danger {
+    @apply bg-sci-danger-600 text-white hover:bg-sci-danger-700 focus:ring-sci-danger-500;
+  }
+
+  .btn-success {
+    @apply bg-sci-success-600 text-white hover:bg-sci-success-700 focus:ring-sci-success-500;
+  }
+
+  /* Panel styles */
+  .panel {
+    @apply bg-sci-secondary-800 border border-sci-secondary-700 rounded-lg shadow-lg;
+  }
+
+  .panel-header {
+    @apply px-4 py-3 border-b border-sci-secondary-700 bg-sci-secondary-800/50;
+  }
+
+  .panel-title {
+    @apply text-lg font-semibold text-sci-secondary-100;
+  }
+
+  .panel-body {
+    @apply p-4;
+  }
+
+  /* Form styles */
+  .form-group {
+    @apply mb-4;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-sci-secondary-300 mb-2;
+  }
+
+  .form-input {
+    @apply w-full px-3 py-2 bg-sci-secondary-700 border border-sci-secondary-600 rounded-md text-sci-secondary-100 placeholder-sci-secondary-400 focus:outline-none focus:ring-2 focus:ring-sci-primary-500 focus:border-transparent;
+  }
+
+  .form-select {
+    @apply w-full px-3 py-2 bg-sci-secondary-700 border border-sci-secondary-600 rounded-md text-sci-secondary-100 focus:outline-none focus:ring-2 focus:ring-sci-primary-500 focus:border-transparent;
+  }
+
+  /* Emergency stop button */
+  .emergency-stop {
+    @apply relative bg-gradient-to-br from-sci-danger-600 to-sci-danger-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transform transition-all duration-150 hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-sci-danger-300;
+  }
+
+  .emergency-stop::before {
+    @apply absolute inset-0 rounded-full bg-gradient-to-br from-sci-danger-400 to-sci-danger-600 opacity-0 transition-opacity duration-200;
+    content: '';
+  }
+
+  .emergency-stop:hover::before {
+    @apply opacity-100;
+  }
+
+  /* Data display */
+  .metric-display {
+    @apply bg-sci-secondary-800 rounded-lg p-4 border border-sci-secondary-700;
+  }
+
+  .metric-value {
+    @apply text-2xl font-mono font-bold text-sci-primary-400;
+  }
+
+  .metric-label {
+    @apply text-sm text-sci-secondary-400;
+  }
+
+  /* Live data visualization */
+  .data-stream {
+    @apply relative overflow-hidden bg-sci-secondary-900 rounded border border-sci-secondary-700;
+  }
+
+  .data-stream::after {
+    @apply absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-sci-primary-400 to-sci-primary-600 animate-data-flow;
+    content: '';
+  }
+}
