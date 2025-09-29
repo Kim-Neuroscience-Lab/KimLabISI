@@ -1,13 +1,15 @@
-import React from 'react'
-import { Video, Columns3, BrainCircuit, Cable, MonitorCheck, LucideIcon } from 'lucide-react'
+import React, { useEffect } from 'react'
+import { Video, Columns3, BrainCircuit, BookMarked, MonitorCheck, Settings, LucideIcon } from 'lucide-react'
 
 interface SystemState {
   isConnected: boolean
   isExperimentRunning: boolean
   currentProgress: number
-  hardwareStatus: {
+  systemStatus: {
     camera: 'online' | 'offline' | 'error'
     display: 'online' | 'offline' | 'error'
+    stimulus: 'online' | 'offline' | 'error'
+    parameters: 'online' | 'offline' | 'error'
   }
 }
 
@@ -19,8 +21,8 @@ interface TabConfig {
 
 interface HeaderProps {
   systemState: SystemState
-  activeTab: 'camera' | 'stimulus' | 'analysis'
-  onTabChange: (tab: 'camera' | 'stimulus' | 'analysis') => void
+  activeTab: 'camera' | 'stimulus' | 'analysis' | 'startup'
+  onTabChange?: (tab: 'camera' | 'stimulus' | 'analysis') => void
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -36,26 +38,38 @@ const Header: React.FC<HeaderProps> = ({
     }
   }
 
-  const getOverallStatus = () => {
-    const backendOnline = systemState.isConnected
-    const displayOnline = systemState.hardwareStatus.display === 'online'
-    const cameraOnline = systemState.hardwareStatus.camera === 'online'
 
-    const hasError = systemState.hardwareStatus.display === 'error' ||
-                     systemState.hardwareStatus.camera === 'error'
+  const getOverallStatus = () => {
+    const parametersOnline = systemState.systemStatus.parameters === 'online'
+    const displayOnline = systemState.systemStatus.display === 'online'
+    const cameraOnline = systemState.systemStatus.camera === 'online'
+    const stimulusOnline = systemState.systemStatus.stimulus === 'online'
+
+    const hasError = systemState.systemStatus.parameters === 'error' ||
+                     systemState.systemStatus.display === 'error' ||
+                     systemState.systemStatus.camera === 'error' ||
+                     systemState.systemStatus.stimulus === 'error'
+
+    // All systems must be online for OK status
+    const allSystemsOnline = parametersOnline && displayOnline && cameraOnline && stimulusOnline
+
+    // Show connecting state when not everything is online but no explicit errors
+    const isConnecting = !allSystemsOnline && !hasError
 
     if (hasError) {
       return { text: 'ERROR', color: 'text-sci-error-400' }
-    } else if (backendOnline && displayOnline && cameraOnline) {
+    } else if (allSystemsOnline) {
       return { text: 'OK', color: 'text-sci-success-400' }
+    } else if (isConnecting) {
+      return { text: 'CONNECTING', color: 'text-sci-secondary-200' }
     } else {
       return { text: 'ERROR', color: 'text-sci-error-400' }
     }
   }
 
   const tabs: TabConfig[] = [
-    { id: 'camera', label: 'Camera Feed', icon: Video },
-    { id: 'stimulus', label: 'Stimulus Feed', icon: Columns3 },
+    { id: 'stimulus', label: 'Stimulus Generation', icon: Columns3 },
+    { id: 'camera', label: 'Acquisition', icon: Video },
     { id: 'analysis', label: 'Analysis', icon: BrainCircuit }
   ]
 
@@ -66,15 +80,20 @@ const Header: React.FC<HeaderProps> = ({
         {tabs.map(tab => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
+          const isDisabled = !onTabChange
+          const isClickable = onTabChange
 
           return (
             <button
               key={tab.id}
-              onClick={() => onTabChange(tab.id)}
+              onClick={isClickable ? () => onTabChange(tab.id) : undefined}
+              disabled={isDisabled}
               className={`h-12 px-3 flex items-center justify-center text-sm font-medium transition-colors ${
                 isActive
                   ? 'text-sci-primary-400'
-                  : 'text-sci-secondary-400 hover:text-sci-primary-400'
+                  : isDisabled
+                  ? 'text-sci-secondary-600 cursor-not-allowed'
+                  : 'text-sci-secondary-400 hover:text-sci-primary-400 cursor-pointer'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -105,21 +124,27 @@ const Header: React.FC<HeaderProps> = ({
         {/* Status Icons - mirror the tab icon structure */}
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Backend: ${systemState.isConnected ? 'Online' : 'Offline'}`}
+          title={`Parameters: ${systemState.systemStatus.parameters}`}
         >
-          <Cable className={`w-4 h-4 ${getIconColor(systemState.isConnected ? 'online' : 'offline')}`} />
+          <BookMarked className={`w-4 h-4 ${getIconColor(systemState.systemStatus.parameters)}`} />
         </div>
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Display: ${systemState.hardwareStatus.display}`}
+          title={`Display: ${systemState.systemStatus.display}`}
         >
-          <MonitorCheck className={`w-4 h-4 ${getIconColor(systemState.hardwareStatus.display)}`} />
+          <MonitorCheck className={`w-4 h-4 ${getIconColor(systemState.systemStatus.display)}`} />
         </div>
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Camera: ${systemState.hardwareStatus.camera}`}
+          title={`Camera: ${systemState.systemStatus.camera}`}
         >
-          <Video className={`w-4 h-4 ${getIconColor(systemState.hardwareStatus.camera)}`} />
+          <Video className={`w-4 h-4 ${getIconColor(systemState.systemStatus.camera)}`} />
+        </div>
+        <div
+          className="h-12 px-3 flex items-center justify-center"
+          title={`Stimulus: ${systemState.systemStatus.stimulus}`}
+        >
+          <Columns3 className={`w-4 h-4 ${getIconColor(systemState.systemStatus.stimulus)}`} />
         </div>
 
         {systemState.isExperimentRunning && (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import ControlPanel from './components/ControlPanel'
 import MainViewport from './components/MainViewport'
 import Console from './components/Console'
@@ -8,9 +8,11 @@ interface SystemState {
   isConnected: boolean
   isExperimentRunning: boolean
   currentProgress: number
-  hardwareStatus: {
+  systemStatus: {
     camera: 'online' | 'offline' | 'error'
     display: 'online' | 'offline' | 'error'
+    stimulus: 'online' | 'offline' | 'error'
+    parameters: 'online' | 'offline' | 'error'
   }
 }
 
@@ -19,38 +21,51 @@ function App() {
     isConnected: false,
     isExperimentRunning: false,
     currentProgress: 0,
-    hardwareStatus: {
+    systemStatus: {
       camera: 'offline',
-      display: 'offline'
+      display: 'offline',
+      stimulus: 'offline',
+      parameters: 'offline'
     }
   })
 
-  const [currentSession, setCurrentSession] = useState<string | null>(null)
+  const [, setCurrentSession] = useState<string | null>(null)
   const [logMessages, setLogMessages] = useState<string[]>([])
-  const [isControlPanelCollapsed, setIsControlPanelCollapsed] = useState(false)
+  const [, setIsControlPanelCollapsed] = useState(false)
+  const [startupProgress, setStartupProgress] = useState<{
+    phase: string
+    message: string
+    error?: boolean
+  }>({
+    phase: 'initializing',
+    message: 'Starting system...'
+  })
 
-  const { sendCommand, isReady, lastMessage, connectionError } = useISISystem()
+  // All parameters managed by backend - no frontend state
+  // Hardware lists come from backend parameter manager
+
+  const { sendCommand, isReady, lastMessage, connectionError, initState } = useISISystem()
+
+  // Use centralized hardware status management
+  // Remove hardware status hook - backend will manage all health checking
 
   // Handle system initialization and errors
   useEffect(() => {
-    if (isReady) {
+    if (initState === 'system-ready') {
       setSystemState(prev => ({
         ...prev,
         isConnected: true
       }))
-      addLogMessage('System connected and ready')
     } else if (connectionError) {
       setSystemState(prev => ({
         ...prev,
-        isConnected: false,
-        hardwareStatus: {
-          camera: 'error',
-          display: 'error'
-        }
+        isConnected: false
       }))
-      addLogMessage(`System error: ${connectionError}`)
+      addLogMessage(`✗ System error: ${connectionError}`)
     }
-  }, [isReady, connectionError])
+  }, [initState, connectionError])
+
+
 
   // Handle incoming messages from Python backend
   useEffect(() => {
@@ -61,7 +76,6 @@ function App() {
         case 'system_status':
           setSystemState(prev => ({
             ...prev,
-            hardwareStatus: lastMessage.hardware_status,
             isExperimentRunning: lastMessage.experiment_running
           }))
           break
@@ -71,6 +85,26 @@ function App() {
             ...prev,
             currentProgress: lastMessage.progress
           }))
+          break
+
+        case 'system_health':
+        case 'system_health_detailed':
+          if (lastMessage.hardware_status) {
+            setSystemState(prev => ({
+              ...prev,
+              systemStatus: lastMessage.hardware_status
+            }))
+          }
+          break
+
+
+        case 'startup_status':
+          // Update startup progress from coordinated startup sequence
+          setStartupProgress({
+            phase: lastMessage.phase,
+            message: lastMessage.message,
+            error: lastMessage.error
+          })
           break
 
         case 'log_message':
@@ -90,61 +124,13 @@ function App() {
     }
   }, [lastMessage])
 
-  // Periodic status monitoring
-  useEffect(() => {
-    if (!isReady) return
-
-    const statusInterval = setInterval(async () => {
-      try {
-        await window.electronAPI.getSystemStatus()
-      } catch (error) {
-        console.error('Status check failed:', error)
-      }
-    }, 30000) // Check every 30 seconds
-
-    // Initial status check
-    window.electronAPI.getSystemStatus().catch(console.error)
-
-    return () => clearInterval(statusInterval)
-  }, [isReady])
+  // Backend automatically manages health checking and sends updates
 
   const addLogMessage = (message: string) => {
     const timestamp = new Date().toLocaleTimeString()
     setLogMessages(prev => [...prev.slice(-49), `[${timestamp}] ${message}`])
   }
 
-  const handleEmergencyStop = async () => {
-    try {
-      await window.electronAPI.emergencyStop()
-      addLogMessage('EMERGENCY STOP activated')
-      setSystemState(prev => ({
-        ...prev,
-        isExperimentRunning: false,
-        currentProgress: 0
-      }))
-    } catch (error) {
-      console.error('Emergency stop failed:', error)
-      addLogMessage('ERROR: Emergency stop failed')
-    }
-  }
-
-  const handleStartExperiment = async (params: any) => {
-    try {
-      await sendCommand({
-        type: 'start_experiment',
-        parameters: params
-      })
-      setSystemState(prev => ({
-        ...prev,
-        isExperimentRunning: true,
-        currentProgress: 0
-      }))
-      addLogMessage('Experiment started')
-    } catch (error) {
-      console.error('Failed to start experiment:', error)
-      addLogMessage('ERROR: Failed to start experiment')
-    }
-  }
 
   const handleStopExperiment = async () => {
     try {
@@ -163,6 +149,7 @@ function App() {
     }
   }
 
+  // Main application - always render the full layout
   return (
     <div className="h-screen flex flex-col bg-sci-secondary-900 text-sci-secondary-100">
       {/* Main Content Area */}
@@ -172,11 +159,12 @@ function App() {
           <ControlPanel
             isConnected={systemState.isConnected}
             isExperimentRunning={systemState.isExperimentRunning}
-            hardwareStatus={systemState.hardwareStatus}
             onStopExperiment={handleStopExperiment}
             sendCommand={sendCommand}
             onCollapseChange={setIsControlPanelCollapsed}
             isReady={isReady}
+            lastMessage={lastMessage}
+            systemStatus={systemState.systemStatus}
           />
         </div>
 
@@ -184,6 +172,11 @@ function App() {
         <div className="flex-1 flex flex-col">
           <MainViewport
             systemState={systemState}
+            sendCommand={sendCommand}
+            lastMessage={lastMessage}
+            initState={initState}
+            connectionError={connectionError}
+            startupProgress={startupProgress}
           />
         </div>
       </div>

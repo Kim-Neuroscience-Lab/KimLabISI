@@ -1,0 +1,119 @@
+{
+  "current": {
+    "acquisition": {
+      "baseline_sec": 5.0,
+      "between_sec": 5.0,
+      "cycles": 10,
+      "directions": [
+        "LR",
+        "RL",
+        "TB",
+        "BT"
+      ]
+    },
+    "analysis": {
+      "area_min_size_mm2": 0.1,
+      "gradient_window_size": 3,
+      "magnitude_threshold": 0.1,
+      "phase_filter_sigma": 0.5,
+      "response_threshold_percent": 5.0,
+      "ring_size_mm": 1.0,
+      "smoothing_sigma": 1.0,
+      "vfs_threshold_sd": 2.0
+    },
+    "camera": {
+      "available_cameras": [
+        "FaceTime HD Camera"
+      ],
+      "camera_fps": 30,
+      "camera_height_px": 1080,
+      "camera_width_px": 1920,
+      "selected_camera": "FaceTime HD Camera"
+    },
+    "monitor": {
+      "available_displays": [
+        "Color LCD",
+        "RTK FHD"
+      ],
+      "monitor_distance_cm": 10.0,
+      "monitor_fps": 60,
+      "monitor_height_cm": 36.195,
+      "monitor_height_px": 1080,
+      "monitor_lateral_angle_deg": 30.0,
+      "monitor_tilt_angle_deg": 20.0,
+      "monitor_width_cm": 60.96,
+      "monitor_width_px": 1920,
+      "selected_display": "RTK FHD"
+    },
+    "session": {
+      "animal_age": "",
+      "animal_id": "",
+      "created_at": "2025-09-28T15:22:27.071857",
+      "last_modified": "2025-09-28T20:55:58.600018",
+      "session_name": ""
+    },
+    "stimulus": {
+      "bar_width_deg": 20.0,
+      "checker_size_deg": 25.0,
+      "contrast": 1.0,
+      "drift_speed_deg_per_sec": 9.0,
+      "strobe_rate_hz": 6.0
+    }
+  },
+  "default": {
+    "acquisition": {
+      "baseline_sec": 5.0,
+      "between_sec": 5.0,
+      "cycles": 10,
+      "directions": [
+        "LR",
+        "RL",
+        "TB",
+        "BT"
+      ]
+    },
+    "analysis": {
+      "area_min_size_mm2": 0.1,
+      "gradient_window_size": 3,
+      "magnitude_threshold": 0.1,
+      "phase_filter_sigma": 0.5,
+      "response_threshold_percent": 5.0,
+      "ring_size_mm": 1.0,
+      "smoothing_sigma": 1.0,
+      "vfs_threshold_sd": 2.0
+    },
+    "camera": {
+      "available_cameras": [],
+      "camera_fps": -1,
+      "camera_height_px": -1,
+      "camera_width_px": -1,
+      "selected_camera": ""
+    },
+    "monitor": {
+      "available_displays": [],
+      "monitor_distance_cm": 10.0,
+      "monitor_fps": -1,
+      "monitor_height_cm": 36.195,
+      "monitor_height_px": -1,
+      "monitor_lateral_angle_deg": 30.0,
+      "monitor_tilt_angle_deg": 20.0,
+      "monitor_width_cm": 60.96,
+      "monitor_width_px": -1,
+      "selected_display": ""
+    },
+    "session": {
+      "animal_age": "",
+      "animal_id": "",
+      "created_at": "",
+      "last_modified": "",
+      "session_name": ""
+    },
+    "stimulus": {
+      "bar_width_deg": 20.0,
+      "checker_size_deg": 25.0,
+      "contrast": 1.0,
+      "drift_speed_deg_per_sec": 9.0,
+      "strobe_rate_hz": 6.0
+    }
+  }
+}

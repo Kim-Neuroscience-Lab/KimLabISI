@@ -152,14 +152,6 @@ class CameraManager:
                 logger.debug(f"Failed to access camera index {i}: {e}")
                 continue
 
-        # Add PCO Camera as a mock entry if no real PCO camera is detected
-        # This allows the UI to show the PCO option even when it's not connected
-        pco_detected = any("PCO" in cam.name for cam in self.detected_cameras)
-        if not pco_detected:
-            pco_camera = CameraInfo(index=-1, name="PCO Camera", backend="PCO SDK")
-            pco_camera.is_available = False  # Mark as unavailable since it's mock
-            self.detected_cameras.insert(0, pco_camera)
-
         logger.info(f"Camera detection complete. Found {len([c for c in self.detected_cameras if c.is_available])} working cameras")
         return self.detected_cameras
 
@@ -292,27 +284,44 @@ class CameraManager:
             logger.error(f"Error getting camera property: {e}")
             return None
 
-    def get_camera_capabilities(self, camera_index: int) -> Optional[Dict[str, Any]]:
-        """Get detailed camera capabilities by temporarily opening camera.
+    def get_camera_capabilities(self, camera_name: str) -> Optional[Dict[str, Any]]:
+        """Get detailed camera capabilities from already-detected camera info.
 
         Args:
-            camera_index: Index of camera to get capabilities for
+            camera_name: Name of camera to get capabilities for
 
         Returns:
             Dictionary with camera capabilities or None if failed
         """
         try:
-            cap = cv2.VideoCapture(camera_index)
-            if not cap.isOpened():
+            # If no cameras detected yet, trigger detection
+            if not self.detected_cameras:
+                logger.info("No detected cameras available, triggering camera detection")
+                self.detect_cameras()
+
+            # First try exact match by name
+            camera = next((c for c in self.detected_cameras if c.name == camera_name and c.is_available), None)
+
+            # If no exact match, try partial match (handles device IDs in parentheses)
+            if not camera:
+                camera = next((c for c in self.detected_cameras if
+                              (camera_name.startswith(c.name) or c.name in camera_name) and c.is_available), None)
+
+            if not camera:
+                logger.warning(f"Camera not found in detected cameras: {camera_name}")
                 return None
 
+            if not camera.properties:
+                logger.warning(f"No properties available for camera: {camera_name}")
+                return None
+
+            # Return capabilities in same format expected by frontend
             capabilities = {
-                "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                "frameRate": cap.get(cv2.CAP_PROP_FPS)
+                "width": camera.properties.get("width", -1),
+                "height": camera.properties.get("height", -1),
+                "frameRate": camera.properties.get("fps", -1)
             }
 
-            cap.release()
             return capabilities
 
         except Exception as e:
@@ -335,12 +344,14 @@ def handle_detect_cameras(command: Dict[str, Any]) -> Dict[str, Any]:
 
         return {
             "success": True,
+            "type": "detect_cameras",
             "cameras": camera_list
         }
     except Exception as e:
         logger.error(f"Camera detection failed: {e}")
         return {
             "success": False,
+            "type": "detect_cameras",
             "error": str(e),
             "cameras": []
         }
@@ -350,50 +361,26 @@ def handle_get_camera_capabilities(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_camera_capabilities IPC command."""
     try:
         camera_name = command.get("camera_name")
-        camera_index = command.get("camera_index")
 
-        if not camera_name and camera_index is None:
+        if not camera_name:
             return {
                 "success": False,
-                "error": "Either camera_name or camera_index is required"
+                "type": "get_camera_capabilities",
+                "error": "camera_name is required"
             }
 
-        # Find camera by name or use index directly
-        target_index = camera_index
-        if camera_name and camera_index is None:
-            cameras = camera_manager.detect_cameras()
-
-            # First try exact match
-            for camera in cameras:
-                if camera.name == camera_name:
-                    target_index = camera.index
-                    break
-
-            # If no exact match, try partial match (handles device IDs in parentheses)
-            if target_index is None:
-                for camera in cameras:
-                    # Check if the camera name starts with our detected name
-                    # This handles cases like "FaceTime HD Camera (2C0E:82E3)" matching "FaceTime HD Camera"
-                    if camera_name.startswith(camera.name) or camera.name in camera_name:
-                        target_index = camera.index
-                        break
-
-            if target_index is None:
-                return {
-                    "success": False,
-                    "error": f"Camera not found: {camera_name}"
-                }
-
-        capabilities = camera_manager.get_camera_capabilities(target_index)
+        capabilities = camera_manager.get_camera_capabilities(camera_name)
 
         if capabilities is None:
             return {
                 "success": False,
-                "error": "Failed to retrieve camera capabilities"
+                "type": "get_camera_capabilities",
+                "error": f"Camera not found: {camera_name}"
             }
 
         return {
             "success": True,
+            "type": "get_camera_capabilities",
             "capabilities": capabilities
         }
 
@@ -401,6 +388,65 @@ def handle_get_camera_capabilities(command: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Failed to get camera capabilities: {e}")
         return {
             "success": False,
+            "type": "get_camera_capabilities",
+            "error": str(e)
+        }
+
+
+def handle_camera_stream_started(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_stream_started IPC command"""
+    try:
+        camera_name = command.get('camera_name', 'unknown')
+        logger.info(f"Camera stream started: {camera_name}")
+        return {
+            "success": True,
+            "type": "camera_stream_started",
+            "message": f"Camera stream started for {camera_name}"
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_camera_stream_started: {e}")
+        return {
+            "success": False,
+            "type": "camera_stream_started",
+            "error": str(e)
+        }
+
+
+def handle_camera_stream_stopped(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_stream_stopped IPC command"""
+    try:
+        camera_name = command.get('camera_name', 'unknown')
+        logger.info(f"Camera stream stopped: {camera_name}")
+        return {
+            "success": True,
+            "type": "camera_stream_stopped",
+            "message": f"Camera stream stopped for {camera_name}"
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_camera_stream_stopped: {e}")
+        return {
+            "success": False,
+            "type": "camera_stream_stopped",
+            "error": str(e)
+        }
+
+
+def handle_camera_capture(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_capture IPC command"""
+    try:
+        camera_name = command.get('camera_name', 'unknown')
+        timestamp = command.get('timestamp', 'unknown')
+        logger.info(f"Camera capture from {camera_name} at {timestamp}")
+        return {
+            "success": True,
+            "type": "camera_capture",
+            "message": f"Camera capture logged for {camera_name}"
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_camera_capture: {e}")
+        return {
+            "success": False,
+            "type": "camera_capture",
             "error": str(e)
         }
 

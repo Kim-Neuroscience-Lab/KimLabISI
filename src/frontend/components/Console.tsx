@@ -1,14 +1,10 @@
 import React, { useState } from 'react'
-import { SquareChevronRight } from 'lucide-react'
+import { SquareChevronRight, Github } from 'lucide-react'
 
 interface ConsoleProps {
   logMessages: string[]
 }
 
-interface MessageCounts {
-  errors: number
-  warnings: number
-}
 
 const Console: React.FC<ConsoleProps> = ({
   logMessages
@@ -19,74 +15,77 @@ const Console: React.FC<ConsoleProps> = ({
     setIsCollapsed(!isCollapsed)
   }
 
-  const getMessageCounts = (): MessageCounts => {
-    const counts = { errors: 0, warnings: 0 }
-    logMessages.forEach(message => {
-      const lowerMessage = message.toLowerCase()
-      if (lowerMessage.includes('error') || lowerMessage.includes('failed') || lowerMessage.includes('fail')) {
-        counts.errors++
-      } else if (lowerMessage.includes('warning') || lowerMessage.includes('warn')) {
-        counts.warnings++
-      }
-    })
-    return counts
+  const openGitHub = () => {
+    window.open('https://github.com/Kim-Neuroscience-Lab/KimLabISI.git', '_blank')
   }
 
-  const counts = getMessageCounts()
+  const mostRecentMessage = logMessages.length > 0 ? logMessages[logMessages.length - 1] : null
 
   if (isCollapsed) {
     return (
-      <div className="h-12 bg-sci-secondary-800 border-t border-sci-secondary-700 flex items-center px-4">
-        {/* Collapsed Console - Bottom Bar */}
-        <div className="flex items-center gap-3">
+      <div className="h-12 bg-sci-secondary-800 border-t border-sci-secondary-700 flex items-center">
+        {/* Console Icon */}
+        <div className="h-12 w-12 flex items-center justify-center border-r border-sci-secondary-700">
           <SquareChevronRight
             className="w-6 h-6 cursor-pointer text-sci-secondary-200 hover:text-sci-primary-400 transition-colors"
             onClick={toggleConsole}
           />
         </div>
-        <div className="flex-1"></div>
-        <div className="flex items-center gap-4">
-          {counts.errors > 0 && (
-            <span className="text-xs text-sci-error-400">
-              {counts.errors} errors
-            </span>
+        {/* Most recent message */}
+        <div className="flex-1 mx-4 overflow-hidden">
+          {mostRecentMessage ? (
+            <div className="text-xs font-mono text-sci-secondary-300 truncate">
+              {mostRecentMessage}
+            </div>
+          ) : (
+            <div className="text-xs text-sci-secondary-500 italic">
+              No messages
+            </div>
           )}
-          {counts.warnings > 0 && (
-            <span className="text-xs text-sci-warning-400">
-              {counts.warnings} warnings
-            </span>
-          )}
+        </div>
+        {/* GitHub Icon */}
+        <div className="h-12 w-12 flex items-center justify-center">
+          <Github
+            className="w-6 h-6 cursor-pointer text-sci-secondary-200 hover:text-sci-primary-400 transition-colors"
+            onClick={openGitHub}
+          />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="h-64 bg-sci-secondary-800 border-t border-sci-secondary-700 flex flex-col">
+    <div className="bg-sci-secondary-800 border-t border-sci-secondary-700 flex flex-col" style={{ height: '256px', minHeight: '256px', maxHeight: '256px' }}>
       {/* Console Header */}
-      <div className="h-12 flex items-center justify-between px-4 border-b border-sci-secondary-700">
-        <div className="flex items-center gap-3">
+      <div className="h-12 flex items-center justify-between border-b border-sci-secondary-700 flex-shrink-0">
+        <div className="w-12 flex items-center justify-center">
           <SquareChevronRight
             className="w-6 h-6 cursor-pointer text-sci-secondary-200 hover:text-sci-primary-400 transition-colors"
             onClick={toggleConsole}
           />
         </div>
-        <div className="flex items-center gap-4">
-          {counts.errors > 0 && (
-            <span className="text-xs text-sci-error-400">
-              {counts.errors} errors
-            </span>
+        {/* Most recent message */}
+        <div className="flex-1 mx-4 overflow-hidden">
+          {mostRecentMessage ? (
+            <div className="text-xs font-mono text-sci-secondary-300 truncate">
+              {mostRecentMessage}
+            </div>
+          ) : (
+            <div className="text-xs text-sci-secondary-500 italic">
+              No messages
+            </div>
           )}
-          {counts.warnings > 0 && (
-            <span className="text-xs text-sci-warning-400">
-              {counts.warnings} warnings
-            </span>
-          )}
+        </div>
+        <div className="w-12 flex items-center justify-center">
+          <Github
+            className="w-6 h-6 cursor-pointer text-sci-secondary-200 hover:text-sci-primary-400 transition-colors"
+            onClick={openGitHub}
+          />
         </div>
       </div>
 
       {/* Console Content */}
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 min-h-0 overflow-hidden">
         <div className="h-full bg-sci-secondary-900 rounded border border-sci-secondary-700 p-3 overflow-hidden">
           <div className="h-full overflow-y-auto">
             {logMessages.length > 0 ? (

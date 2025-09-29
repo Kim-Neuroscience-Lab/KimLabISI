@@ -1,6 +1,5 @@
 import React from 'react'
 import { FormField } from './FormField'
-import { useParameterManager } from '../hooks/useParameterManager'
 
 export interface ParameterConfig {
   key: string
@@ -23,19 +22,14 @@ interface ParameterSectionProps {
 }
 
 export const ParameterSection: React.FC<ParameterSectionProps> = ({
-  title,
+  title: _title,
   initialValues,
   configs,
   onParametersChange
 }) => {
-  const { parameters, updateParameter } = useParameterManager(initialValues)
-
-  React.useEffect(() => {
-    onParametersChange?.(parameters)
-  }, [parameters, onParametersChange])
-
   const handleParameterChange = (key: string, value: string | number) => {
-    updateParameter(key, value)
+    // Send change directly to parent - no local state management
+    onParametersChange?.({ ...initialValues, [key]: value })
   }
 
   return (
@@ -44,7 +38,7 @@ export const ParameterSection: React.FC<ParameterSectionProps> = ({
         <FormField
           key={config.key}
           label={config.label}
-          value={parameters[config.key]}
+          value={initialValues[config.key] ?? ''}
           onChange={(value) => handleParameterChange(config.key, value)}
           type={config.type}
           options={config.options}

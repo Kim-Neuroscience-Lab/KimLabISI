@@ -21,8 +21,8 @@ def run_application():
 
         print("Starting ISI Control System...")
 
-        # Run the complete Electron application with integrated backend
-        cmd = ["npm", "run", "electron-dev"]
+        # Run the complete Electron application with integrated backend using modern electron-vite
+        cmd = ["npm", "run", "dev"]
         subprocess.run(cmd, cwd=root_dir, check=True)
 
     except subprocess.CalledProcessError as e:

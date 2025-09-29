@@ -1,21 +1,17 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
-import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
-import path from 'node:path'
-import { ChildProcess, execFile } from 'node:child_process'
-
-const require = createRequire(import.meta.url)
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import * as path from 'node:path'
+import { spawn, execSync } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 
 // The built directory structure
 //
 // ├─┬ dist-electron
-// │ ├─┬ main.js    > Electron main
-// │ │ └─┬ preload.js    > Preload scripts
+// │ ├─┬ main.cjs    > Electron main
+// │ │ └─┬ preload.cjs    > Preload scripts
 // │ └─┬ renderer.js > Electron renderer
 //
 process.env.DIST_ELECTRON = path.join(__dirname, '../')
-process.env.DIST = path.join(__dirname, '../dist')
+process.env.DIST = path.join(__dirname, '../renderer')
 process.env.VITE_PUBLIC = process.env.VITE_DEV_SERVER_URL
   ? path.join(process.env.DIST_ELECTRON, './public')
   : process.env.DIST
@@ -33,7 +29,7 @@ if (!app.requestSingleInstanceLock()) {
 
 // Global variables for processes
 let mainWindow: BrowserWindow | null = null
-let pythonBackend: ChildProcess | null = null
+let isInitialLoad = true
 
 // Python Backend Management
 class PythonBackendManager {
@@ -54,49 +50,58 @@ class PythonBackendManager {
       try {
         const isDevelopment = process.env.NODE_ENV !== 'production' || process.env.VITE_DEV_SERVER_URL
         const rootDir = isDevelopment
-          ? path.join(__dirname, '../../..')
+          ? path.join(__dirname, '../..')
           : process.resourcesPath
+
+        // Starting Python backend with ISI Control system
 
         // Kill any existing Python processes that might conflict
         this.killExistingPythonProcesses()
 
-        this.process = execFile('poetry', ['run', 'python', 'src/backend/src/isi_control/main.py'], {
+        this.process = spawn('/Users/Adam/.local/bin/poetry', ['run', 'python', '-u', '-m', 'isi_control.main'], {
           stdio: ['pipe', 'pipe', 'pipe'],
           cwd: rootDir,
           env: {
             ...process.env,
-            PYTHONPATH: path.join(rootDir, 'src/backend/src')
-          }
-        }) as ChildProcess
-
-        if (!this.process.pid) {
-          reject(new Error('Failed to get process PID'))
-          return
-        }
-
-
-        this.process.stdout?.on('data', (data) => {
-          const message = data.toString().trim()
-
-          if (message.includes('IPC_READY')) {
-            this.onBackendReady(resolve)
-          } else {
-            this.handleBackendMessage(message)
+            PYTHONPATH: 'src/backend/src'
           }
         })
 
-        this.process.stderr?.on('data', (data) => {
+        this.process.stdout?.on('data', (data: Buffer) => {
+          const messages = data.toString().split('\n').filter(msg => msg.trim())
+          // Processing backend stdout messages
+
+          for (const message of messages) {
+            if (message.includes('IPC_READY')) {
+              // Backend ready signal received
+              this.onBackendReady(resolve)
+            } else {
+              this.handleBackendMessage(message)
+            }
+          }
+        })
+
+        this.process.stderr?.on('data', (data: Buffer) => {
           const errorMsg = data.toString()
-          console.error('Python backend error:', errorMsg)
+          console.error('Python backend stderr:', errorMsg)
+          // Send error to renderer so user can see it
+          if (mainWindow) {
+            mainWindow.webContents.send('backend-error', `Backend error: ${errorMsg}`)
+          }
         })
 
         this.process.on('error', (error) => {
-          console.error('Python process error:', error)
+          if (error instanceof Error) {
+            console.error('Python process error:', error)
+            reject(error)
+          } else {
+            console.error('Python process error:', String(error))
+            reject(new Error(String(error)))
+          }
           this.cleanup()
-          reject(error)
         })
 
-        this.process.on('exit', (code, signal) => {
+        this.process.on('exit', (_code, _signal) => {
           this.isReady = false
           this.cleanup()
 
@@ -115,13 +120,20 @@ class PythonBackendManager {
         }, this.STARTUP_TIMEOUT)
 
       } catch (error) {
-        console.error('Error starting Python backend:', error)
-        reject(error)
+        if (error instanceof Error) {
+          console.error('Error starting Python backend:', error)
+          reject(error)
+        } else {
+          const unknownError = new Error(String(error))
+          console.error('Error starting Python backend:', unknownError)
+          reject(unknownError)
+        }
       }
     })
   }
 
   private onBackendReady(resolve: () => void): void {
+    // Backend initialization completed
     this.isReady = true
 
     // Clear startup timeout
@@ -157,7 +169,7 @@ class PythonBackendManager {
       }
     } else {
       // Regular log message - log it for debugging
-      console.log('Backend log:', message)
+      // Backend log message received
     }
   }
 
@@ -172,30 +184,26 @@ class PythonBackendManager {
 
   private killExistingPythonProcesses(): void {
     try {
-      const { execSync } = require('child_process')
-
-      // First, check if any processes exist
       let processes: string
       try {
-        processes = execSync('pgrep -f "isi_control/main.py"', { encoding: 'utf8' })
+        processes = execSync('pgrep -f "isi_control.main"', { encoding: 'utf8' })
       } catch (error) {
-        // No processes found - this is expected most of the time
         return
       }
 
       if (processes.trim()) {
-        console.log('Found existing ISI backend processes, terminating...')
-        execSync('pkill -f "isi_control/main.py"')
+        // Terminating existing ISI backend processes
+        execSync('pkill -f "isi_control.main"')
       }
     } catch (error) {
-      // Only log actual errors, not expected "no processes found" cases
-      if (error.status !== 1) { // pgrep returns 1 when no processes found
-        console.error('Error during process cleanup:', error.message)
+      const err = error as NodeJS.ErrnoException & { status?: number }
+      if (err.status !== 1) {
+        console.error('Error during process cleanup:', err.message)
       }
     }
   }
 
-  private async cleanup(): Promise<void> {
+  async cleanup(): Promise<void> {
     if (this.startupTimeout) {
       clearTimeout(this.startupTimeout)
       this.startupTimeout = null
@@ -214,7 +222,7 @@ class PythonBackendManager {
         await new Promise(resolve => setTimeout(resolve, 1000))
 
         // Force kill if still running
-        if (!this.process.killed) {
+        if (this.process && !this.process.killed) {
           this.process.kill('SIGKILL')
         }
       } catch (error) {
@@ -238,6 +246,57 @@ class PythonBackendManager {
     this.process.stdin?.write(jsonMessage)
   }
 
+  async sendCommand(message: any): Promise<any> {
+    // Sending command to backend
+    if (!this.isReady || !this.process) {
+      // Backend not ready for commands
+      throw new Error('Backend not ready')
+    }
+
+    return new Promise((resolve, reject) => {
+      // Create unique message ID for correlation
+      const messageId = `${Date.now()}_${Math.random()}`
+      const messageWithId = { ...message, messageId }
+
+      // Set up timeout
+      const timeout = setTimeout(() => {
+        this.process?.stdout?.off('data', dataHandler)
+        reject(new Error('Command timeout'))
+      }, 10000)
+
+      // Response handler
+      const dataHandler = (data: Buffer) => {
+        const messages = data.toString().split('\n').filter(msg => msg.trim())
+
+        for (const msg of messages) {
+          if (!msg.startsWith('{')) continue
+
+          try {
+            const response = JSON.parse(msg)
+
+            if (response.messageId === messageId) {
+              clearTimeout(timeout)
+              this.process?.stdout?.off('data', dataHandler)
+
+              // Remove messageId and resolve with clean response
+              const { messageId: _, ...cleanResponse } = response
+              resolve(cleanResponse)
+              return
+            }
+          } catch (e) {
+            // Ignore invalid JSON
+          }
+        }
+      }
+
+      // Attach listener and send command
+      this.process.stdout?.on('data', dataHandler)
+
+      const jsonMessage = JSON.stringify(messageWithId) + '\n'
+      this.process.stdin?.write(jsonMessage)
+    })
+  }
+
   private handleMessage(message: any): void {
 
     // Forward to renderer process
@@ -258,18 +317,31 @@ class PythonBackendManager {
 
 const backendManager = new PythonBackendManager()
 
-const preload = path.join(__dirname, 'preload.js')
+const preload = path.join(__dirname, '../preload/preload.js')
 const url = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
 const indexHtml = path.join(process.env.DIST, 'index.html')
 
 async function createWindow() {
+  // Get the primary display's work area (screen minus taskbars/docks)
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
+
+  // Calculate window dimensions as a percentage of screen size
+  // Use 85% of screen width and 90% of screen height for optimal fit
+  const windowWidth = Math.floor(screenWidth * 0.85)
+  const windowHeight = Math.floor(screenHeight * 0.90)
+
+  // Set reasonable minimum dimensions to ensure usability
+  const minWidth = Math.min(1200, screenWidth * 0.6)
+  const minHeight = Math.min(800, screenHeight * 0.6)
+
   mainWindow = new BrowserWindow({
     title: 'ISI Control System',
-    width: 1400,
-    height: 900,
-    minWidth: 1200,
-    minHeight: 800,
-    icon: path.join(process.env.VITE_PUBLIC, 'electron.png'),
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: Math.floor(minWidth),
+    minHeight: Math.floor(minHeight),
+    icon: process.env.VITE_PUBLIC ? path.join(process.env.VITE_PUBLIC, 'electron.png') : undefined,
     webPreferences: {
       preload,
       nodeIntegration: false,
@@ -289,16 +361,60 @@ async function createWindow() {
     mainWindow.webContents.openDevTools()
   }
 
-  // Test actively push message to the Electron-Renderer
-  mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow?.webContents.send('main-process-message', `Renderer loaded at ${new Date().toLocaleString()}`)
+  // Handle renderer reload/refresh events
+  mainWindow.webContents.on('did-start-loading', () => {
+    // Only cleanup on refresh, not initial load
+    if (!isInitialLoad) {
+      backendManager.cleanup()
+    }
   })
 
-  // Make all links open with the browser, not with the application
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:')) {
-      require('electron').shell.openExternal(url)
+  // Test actively push message to the Electron-Renderer
+  mainWindow.webContents.on('did-finish-load', async () => {
+    mainWindow?.webContents.send('main-process-message', `Renderer loaded at ${new Date().toLocaleString()}`)
+
+    // Only restart backend on refresh, not initial load
+    if (!isInitialLoad) {
+      try {
+        await backendManager.start()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        mainWindow?.webContents.send('backend-error', message)
+      }
     }
+
+    // Mark that initial load is complete
+    isInitialLoad = false
+  })
+
+  // Handle window opening - allow internal presentation windows, block external URLs
+  mainWindow.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    // Window open request received
+
+    // Allow our internal presentation windows (they use empty URL and specific frameName)
+    if (!url || url === '' || frameName === 'stimulusPresentation') {
+      // Allowing presentation window
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          webPreferences: {
+            preload,
+            nodeIntegration: false,
+            contextIsolation: true,
+            webSecurity: true,
+          }
+        }
+      }
+    }
+
+    // Open external HTTPS links in the default browser
+    if (url.startsWith('https:') || url.startsWith('http:')) {
+      // Opening external URL in browser
+      shell.openExternal(url)
+    }
+
+    // Deny all other window opening attempts
+    // Denying window open request
     return { action: 'deny' }
   })
 
@@ -306,26 +422,22 @@ async function createWindow() {
   try {
     await backendManager.start()
   } catch (error) {
-    // Continue running but show error in UI
-    mainWindow.webContents.send('backend-error', error.message)
+    const message = error instanceof Error ? error.message : String(error)
+    mainWindow.webContents.send('backend-error', message)
   }
 }
 
 // IPC Handlers
-ipcMain.handle('send-to-python', async (event, message) => {
-  backendManager.send(message)
-  return { success: true }
+ipcMain.handle('send-to-python', async (_event, message) => {
+  return await backendManager.sendCommand(message)
 })
 
 ipcMain.handle('get-system-status', async () => {
-  // Request system status from Python backend
-  backendManager.send({ type: 'get_system_status' })
-  return { success: true }
+  return await backendManager.sendCommand({ type: 'get_system_status' })
 })
 
 ipcMain.handle('emergency-stop', async () => {
-  backendManager.send({ type: 'emergency_stop' })
-  return { success: true }
+  return await backendManager.sendCommand({ type: 'emergency_stop' })
 })
 
 // App event handlers

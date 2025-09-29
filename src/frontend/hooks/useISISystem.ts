@@ -5,44 +5,49 @@ interface ISIMessage {
   [key: string]: any
 }
 
+export type InitializationState =
+  | 'initializing'    // App starting up
+  | 'system-ready'    // Backend is ready and operational
+  | 'error'           // Initialization failed
+
 export const useISISystem = () => {
-  const [isReady, setIsReady] = useState(false)
+  const [initState, setInitState] = useState<InitializationState>('initializing')
   const [lastMessage, setLastMessage] = useState<ISIMessage | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
 
-  // Initialize IPC communication
+  // Initialize IPC communication - just listen to backend
   useEffect(() => {
     if (!window.electronAPI) {
       setConnectionError('Electron API not available')
+      setInitState('error')
       return
     }
 
+    let mounted = true
+
     // Listen for Python backend messages
     const handlePythonMessage = (message: ISIMessage) => {
+      if (!mounted) return
+
       setLastMessage(message)
 
-      // Set ready state when we receive a successful system status response
-      if (message.success && message.status === 'ready') {
-        setIsReady(true)
-        setConnectionError(null)
-      }
+      // Don't set system-ready from health messages - wait for main process signal
     }
 
     // Listen for backend errors
     const handleBackendError = (error: string) => {
+      if (!mounted) return
       setConnectionError(error)
-      setIsReady(false)
+      setInitState('error')
     }
 
-    // Listen for main process signals (backend ready)
+    // Listen for main process signals - this drives our ready state
     const handleMainMessage = (message: string) => {
+      if (!mounted) return
 
-      // Request system status when backend is ready
-      if (message.includes('Backend ready')) {
-        window.electronAPI.getSystemStatus()
-          .catch((error) => {
-            setConnectionError('Failed to connect to system')
-          })
+      // Set system ready when main process confirms backend is ready
+      if (message === 'Backend ready') {
+        setInitState('system-ready')
       }
     }
 
@@ -53,14 +58,19 @@ export const useISISystem = () => {
 
     // Cleanup listeners on unmount
     return () => {
+      mounted = false
       window.electronAPI.removeAllPythonListeners()
     }
   }, [])
 
-  // Send command to Python backend
+  // Send command to Python backend - only when system is ready
   const sendCommand = useCallback(async (command: ISIMessage) => {
     if (!window.electronAPI) {
       throw new Error('Electron API not available')
+    }
+
+    if (initState !== 'system-ready') {
+      throw new Error(`System not ready (current state: ${initState})`)
     }
 
     try {
@@ -72,7 +82,7 @@ export const useISISystem = () => {
     } catch (error) {
       throw error
     }
-  }, [])
+  }, [initState])
 
   // Emergency stop function
   const emergencyStop = useCallback(async () => {
@@ -89,7 +99,8 @@ export const useISISystem = () => {
   }, [])
 
   return {
-    isReady,
+    initState,
+    isReady: initState === 'system-ready',
     lastMessage,
     connectionError,
     sendCommand,
