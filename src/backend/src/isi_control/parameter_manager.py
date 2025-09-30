@@ -26,73 +26,74 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SessionParameters:
     """Session metadata and identification parameters"""
-    session_name: str = ""
-    animal_id: str = ""
-    animal_age: str = ""
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    last_modified: str = field(default_factory=lambda: datetime.now().isoformat())
+    session_name: str
+    animal_id: str
+    animal_age: str
+    created_at: str
+    last_modified: str
 
 @dataclass
 class MonitorParameters:
     """Monitor and display configuration parameters"""
-    selected_display: str = ""
-    available_displays: List[str] = field(default_factory=list)
-    monitor_distance_cm: float = 10.0
-    monitor_lateral_angle_deg: float = 0.0
-    monitor_tilt_angle_deg: float = 0.0
-    monitor_width_cm: float = 60.96
-    monitor_height_cm: float = 36.195
-    monitor_width_px: int = -1  # -1 indicates not detected/failed detection
-    monitor_height_px: int = -1  # -1 indicates not detected/failed detection
-    monitor_fps: int = -1  # -1 indicates not detected/failed detection
+    selected_display: str
+    available_displays: List[str]
+    monitor_distance_cm: float
+    monitor_lateral_angle_deg: float
+    monitor_tilt_angle_deg: float
+    monitor_width_cm: float
+    monitor_height_cm: float
+    monitor_width_px: int
+    monitor_height_px: int
+    monitor_fps: int
 
 @dataclass
 class StimulusParameters:
     """Stimulus generation and presentation parameters"""
-    checker_size_deg: float = 25.0
-    bar_width_deg: float = 20.0
-    drift_speed_deg_per_sec: float = 9.0
-    strobe_rate_hz: float = 6.0
-    contrast: float = 0.8
+    checker_size_deg: float
+    bar_width_deg: float
+    drift_speed_deg_per_sec: float
+    strobe_rate_hz: float
+    contrast: float
+    background_luminance: float
 
 @dataclass
 class CameraParameters:
     """Camera acquisition and configuration parameters"""
-    selected_camera: str = ""
-    available_cameras: List[str] = field(default_factory=list)
-    camera_fps: int = -1  # -1 indicates not detected/failed detection
-    camera_width_px: int = -1  # -1 indicates not detected/failed detection
-    camera_height_px: int = -1  # -1 indicates not detected/failed detection
+    selected_camera: str
+    available_cameras: List[str]
+    camera_fps: int
+    camera_width_px: int
+    camera_height_px: int
 
 @dataclass
 class AcquisitionParameters:
     """Experimental acquisition timing and protocol parameters"""
-    baseline_sec: float = 5.0
-    between_sec: float = 5.0
-    cycles: int = 3
-    directions: List[str] = field(default_factory=lambda: ["LR", "RL"])
+    baseline_sec: float
+    between_sec: float
+    cycles: int
+    directions: List[str]
 
 @dataclass
 class AnalysisParameters:
     """Data analysis and processing parameters"""
-    ring_size_mm: float = 1.0
-    vfs_threshold_sd: float = 2.0
-    smoothing_sigma: float = 1.0
-    magnitude_threshold: float = 0.1
-    phase_filter_sigma: float = 0.5
-    gradient_window_size: int = 3
-    area_min_size_mm2: float = 0.1
-    response_threshold_percent: float = 5.0
+    ring_size_mm: float
+    vfs_threshold_sd: float
+    smoothing_sigma: float
+    magnitude_threshold: float
+    phase_filter_sigma: float
+    gradient_window_size: int
+    area_min_size_mm2: float
+    response_threshold_percent: float
 
 @dataclass
 class AllParameters:
     """Container for all parameter groups"""
-    session: SessionParameters = field(default_factory=SessionParameters)
-    monitor: MonitorParameters = field(default_factory=MonitorParameters)
-    stimulus: StimulusParameters = field(default_factory=StimulusParameters)
-    camera: CameraParameters = field(default_factory=CameraParameters)
-    acquisition: AcquisitionParameters = field(default_factory=AcquisitionParameters)
-    analysis: AnalysisParameters = field(default_factory=AnalysisParameters)
+    session: SessionParameters
+    monitor: MonitorParameters
+    stimulus: StimulusParameters
+    camera: CameraParameters
+    acquisition: AcquisitionParameters
+    analysis: AnalysisParameters
 
 
 class ParameterValidationError(Exception):
@@ -118,46 +119,6 @@ class ParameterManager:
         'analysis': AnalysisParameters
     }
 
-    # Parameter validation ranges
-    VALIDATION_RULES = {
-        'monitor': {
-            'monitor_distance_cm': (0.1, 100.0),
-            'monitor_lateral_angle_deg': (-90.0, 90.0),
-            'monitor_tilt_angle_deg': (-90.0, 90.0),
-            'monitor_width_cm': (1.0, 200.0),
-            'monitor_height_cm': (1.0, 200.0),
-            'monitor_width_px': (100, 10000),
-            'monitor_height_px': (100, 10000),
-            'monitor_fps': (1, 300)
-        },
-        'stimulus': {
-            'checker_size_deg': (0.1, 180.0),
-            'bar_width_deg': (0.1, 180.0),
-            'drift_speed_deg_per_sec': (0.1, 1000.0),
-            'strobe_rate_hz': (0.1, 100.0),
-            'contrast': (0.0, 1.0)
-        },
-        'camera': {
-            'camera_fps': (1, 300),
-            'camera_width_px': (100, 10000),
-            'camera_height_px': (100, 10000)
-        },
-        'acquisition': {
-            'baseline_sec': (0.1, 3600.0),
-            'between_sec': (0.1, 3600.0),
-            'cycles': (1, 1000)
-        },
-        'analysis': {
-            'ring_size_mm': (0.01, 100.0),
-            'vfs_threshold_sd': (0.1, 10.0),
-            'smoothing_sigma': (0.01, 10.0),
-            'magnitude_threshold': (0.0, 1.0),
-            'phase_filter_sigma': (0.01, 10.0),
-            'gradient_window_size': (1, 100),
-            'area_min_size_mm2': (0.001, 1000.0),
-            'response_threshold_percent': (0.0, 100.0)
-        }
-    }
 
     def __init__(self, config_file: str = "isi_parameters.json", config_dir: Optional[str] = None):
         """
@@ -215,7 +176,10 @@ class ParameterManager:
             # Load the default configuration for reset functionality
             self._default_params = self._dict_to_parameters(data['default'])
 
-            logger.info("Loaded parameter configuration")
+            # Load parameter configuration from JSON
+            self._parameter_config = data.get('config', {})
+
+            logger.info("Loaded parameter configuration and parameter config")
         else:
             # Create initial configuration
             self._current_params = AllParameters()
@@ -225,25 +189,38 @@ class ParameterManager:
 
     def _save_to_file(self):
         """Save parameter configuration to the config file"""
-        # Build the configuration structure
-        data = {
-            'current': self._parameters_to_dict(self._current_params),
-            'default': self._parameters_to_dict(self._default_params)
-        }
+        try:
+            # Build the configuration structure, preserving the config section
+            data = {
+                'current': self._parameters_to_dict(self._current_params),
+                'default': self._parameters_to_dict(self._default_params),
+                'config': self._parameter_config
+            }
 
-        # Write to file with backup
-        backup_file = self.config_file.with_suffix('.json.backup')
-        if self.config_file.exists():
-            self.config_file.rename(backup_file)
+            # Write to temporary file first for atomic save
+            import tempfile
+            temp_file = self.config_file.with_suffix('.json.tmp')
 
-        with open(self.config_file, 'w') as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+            with open(temp_file, 'w') as f:
+                json.dump(data, f, indent=2, sort_keys=True)
 
-        # Remove backup if save was successful
-        if backup_file.exists():
-            backup_file.unlink()
+            # Create backup
+            backup_file = self.config_file.with_suffix('.json.backup')
+            if self.config_file.exists():
+                self.config_file.replace(backup_file)
 
-        logger.debug("Parameter configuration saved to file")
+            # Atomic rename - this is the only way the main file gets replaced
+            temp_file.replace(self.config_file)
+
+            logger.debug("Parameter configuration saved to file")
+
+        except Exception as e:
+            logger.error(f"Failed to save parameters: {e}", exc_info=True)
+            # Try to restore from backup if save failed
+            backup_file = self.config_file.with_suffix('.json.backup')
+            if backup_file.exists() and not self.config_file.exists():
+                backup_file.replace(self.config_file)
+                logger.info("Restored parameters from backup after save failure")
 
     def _parameters_to_dict(self, params: AllParameters) -> Dict[str, Any]:
         """Convert AllParameters to dictionary format"""
@@ -258,7 +235,7 @@ class ParameterManager:
 
     def _dict_to_parameters(self, data: Dict[str, Any]) -> AllParameters:
         """Convert dictionary to AllParameters object"""
-        params = AllParameters()
+        param_groups = {}
 
         for group_name, param_class in self.PARAMETER_TYPES.items():
             if group_name in data:
@@ -266,9 +243,20 @@ class ParameterManager:
                 # Create parameter object from dict, filtering unknown fields
                 valid_fields = {f.name for f in fields(param_class)}
                 filtered_data = {k: v for k, v in group_data.items() if k in valid_fields}
-                setattr(params, group_name, param_class(**filtered_data))
+                param_groups[group_name] = param_class(**filtered_data)
+            else:
+                # Use defaults if group is missing - shouldn't happen in normal operation
+                logger.warning(f"Parameter group '{group_name}' missing from data, this may cause issues")
+                param_groups[group_name] = None
 
-        return params
+        return AllParameters(
+            session=param_groups['session'],
+            monitor=param_groups['monitor'],
+            stimulus=param_groups['stimulus'],
+            camera=param_groups['camera'],
+            acquisition=param_groups['acquisition'],
+            analysis=param_groups['analysis']
+        )
 
     def validate_parameter_group(self, group_name: str, params: Dict[str, Any]) -> List[str]:
         """
@@ -289,7 +277,6 @@ class ParameterManager:
 
         param_class = self.PARAMETER_TYPES[group_name]
         valid_fields = {f.name: f.type for f in fields(param_class)}
-        validation_rules = self.VALIDATION_RULES.get(group_name, {})
 
         for param_name, value in params.items():
             if param_name not in valid_fields:
@@ -309,6 +296,9 @@ class ParameterManager:
             else:
                 # Simple type checking
                 if expected_type in (int, float):
+                    if value == '':
+                        errors.append(f"Parameter {group_name}.{param_name} cannot be empty")
+                        continue
                     if not isinstance(value, (int, float)):
                         errors.append(f"Parameter {group_name}.{param_name} must be a number")
                         continue
@@ -317,11 +307,7 @@ class ParameterManager:
                         errors.append(f"Parameter {group_name}.{param_name} must be a string")
                         continue
 
-            # Range validation
-            if param_name in validation_rules and isinstance(value, (int, float)):
-                min_val, max_val = validation_rules[param_name]
-                if not (min_val <= value <= max_val):
-                    errors.append(f"Parameter {group_name}.{param_name} must be between {min_val} and {max_val}")
+            # Range validation removed - no min/max constraints
 
         return errors
 
@@ -399,7 +385,111 @@ class ParameterManager:
 
             self.save_parameters(self._current_params)
 
+            # Update stimulus generator if relevant parameters changed
+            self._update_stimulus_if_needed(group_name, updates)
+
             logger.info(f"Updated {group_name} parameters")
+
+    def _validate_parameter_safety(self, group_name: str, param_name: str, value: Any) -> bool:
+        """Check if parameter value is within safe operating bounds"""
+        if group_name not in self._parameter_config:
+            return True  # No config defined, assume safe
+
+        if param_name not in self._parameter_config[group_name]:
+            return True  # No config defined for this parameter, assume safe
+
+        config = self._parameter_config[group_name][param_name]
+        min_val = config.get('min')
+        max_val = config.get('max')
+
+        # Check if value is within absolute safety bounds
+        if min_val is not None and value < min_val:
+            return False
+        if max_val is not None and value > max_val:
+            return False
+
+        return True
+
+    def _update_stimulus_if_needed(self, group_name: str, updates: Dict[str, Any]):
+        """Update stimulus generator if monitor or stimulus parameters changed"""
+        try:
+            if group_name == 'monitor':
+                # Validate safety before updating stimulus
+                spatial_config = {}
+                monitor_params = self._current_params.monitor
+
+                # Only add parameters that are within safe bounds and not None/invalid
+                if (monitor_params.monitor_distance_cm is not None and
+                    monitor_params.monitor_distance_cm > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_distance_cm', monitor_params.monitor_distance_cm)):
+                    spatial_config['monitor_distance_cm'] = monitor_params.monitor_distance_cm
+
+                if (monitor_params.monitor_lateral_angle_deg is not None and
+                    self._validate_parameter_safety('monitor', 'monitor_lateral_angle_deg', monitor_params.monitor_lateral_angle_deg)):
+                    spatial_config['monitor_angle_degrees'] = monitor_params.monitor_lateral_angle_deg
+
+                if (monitor_params.monitor_width_px is not None and
+                    monitor_params.monitor_width_px > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_width_px', monitor_params.monitor_width_px)):
+                    spatial_config['screen_width_pixels'] = monitor_params.monitor_width_px
+
+                if (monitor_params.monitor_height_px is not None and
+                    monitor_params.monitor_height_px > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_height_px', monitor_params.monitor_height_px)):
+                    spatial_config['screen_height_pixels'] = monitor_params.monitor_height_px
+
+                if (monitor_params.monitor_width_cm is not None and
+                    monitor_params.monitor_width_cm > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_width_cm', monitor_params.monitor_width_cm)):
+                    spatial_config['screen_width_cm'] = monitor_params.monitor_width_cm
+
+                if (monitor_params.monitor_height_cm is not None and
+                    monitor_params.monitor_height_cm > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_height_cm', monitor_params.monitor_height_cm)):
+                    spatial_config['screen_height_cm'] = monitor_params.monitor_height_cm
+
+                if (monitor_params.monitor_fps is not None and
+                    monitor_params.monitor_fps > 0 and
+                    self._validate_parameter_safety('monitor', 'monitor_fps', monitor_params.monitor_fps)):
+                    spatial_config['fps'] = monitor_params.monitor_fps
+
+                if spatial_config:
+                    from .stimulus_manager import handle_update_spatial_configuration
+                    handle_update_spatial_configuration({'configuration': spatial_config})
+                    logger.info(f"Updated stimulus spatial configuration: {spatial_config}")
+                else:
+                    logger.warning("No valid monitor parameters for stimulus update")
+
+            elif group_name == 'stimulus':
+                # Validate safety before updating stimulus
+                stimulus_config = {}
+                stimulus_params = self._current_params.stimulus
+
+                # Only add parameters that are within safe bounds
+                if self._validate_parameter_safety('stimulus', 'bar_width_deg', stimulus_params.bar_width_deg):
+                    stimulus_config['bar_width_deg'] = stimulus_params.bar_width_deg
+
+                if self._validate_parameter_safety('stimulus', 'drift_speed_deg_per_sec', stimulus_params.drift_speed_deg_per_sec):
+                    stimulus_config['drift_speed_deg_per_sec'] = stimulus_params.drift_speed_deg_per_sec
+
+                if self._validate_parameter_safety('stimulus', 'checker_size_deg', stimulus_params.checker_size_deg):
+                    stimulus_config['checker_size_deg'] = stimulus_params.checker_size_deg
+
+                if self._validate_parameter_safety('stimulus', 'strobe_rate_hz', stimulus_params.strobe_rate_hz):
+                    stimulus_config['strobe_rate_hz'] = stimulus_params.strobe_rate_hz
+
+                if self._validate_parameter_safety('stimulus', 'contrast', stimulus_params.contrast):
+                    stimulus_config['contrast'] = stimulus_params.contrast
+
+                if stimulus_config:
+                    from .stimulus_manager import handle_update_stimulus_parameters
+                    handle_update_stimulus_parameters({'parameters': stimulus_config})
+                    logger.info(f"Updated stimulus parameters: {stimulus_config}")
+                else:
+                    logger.warning("No valid stimulus parameters for update")
+
+        except Exception as e:
+            logger.warning(f"Failed to update stimulus for {group_name} parameters: {e}")
 
     def reset_to_defaults(self):
         """
@@ -480,7 +570,7 @@ class ParameterManager:
         """
         info = {
             'parameter_groups': {},
-            'validation_rules': self.VALIDATION_RULES
+            'parameter_config': self._parameter_config
         }
 
         for group_name, param_class in self.PARAMETER_TYPES.items():

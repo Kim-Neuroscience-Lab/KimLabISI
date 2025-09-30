@@ -4,107 +4,60 @@ import MainViewport from './components/MainViewport'
 import Console from './components/Console'
 import { useISISystem } from './hooks/useISISystem'
 
-interface SystemState {
-  isConnected: boolean
-  isExperimentRunning: boolean
-  currentProgress: number
-  systemStatus: {
-    camera: 'online' | 'offline' | 'error'
-    display: 'online' | 'offline' | 'error'
-    stimulus: 'online' | 'offline' | 'error'
-    parameters: 'online' | 'offline' | 'error'
-  }
-}
-
 function App() {
-  const [systemState, setSystemState] = useState<SystemState>({
-    isConnected: false,
-    isExperimentRunning: false,
-    currentProgress: 0,
-    systemStatus: {
-      camera: 'offline',
-      display: 'offline',
-      stimulus: 'offline',
-      parameters: 'offline'
-    }
-  })
+  const [isExperimentRunning, setIsExperimentRunning] = useState(false)
+  const [currentProgress, setCurrentProgress] = useState(0)
 
   const [, setCurrentSession] = useState<string | null>(null)
   const [logMessages, setLogMessages] = useState<string[]>([])
   const [, setIsControlPanelCollapsed] = useState(false)
-  const [startupProgress, setStartupProgress] = useState<{
-    phase: string
-    message: string
-    error?: boolean
-  }>({
-    phase: 'initializing',
-    message: 'Starting system...'
-  })
 
   // All parameters managed by backend - no frontend state
   // Hardware lists come from backend parameter manager
 
-  const { sendCommand, isReady, lastMessage, connectionError, initState } = useISISystem()
+  const {
+    systemState,
+    displayText,
+    isReady,
+    isError,
+    errorMessage,
+    connectionError,
+    lastMessage,
+    sendCommand
+  } = useISISystem()
 
   // Use centralized hardware status management
   // Remove hardware status hook - backend will manage all health checking
 
   // Handle system initialization and errors
   useEffect(() => {
-    if (initState === 'system-ready') {
-      setSystemState(prev => ({
-        ...prev,
-        isConnected: true
-      }))
-    } else if (connectionError) {
-      setSystemState(prev => ({
-        ...prev,
-        isConnected: false
-      }))
+    if (connectionError) {
       addLogMessage(`✗ System error: ${connectionError}`)
     }
-  }, [initState, connectionError])
+  }, [connectionError])
 
 
 
   // Handle incoming messages from Python backend
   useEffect(() => {
     if (lastMessage) {
+      console.log('Received message:', lastMessage.type, lastMessage)
 
       // Handle different message types
       switch (lastMessage.type) {
-        case 'system_status':
-          setSystemState(prev => ({
-            ...prev,
-            isExperimentRunning: lastMessage.experiment_running
-          }))
-          break
-
-        case 'experiment_progress':
-          setSystemState(prev => ({
-            ...prev,
-            currentProgress: lastMessage.progress
-          }))
-          break
-
-        case 'system_health':
-        case 'system_health_detailed':
-          if (lastMessage.hardware_status) {
-            setSystemState(prev => ({
-              ...prev,
-              systemStatus: lastMessage.hardware_status
-            }))
+        case 'system_state':
+          // State updates handled by useISISystem hook
+          if (lastMessage.state === 'ready') {
+            addLogMessage('✓ System ready - all startup checks passed')
           }
           break
 
+        case 'system_status':
+          setIsExperimentRunning(lastMessage.experiment_running)
+          break
 
-        case 'startup_status':
-          // Update startup progress from coordinated startup sequence
-          setStartupProgress({
-            phase: lastMessage.phase,
-            message: lastMessage.message,
-            error: lastMessage.error
-          })
+        case 'experiment_progress':
+          setCurrentProgress(lastMessage.progress)
           break
 
         case 'log_message':
@@ -137,11 +90,8 @@ function App() {
       await sendCommand({
         type: 'stop_experiment'
       })
-      setSystemState(prev => ({
-        ...prev,
-        isExperimentRunning: false,
-        currentProgress: 0
-      }))
+      setIsExperimentRunning(false)
+      setCurrentProgress(0)
       addLogMessage('Experiment stopped')
     } catch (error) {
       console.error('Failed to stop experiment:', error)
@@ -157,26 +107,36 @@ function App() {
         {/* Left Panel - Control Panel */}
         <div className="border-r border-sci-secondary-700 bg-sci-secondary-800">
           <ControlPanel
-            isConnected={systemState.isConnected}
-            isExperimentRunning={systemState.isExperimentRunning}
+            isConnected={isReady}
+            isExperimentRunning={isExperimentRunning}
             onStopExperiment={handleStopExperiment}
             sendCommand={sendCommand}
             onCollapseChange={setIsControlPanelCollapsed}
             isReady={isReady}
             lastMessage={lastMessage}
-            systemStatus={systemState.systemStatus}
           />
         </div>
 
         {/* Main Viewport */}
         <div className="flex-1 flex flex-col">
           <MainViewport
-            systemState={systemState}
             sendCommand={sendCommand}
             lastMessage={lastMessage}
-            initState={initState}
+            systemStateStr={systemState}
+            displayText={displayText}
+            isReady={isReady}
+            isError={isError}
+            errorMessage={errorMessage}
             connectionError={connectionError}
-            startupProgress={startupProgress}
+            systemState={{
+              isConnected: isReady,
+              isExperimentRunning: isExperimentRunning,
+              currentProgress: currentProgress,
+              hardwareStatus: {
+                camera: 'offline',
+                display: 'offline'
+              }
+            }}
           />
         </div>
       </div>

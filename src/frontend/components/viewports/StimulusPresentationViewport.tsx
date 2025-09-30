@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { useFrameRenderer } from '../../hooks/useFrameRenderer'
 
 interface MonitorParameters {
   selected_display: string
@@ -62,13 +63,31 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
   isPresenting = false,
   onClose
 }) => {
-  const [currentStimulus, setCurrentStimulus] = useState<any>(null)
+  const [hasFrameData, setHasFrameData] = useState(false)
 
-  // Listen for stimulus presentation updates
+  // Canvas-based frame rendering
+  const { canvasRef, renderFrame } = useFrameRenderer()
+
+  // Listen for shared memory frames from main process
   useEffect(() => {
-    if (lastMessage?.type === 'stimulus_frame') {
-      setCurrentStimulus(lastMessage)
+    const handleSharedMemoryFrame = (frameData: any) => {
+      renderFrame(frameData)
+      setHasFrameData(true)
     }
+
+    if (window.electronAPI?.onSharedMemoryFrame) {
+      window.electronAPI.onSharedMemoryFrame(handleSharedMemoryFrame)
+    }
+
+    return () => {
+      if (window.electronAPI?.removeSharedMemoryListener) {
+        window.electronAPI.removeSharedMemoryListener()
+      }
+    }
+  }, [renderFrame])
+
+  // Listen for stimulus presentation stop
+  useEffect(() => {
     if (lastMessage?.type === 'stimulus_presentation_stop') {
       if (onClose) {
         onClose()
@@ -90,31 +109,6 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
     }
   }, [onClose])
 
-  // Stimulus display - shows frames sent from backend
-  const renderStimulus = () => {
-    if (currentStimulus?.frame_data) {
-      return (
-        <img
-          src={currentStimulus.frame_data}
-          alt="Stimulus Frame"
-          className="w-full h-full object-contain"
-          style={{
-            maxWidth: '100vw',
-            maxHeight: '100vh',
-            width: '100%',
-            height: '100%'
-          }}
-        />
-      )
-    }
-
-    // Default presentation screen - completely black with no text or UI
-    return (
-      <div className="w-full h-full bg-black">
-      </div>
-    )
-  }
-
   // Always render in fullscreen mode for presentation - no UI controls needed
   return (
     <div
@@ -125,7 +119,15 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
         overflow: 'hidden'
       }}
     >
-      {renderStimulus()}
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full"
+        style={{
+          maxWidth: '100vw',
+          maxHeight: '100vh',
+          objectFit: 'contain'
+        }}
+      />
     </div>
   )
 }

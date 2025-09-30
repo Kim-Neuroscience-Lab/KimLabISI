@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISI Stimulus Presentation</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000000;
+    }
+
+    #presentation-root {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Fullscreen canvas for stimulus rendering */
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated; /* Nearest neighbor for sharp pixels */
+      image-rendering: crisp-edges;
+    }
+  </style>
+</head>
+<body>
+  <div id="presentation-root"></div>
+  <script type="module" src="./presentation.tsx"></script>
+</body>
+</html>

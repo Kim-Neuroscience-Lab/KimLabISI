@@ -4,7 +4,6 @@ Handles both on-demand frame generation for frontend preview and full dataset ge
 """
 
 import numpy as np
-import base64
 import io
 import time
 import threading
@@ -12,67 +11,94 @@ from PIL import Image
 from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
+from logging import Logger
+
 
 # Import existing spatial transformation components
 from .spherical_transform import SphericalTransform
 
-logger = logging.getLogger(__name__)
+logger: Logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SpatialConfiguration:
     """3D spatial configuration between mouse and monitor"""
 
-    monitor_distance_cm: float = 10.0
-    monitor_angle_degrees: float = 20.0
-    screen_width_pixels: int = 512  # 2560 * 0.2 for testing
-    screen_height_pixels: int = 288  # 1440 * 0.2 for testing
-    screen_width_cm: float = 60.96
-    screen_height_cm: float = 36.195
-    fps: int = 60
+    monitor_distance_cm: float
+    monitor_angle_degrees: float
+    screen_width_pixels: int
+    screen_height_pixels: int
+    screen_width_cm: float
+    screen_height_cm: float
+    fps: int
 
     @property
     def field_of_view_horizontal(self) -> float:
         """Calculate horizontal field of view from screen width and distance"""
-        return 2 * np.degrees(
-            np.arctan(self.screen_width_cm / (2 * self.monitor_distance_cm))
+        return (
+            2
+            * np.degrees(
+                np.arctan(self.screen_width_cm / (2 * self.monitor_distance_cm))
+            )
+            if self.screen_width_cm and self.monitor_distance_cm
+            else 0.0
         )
 
     @property
     def field_of_view_vertical(self) -> float:
         """Calculate vertical field of view from screen height and distance"""
-        return 2 * np.degrees(
-            np.arctan(self.screen_height_cm / (2 * self.monitor_distance_cm))
+        return (
+            2
+            * np.degrees(
+                np.arctan(self.screen_height_cm / (2 * self.monitor_distance_cm))
+            )
+            if self.screen_height_cm and self.monitor_distance_cm
+            else 0.0
         )
 
     @property
     def pixels_per_degree_horizontal(self) -> float:
-        return self.screen_width_pixels / self.field_of_view_horizontal
+        return (
+            self.screen_width_pixels / self.field_of_view_horizontal
+            if self.screen_width_pixels and self.field_of_view_horizontal
+            else 0.0
+        )
 
     @property
     def pixels_per_degree_vertical(self) -> float:
-        return self.screen_height_pixels / self.field_of_view_vertical
+        return (
+            self.screen_height_pixels / self.field_of_view_vertical
+            if self.screen_height_pixels and self.field_of_view_vertical
+            else 0.0
+        )
 
 
 @dataclass
 class StimulusParameters:
     """Stimulus generation parameters"""
 
-    bar_width_degrees: float = 20.0
-    drift_speed_degrees_per_sec: float = 9.0
-    num_cycles: int = 10
-    checkerboard_size_degrees: float = 25.0
-    flicker_frequency_hz: float = 6.0
-    contrast: float = 0.8
-    background_luminance: float = 0.0
+    bar_width_degrees: float
+    drift_speed_degrees_per_sec: float
+    checkerboard_size_degrees: float
+    flicker_frequency_hz: float
+    contrast: float
+    background_luminance: float
 
 
 class StimulusGenerator:
     """Unified stimulus generation for both on-demand frames and full datasets"""
 
-    def __init__(self, spatial_config: SpatialConfiguration = None, stimulus_params: StimulusParameters = None):
-        self.spatial_config = spatial_config or SpatialConfiguration()
-        self.stimulus_params = stimulus_params or StimulusParameters()
+    def __init__(
+        self,
+        spatial_config: Optional[SpatialConfiguration] = None,
+        stimulus_params: Optional[StimulusParameters] = None,
+    ):
+        # Must provide configurations - no defaults
+        if not spatial_config or not stimulus_params:
+            raise ValueError("StimulusGenerator requires spatial_config and stimulus_params from parameter manager")
+
+        self.spatial_config: SpatialConfiguration = spatial_config
+        self.stimulus_params: StimulusParameters = stimulus_params
 
         # Initialize spherical transform and coordinate grids
         self.spherical_transform = None
@@ -84,8 +110,12 @@ class StimulusGenerator:
         self._setup_coordinate_grids()
 
         logger.info(f"StimulusGenerator initialized:")
-        logger.info(f"  Screen: {self.spatial_config.screen_width_pixels}x{self.spatial_config.screen_height_pixels}")
-        logger.info(f"  FoV: {self.spatial_config.field_of_view_horizontal:.1f}° x {self.spatial_config.field_of_view_vertical:.1f}°")
+        logger.info(
+            f"  Screen: {self.spatial_config.screen_width_pixels}x{self.spatial_config.screen_height_pixels}"
+        )
+        logger.info(
+            f"  FoV: {self.spatial_config.field_of_view_horizontal:.1f}° x {self.spatial_config.field_of_view_vertical:.1f}°"
+        )
         logger.info(f"  Distance: {self.spatial_config.monitor_distance_cm} cm")
 
     def _setup_spherical_transform(self):
@@ -131,7 +161,9 @@ class StimulusGenerator:
                 fov_half = self.spatial_config.field_of_view_vertical / 2
                 total_sweep_degrees = 2 * (fov_half + bar_full_width)
 
-            cycle_duration = total_sweep_degrees / self.stimulus_params.drift_speed_degrees_per_sec
+            cycle_duration = (
+                total_sweep_degrees / self.stimulus_params.drift_speed_degrees_per_sec
+            )
             total_duration = cycle_duration * num_cycles
             total_frames = int(total_duration * self.spatial_config.fps)
 
@@ -145,7 +177,7 @@ class StimulusGenerator:
                 "end_angle": end_angle,
                 "cycle_duration": cycle_duration,
                 "sweep_degrees": total_sweep_degrees,
-                "fps": self.spatial_config.fps
+                "fps": self.spatial_config.fps,
             }
         except Exception as e:
             logger.error(f"Error getting dataset info: {e}")
@@ -158,27 +190,33 @@ class StimulusGenerator:
         if direction in ["LR", "RL"]:
             max_angle = self.spatial_config.field_of_view_horizontal / 2
             start_angle = (
-                (max_angle + bar_full_width) if direction == "LR"
+                (max_angle + bar_full_width)
+                if direction == "LR"
                 else -(max_angle + bar_full_width)
             )
             end_angle = (
-                -(max_angle + bar_full_width) if direction == "LR"
+                -(max_angle + bar_full_width)
+                if direction == "LR"
                 else (max_angle + bar_full_width)
             )
         else:  # TB, BT
             max_angle = self.spatial_config.field_of_view_vertical / 2
             start_angle = (
-                -(max_angle + bar_full_width) if direction == "TB"
+                -(max_angle + bar_full_width)
+                if direction == "TB"
                 else (max_angle + bar_full_width)
             )
             end_angle = (
-                (max_angle + bar_full_width) if direction == "TB"
+                (max_angle + bar_full_width)
+                if direction == "TB"
                 else -(max_angle + bar_full_width)
             )
 
         return start_angle, end_angle
 
-    def calculate_frame_angle(self, direction: str, frame_index: int, total_frames: int) -> float:
+    def calculate_frame_angle(
+        self, direction: str, frame_index: int, total_frames: int
+    ) -> float:
         """Convert frame index to spatial angle"""
         start_angle, end_angle = self._calculate_angle_range(direction)
 
@@ -190,12 +228,23 @@ class StimulusGenerator:
         angle = start_angle + progress * (end_angle - start_angle)
         return angle
 
-    def generate_frame_at_angle(self, direction: str, angle: float, show_bar_mask: bool = True, frame_index: int = 0) -> np.ndarray:
+    def generate_frame_at_angle(
+        self,
+        direction: str,
+        angle: float,
+        show_bar_mask: bool = True,
+        frame_index: int = 0,
+    ) -> np.ndarray:
         """Generate a single frame at the specified angle"""
-        h, w = self.spatial_config.screen_height_pixels, self.spatial_config.screen_width_pixels
+        h, w = (
+            self.spatial_config.screen_height_pixels,
+            self.spatial_config.screen_width_pixels,
+        )
 
         # Start with background
-        frame = np.full((h, w), self.stimulus_params.background_luminance, dtype=np.float32)
+        frame = np.full(
+            (h, w), self.stimulus_params.background_luminance, dtype=np.float32
+        )
 
         if not show_bar_mask:
             # Generate checkerboard pattern across entire frame without bar mask
@@ -230,7 +279,13 @@ class StimulusGenerator:
         frame_uint8 = np.clip(frame * 255, 0, 255).astype(np.uint8)
         return frame_uint8
 
-    def generate_frame_at_index(self, direction: str, frame_index: int, show_bar_mask: bool = True, num_cycles: int = 3) -> Tuple[np.ndarray, Dict[str, Any]]:
+    def generate_frame_at_index(
+        self,
+        direction: str,
+        frame_index: int,
+        show_bar_mask: bool = True,
+        num_cycles: int = 3,
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """Generate a single frame at the specified frame index"""
         try:
             # Get dataset info to calculate total frames
@@ -247,7 +302,9 @@ class StimulusGenerator:
             angle = self.calculate_frame_angle(direction, frame_index, total_frames)
 
             # Generate the frame
-            frame = self.generate_frame_at_angle(direction, angle, show_bar_mask, frame_index)
+            frame = self.generate_frame_at_angle(
+                direction, angle, show_bar_mask, frame_index
+            )
 
             # Return frame with metadata
             metadata = {
@@ -255,7 +312,7 @@ class StimulusGenerator:
                 "total_frames": total_frames,
                 "angle_degrees": angle,
                 "direction": direction,
-                "show_bar_mask": show_bar_mask
+                "show_bar_mask": show_bar_mask,
             }
 
             return frame, metadata
@@ -264,29 +321,10 @@ class StimulusGenerator:
             logger.error(f"Error generating frame at index {frame_index}: {e}")
             raise
 
-    def frame_to_base64_png(self, frame: np.ndarray) -> str:
-        """Convert frame numpy array to base64 PNG string"""
-        try:
-            # Convert to PIL Image
-            if len(frame.shape) == 2:  # Grayscale
-                image = Image.fromarray(frame, mode='L')
-            else:  # RGB
-                image = Image.fromarray(frame, mode='RGB')
 
-            # Save to base64
-            buffer = io.BytesIO()
-            image.save(buffer, format='PNG')
-            buffer.seek(0)
-
-            # Encode as base64
-            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            return f"data:image/png;base64,{img_base64}"
-
-        except Exception as e:
-            logger.error(f"Error converting frame to base64: {e}")
-            raise
-
-    def _generate_checkerboard_pattern(self, w: int, h: int, frame_index: int) -> np.ndarray:
+    def _generate_checkerboard_pattern(
+        self, w: int, h: int, frame_index: int
+    ) -> np.ndarray:
         """Generate counter-phase checkerboard pattern in spherical coordinates"""
         # Get spherical coordinates for checkerboard pattern
         pixel_azimuth, pixel_altitude = (
@@ -306,9 +344,13 @@ class StimulusGenerator:
         # Counter-phase flickering using parameter system
         fps = self.spatial_config.fps
         flicker_frequency_hz = self.stimulus_params.flicker_frequency_hz
-        flicker_period_frames = int(fps / flicker_frequency_hz) if flicker_frequency_hz > 0 else float('inf')
+        flicker_period_frames = (
+            int(fps / flicker_frequency_hz)
+            if flicker_frequency_hz > 0
+            else float("inf")
+        )
 
-        if flicker_period_frames != float('inf'):
+        if flicker_period_frames != float("inf"):
             phase_flip = (frame_index // flicker_period_frames) % 2
             if phase_flip:
                 checkerboard = 1 - checkerboard
@@ -322,8 +364,10 @@ class StimulusGenerator:
 
         return np.clip(pattern, 0, 1)
 
-    def generate_full_dataset(self, direction: str, num_cycles: int = 10) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Generate full frame sequence for acquisition (legacy compatibility)"""
+    def generate_full_dataset(
+        self, direction: str, num_cycles: int = 10
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Generate full frame sequence for acquisition"""
         try:
             logger.info(f"Generating {direction} drifting bar stimulus dataset...")
 
@@ -338,14 +382,19 @@ class StimulusGenerator:
 
             # Generate angle progression
             angles = np.linspace(start_angle, end_angle, total_frames)
-            timestamps = np.arange(total_frames) * (1_000_000 // self.spatial_config.fps)
+            timestamps = np.arange(total_frames) * (
+                1_000_000 // self.spatial_config.fps
+            )
 
             logger.info(f"  Total frames: {total_frames}")
             logger.info(f"  Duration: {dataset_info['duration_sec']:.1f}s")
             logger.info(f"  Angle range: {start_angle:.1f}° to {end_angle:.1f}°")
 
             # Generate all frames
-            h, w = self.spatial_config.screen_height_pixels, self.spatial_config.screen_width_pixels
+            h, w = (
+                self.spatial_config.screen_height_pixels,
+                self.spatial_config.screen_width_pixels,
+            )
             frames = np.zeros((total_frames, h, w), dtype=np.uint8)
 
             # Get spherical coordinates once for efficiency
@@ -357,7 +406,9 @@ class StimulusGenerator:
 
             for i, current_angle in enumerate(angles):
                 # Generate frame at this angle
-                frame = self.generate_frame_at_angle(direction, current_angle, show_bar_mask=True, frame_index=i)
+                frame = self.generate_frame_at_angle(
+                    direction, current_angle, show_bar_mask=True, frame_index=i
+                )
                 frames[i] = frame
 
                 if i % 100 == 0:  # Progress logging
@@ -382,7 +433,9 @@ class StimulusGenerator:
 
         logger.info(f"Spatial configuration updated:")
         logger.info(f"  Monitor distance: {self.spatial_config.monitor_distance_cm} cm")
-        logger.info(f"  Field of view: {self.spatial_config.field_of_view_horizontal:.1f}° x {self.spatial_config.field_of_view_vertical:.1f}°")
+        logger.info(
+            f"  Field of view: {self.spatial_config.field_of_view_horizontal:.1f}° x {self.spatial_config.field_of_view_vertical:.1f}°"
+        )
 
     def update_stimulus_params(self, params: Dict[str, Any]):
         """Update stimulus parameters"""
@@ -396,11 +449,59 @@ class StimulusGenerator:
 # Global stimulus generator instance for IPC handlers
 _stimulus_generator = None
 
+
+def invalidate_stimulus_generator():
+    """Invalidate the global stimulus generator to force recreation with updated parameters"""
+    global _stimulus_generator
+    _stimulus_generator = None
+    logger.info("Stimulus generator invalidated - will be recreated with updated parameters")
+
+
 def get_stimulus_generator() -> StimulusGenerator:
-    """Get or create global stimulus generator instance"""
+    """Get or create global stimulus generator instance using parameter manager"""
     global _stimulus_generator
     if _stimulus_generator is None:
-        _stimulus_generator = StimulusGenerator()
+        from .parameter_manager import get_parameter_manager
+
+        # Get current parameters from parameter manager
+        param_manager = get_parameter_manager()
+        all_params = param_manager.load_parameters()
+
+        # Validate monitor parameters before creating stimulus generator
+        if (all_params.monitor.monitor_width_px <= 0 or
+            all_params.monitor.monitor_height_px <= 0 or
+            all_params.monitor.monitor_fps <= 0):
+            # During startup, parameters may not be ready yet - return None gracefully
+            logger.debug(
+                f"Stimulus generator not available - monitor parameters not yet initialized: "
+                f"width_px={all_params.monitor.monitor_width_px}, "
+                f"height_px={all_params.monitor.monitor_height_px}, fps={all_params.monitor.monitor_fps}"
+            )
+            return None
+
+        # Create spatial configuration from monitor parameters
+        spatial_config = SpatialConfiguration(
+            monitor_distance_cm=all_params.monitor.monitor_distance_cm,
+            monitor_angle_degrees=all_params.monitor.monitor_lateral_angle_deg,
+            screen_width_pixels=all_params.monitor.monitor_width_px,
+            screen_height_pixels=all_params.monitor.monitor_height_px,
+            screen_width_cm=all_params.monitor.monitor_width_cm,
+            screen_height_cm=all_params.monitor.monitor_height_cm,
+            fps=all_params.monitor.monitor_fps
+        )
+
+        # Create stimulus parameters from parameter manager
+        stimulus_params = StimulusParameters(
+            bar_width_degrees=all_params.stimulus.bar_width_deg,
+            drift_speed_degrees_per_sec=all_params.stimulus.drift_speed_deg_per_sec,
+            checkerboard_size_degrees=all_params.stimulus.checker_size_deg,
+            flicker_frequency_hz=all_params.stimulus.strobe_rate_hz,
+            contrast=all_params.stimulus.contrast,
+            background_luminance=all_params.stimulus.background_luminance
+        )
+
+        _stimulus_generator = StimulusGenerator(spatial_config, stimulus_params)
+        logger.info("Stimulus generator created successfully with valid parameters")
     return _stimulus_generator
 
 
@@ -417,55 +518,33 @@ def handle_get_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
             "checker_size_deg": generator.stimulus_params.checkerboard_size_degrees,
             "strobe_rate_hz": generator.stimulus_params.flicker_frequency_hz,
             "contrast": generator.stimulus_params.contrast,
-            "background_luminance": generator.stimulus_params.background_luminance
+            "background_luminance": generator.stimulus_params.background_luminance,
         }
 
-        return {
-            "success": True,
-            "parameters": params
-        }
+        return {"success": True, "parameters": params}
     except Exception as e:
         logger.error(f"Error getting stimulus parameters: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def handle_update_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_stimulus_parameters IPC command"""
     try:
-        generator = get_stimulus_generator()
-        params = command.get('parameters', {})
+        from .parameter_manager import get_parameter_manager
 
-        # Map frontend parameter names to backend names
-        param_mapping = {
-            "bar_width_deg": "bar_width_degrees",
-            "drift_speed_deg_per_sec": "drift_speed_degrees_per_sec",
-            "checker_size_deg": "checkerboard_size_degrees",
-            "strobe_rate_hz": "flicker_frequency_hz",
-            "contrast": "contrast",
-            "background_luminance": "background_luminance"
-        }
+        params = command.get("parameters", {})
 
-        # Update parameters
-        update_dict = {}
-        for frontend_key, backend_key in param_mapping.items():
-            if frontend_key in params:
-                update_dict[backend_key] = params[frontend_key]
+        # Update parameter manager (single source of truth)
+        param_manager = get_parameter_manager()
+        param_manager.update_parameter_group('stimulus', params)
 
-        generator.update_stimulus_params(update_dict)
+        # Invalidate stimulus generator so it recreates with new parameters
+        invalidate_stimulus_generator()
 
-        return {
-            "success": True,
-            "message": "Stimulus parameters updated"
-        }
+        return {"success": True, "message": "Stimulus parameters updated"}
     except Exception as e:
         logger.error(f"Error updating stimulus parameters: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def handle_get_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
@@ -482,279 +561,205 @@ def handle_get_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
             "screen_height_cm": generator.spatial_config.screen_height_cm,
             "fps": generator.spatial_config.fps,
             "field_of_view_horizontal": generator.spatial_config.field_of_view_horizontal,
-            "field_of_view_vertical": generator.spatial_config.field_of_view_vertical
+            "field_of_view_vertical": generator.spatial_config.field_of_view_vertical,
         }
 
-        return {
-            "success": True,
-            "configuration": config
-        }
+        return {"success": True, "configuration": config}
     except Exception as e:
         logger.error(f"Error getting spatial configuration: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def handle_update_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_spatial_configuration IPC command"""
     try:
-        generator = get_stimulus_generator()
-        config = command.get('configuration', {})
+        from .parameter_manager import get_parameter_manager
 
-        generator.update_spatial_config(config)
+        config = command.get("spatial_config", command.get("configuration", {}))
 
-        return {
-            "success": True,
-            "message": "Spatial configuration updated"
+        # Map to monitor parameter names
+        monitor_updates = {
+            "monitor_distance_cm": config.get("monitor_distance_cm"),
+            "monitor_lateral_angle_deg": config.get("monitor_lateral_angle_deg", config.get("monitor_angle_degrees")),
+            "monitor_width_cm": config.get("monitor_width_cm"),
+            "monitor_height_cm": config.get("monitor_height_cm"),
+            "monitor_width_px": config.get("monitor_width_px", config.get("screen_width_pixels")),
+            "monitor_height_px": config.get("monitor_height_px", config.get("screen_height_pixels")),
+            "monitor_fps": config.get("monitor_fps", config.get("fps")),
         }
+
+        # Remove None values
+        monitor_updates = {k: v for k, v in monitor_updates.items() if v is not None}
+
+        # Update parameter manager (single source of truth)
+        param_manager = get_parameter_manager()
+        param_manager.update_parameter_group('monitor', monitor_updates)
+
+        # Invalidate stimulus generator so it recreates with new parameters
+        invalidate_stimulus_generator()
+
+        return {"success": True, "message": "Spatial configuration updated"}
     except Exception as e:
         logger.error(f"Error updating spatial configuration: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def handle_get_stimulus_info(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_info IPC command - returns dataset information"""
     try:
+        logger.info("[STIMULUS-DEBUG] handle_get_stimulus_info called")
         generator = get_stimulus_generator()
-        direction = command.get('direction', 'LR')
-        num_cycles = command.get('num_cycles', 3)
+        direction = command.get("direction", "LR")
+        num_cycles = command.get("num_cycles", 3)
 
+        logger.info(f"[STIMULUS-DEBUG] Calling get_dataset_info for direction={direction}, num_cycles={num_cycles}")
         dataset_info = generator.get_dataset_info(direction, num_cycles)
+        logger.info(f"[STIMULUS-DEBUG] get_dataset_info returned: {dataset_info}")
 
         if "error" in dataset_info:
-            return {
-                "success": False,
-                "error": dataset_info["error"]
-            }
+            logger.error(f"[STIMULUS-DEBUG] Dataset info contains error: {dataset_info['error']}")
+            return {"success": False, "error": dataset_info["error"]}
 
-        return {
-            "success": True,
-            "type": "stimulus_info",
-            **dataset_info
-        }
+        result = {"success": True, "type": "stimulus_info", **dataset_info}
+        logger.info(f"[STIMULUS-DEBUG] Returning result: {result}")
+        return result
 
     except Exception as e:
-        logger.error(f"Error getting stimulus info: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"[STIMULUS-DEBUG] Exception in handle_get_stimulus_info: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
 
 
 def handle_get_stimulus_frame(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle get_stimulus_frame IPC command - returns a single frame as base64 PNG"""
+    """Handle get_stimulus_frame IPC command - renders to PsychoPy window and shared memory"""
     try:
         generator = get_stimulus_generator()
-        direction = command.get('direction', 'LR')
-        frame_index = command.get('frame_index', 0)
-        show_bar_mask = command.get('show_bar_mask', True)
-        num_cycles = command.get('num_cycles', 3)
+        direction = command.get("direction", "LR")
+        frame_index = command.get("frame_index", 0)
+        show_bar_mask = command.get("show_bar_mask", True)
+        num_cycles = command.get("num_cycles", 3)
+
+        # Get dataset info for this direction to include in metadata
+        dataset_info = generator.get_dataset_info(direction, num_cycles)
 
         # Generate frame and get metadata
         frame, metadata = generator.generate_frame_at_index(
             direction=direction,
             frame_index=frame_index,
             show_bar_mask=show_bar_mask,
-            num_cycles=num_cycles
+            num_cycles=num_cycles,
         )
 
-        # Convert frame to base64 PNG
-        frame_data = generator.frame_to_base64_png(frame)
+        # Add dataset info to metadata for frontend slider
+        metadata['total_frames'] = dataset_info.get('total_frames', 0)
+        metadata['start_angle'] = dataset_info.get('start_angle', 0.0)
+        metadata['end_angle'] = dataset_info.get('end_angle', 0.0)
+
+        # Write frame to shared memory stream for frontend rendering
+        # (Presentation window will be managed by Electron, not Python)
+        stream = get_stimulus_shared_memory_stream()
+        frame_id = stream.write_frame(frame, metadata)
 
         return {
             "success": True,
             "type": "stimulus_frame",
-            "frame_data": frame_data,
+            "frame_id": frame_id,
             "frame_info": metadata
         }
 
     except Exception as e:
         logger.error(f"Error generating stimulus frame: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
+
+
+def handle_get_stimulus_frame_binary(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle get_stimulus_frame_binary - removed, use shared memory streaming"""
+    return {
+        "success": False,
+        "error": "This command has been removed. Use shared memory streaming instead."
+    }
 
 
 # Status tracking
-_stimulus_status = {
-    "is_presenting": False,
-    "current_session": None
-}
+_stimulus_status = {"is_presenting": False, "current_session": None}
 
-# Animation thread tracking
-_animation_thread = None
-_animation_stop_event = threading.Event()
-
-
-def _stimulus_animation_loop(direction: str, show_bar_mask: bool):
-    """Animation loop that runs in a separate thread to stream frames to frontend"""
-    global _animation_stop_event
-
-    try:
-        generator = get_stimulus_generator()
-        frame_index = 0
-        start_time = time.time()
-
-        # Calculate frame interval from strobe rate
-        strobe_rate_hz = generator.stimulus_params.flicker_frequency_hz
-        frame_interval = 1.0 / strobe_rate_hz
-
-        logger.info(f"Starting stimulus animation: direction={direction}, mask={show_bar_mask}, rate={strobe_rate_hz}Hz")
-
-        while not _animation_stop_event.is_set():
-            try:
-                # Generate frame
-                frame = generator.generate_frame_at_angle(
-                    direction=direction,
-                    angle=0.0,  # Start angle - could be parameterized
-                    show_bar_mask=show_bar_mask,
-                    frame_index=frame_index
-                )
-
-                # Convert to base64 for frontend
-                frame_data = generator._frame_to_base64(frame)
-
-                # Send frame to frontend via IPC
-                from .main import send_message_to_frontend
-                send_message_to_frontend({
-                    "type": "stimulus_frame",
-                    "frame_data": frame_data,
-                    "frame_index": frame_index,
-                    "direction": direction,
-                    "show_bar_mask": show_bar_mask,
-                    "timestamp": time.time()
-                })
-
-                frame_index += 1
-
-                # Sleep for precise timing
-                elapsed_time = time.time() - start_time
-                next_frame_time = frame_index * frame_interval
-                sleep_time = next_frame_time - elapsed_time
-
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            except Exception as e:
-                logger.error(f"Error in animation loop: {e}")
-                break
-
-    except Exception as e:
-        logger.error(f"Animation loop failed: {e}")
-    finally:
-        logger.info("Stimulus animation stopped")
-
-
-def _start_stimulus_animation(direction: str, show_bar_mask: bool):
-    """Start the stimulus animation in a background thread"""
-    global _animation_thread, _animation_stop_event
-
-    # Stop any existing animation
-    _stop_stimulus_animation()
-
-    # Reset stop event and start new thread
-    _animation_stop_event.clear()
-    _animation_thread = threading.Thread(
-        target=_stimulus_animation_loop,
-        args=(direction, show_bar_mask),
-        daemon=True
-    )
-    _animation_thread.start()
-
-
-def _stop_stimulus_animation():
-    """Stop the stimulus animation thread"""
-    global _animation_thread, _animation_stop_event
-
-    if _animation_thread is not None:
-        _animation_stop_event.set()
-        _animation_thread.join(timeout=1.0)  # Wait up to 1 second
-        _animation_thread = None
+# Shared memory streaming integration
+def get_stimulus_shared_memory_stream():
+    """Get shared memory stream for stimulus frames"""
+    from .shared_memory_stream import get_shared_memory_stream
+    return get_shared_memory_stream()
 
 
 def handle_get_stimulus_status(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_status IPC command"""
-    return {
-        "success": True,
-        "status": _stimulus_status.copy()
-    }
+    return {"success": True, "status": _stimulus_status.copy()}
 
 
 def handle_start_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle start_stimulus IPC command"""
+    """Handle start_stimulus IPC command - starts real-time shared memory streaming"""
     try:
-        session_name = command.get('session_name', f'session_{int(time.time())}')
-        direction = command.get('direction', 'LR')
-        show_bar_mask = command.get('show_bar_mask', False)
+        session_name = command.get("session_name", f"session_{int(time.time())}")
+        direction = command.get("direction", "LR")
+        show_bar_mask = command.get("show_bar_mask", False)
+        fps = command.get("fps", 60.0)
 
         # Update status
         _stimulus_status["is_presenting"] = True
         _stimulus_status["current_session"] = session_name
 
-        # Start the animation loop in a separate thread
-        _start_stimulus_animation(direction, show_bar_mask)
+        # Get stimulus generator and start real-time streaming
+        generator = get_stimulus_generator()
 
-        logger.info(f"Stimulus presentation started: {session_name}, direction: {direction}, mask: {show_bar_mask}")
+        # Get backend instance and start real-time streaming
+        from .main import _backend_instance
+        if _backend_instance and _backend_instance.start_realtime_streaming(generator, fps):
+            logger.info(
+                f"Real-time stimulus streaming started: {session_name}, direction: {direction}, fps: {fps}"
+            )
+            return {"success": True, "message": f"Real-time stimulus streaming started: {session_name}"}
+        else:
+            raise Exception("Failed to start real-time streaming")
 
-        return {
-            "success": True,
-            "message": f"Stimulus started: {session_name}"
-        }
     except Exception as e:
         logger.error(f"Error starting stimulus: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        _stimulus_status["is_presenting"] = False
+        _stimulus_status["current_session"] = None
+        return {"success": False, "error": str(e)}
 
 
 def handle_stop_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle stop_stimulus IPC command"""
+    """Handle stop_stimulus IPC command - stops real-time shared memory streaming"""
     try:
-        # Stop animation thread
-        _stop_stimulus_animation()
+        # Get backend instance and stop real-time streaming
+        from .main import _backend_instance
+        if _backend_instance:
+            _backend_instance.stop_realtime_streaming()
 
         # Update status
         session_name = _stimulus_status["current_session"]
         _stimulus_status["is_presenting"] = False
         _stimulus_status["current_session"] = None
 
-        logger.info(f"Stimulus presentation stopped: {session_name}")
+        logger.info(f"Real-time stimulus streaming stopped: {session_name}")
 
-        return {
-            "success": True,
-            "message": "Stimulus stopped"
-        }
+        return {"success": True, "message": "Real-time stimulus streaming stopped"}
     except Exception as e:
         logger.error(f"Error stopping stimulus: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def handle_generate_stimulus_preview(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle generate_stimulus_preview IPC command - legacy compatibility"""
+    """Handle generate_stimulus_preview IPC command"""
     try:
         generator = get_stimulus_generator()
-        direction = command.get('direction', 'LR')
+        direction = command.get("direction", "LR")
 
         # Get dataset info as preview information
         dataset_info = generator.get_dataset_info(direction, 3)
 
         if "error" in dataset_info:
-            return {
-                "success": False,
-                "error": dataset_info["error"]
-            }
+            return {"success": False, "error": dataset_info["error"]}
 
-        # Format as legacy preview response
+        # Format preview response
         preview_info = {
             "direction": direction,
             "bar_width_deg": generator.stimulus_params.bar_width_degrees,
@@ -765,27 +770,24 @@ def handle_generate_stimulus_preview(command: Dict[str, Any]) -> Dict[str, Any]:
             "estimated_duration_sec": dataset_info["duration_sec"],
             "field_of_view_deg": {
                 "horizontal": generator.spatial_config.field_of_view_horizontal,
-                "vertical": generator.spatial_config.field_of_view_vertical
+                "vertical": generator.spatial_config.field_of_view_vertical,
             },
             "resolution": {
                 "width_px": generator.spatial_config.screen_width_pixels,
-                "height_px": generator.spatial_config.screen_height_pixels
+                "height_px": generator.spatial_config.screen_height_pixels,
             },
             "timing": {
                 "fps": generator.spatial_config.fps,
                 "frame_duration_ms": 1000.0 / generator.spatial_config.fps,
-                "strobe_period_ms": 1000.0 / generator.stimulus_params.flicker_frequency_hz if generator.stimulus_params.flicker_frequency_hz > 0 else None
-            }
+                "strobe_period_ms": (
+                    1000.0 / generator.stimulus_params.flicker_frequency_hz
+                    if generator.stimulus_params.flicker_frequency_hz > 0
+                    else None
+                ),
+            },
         }
 
-        return {
-            "success": True,
-            "type": "stimulus_preview",
-            "preview": preview_info
-        }
+        return {"success": True, "type": "stimulus_preview", "preview": preview_info}
     except Exception as e:
         logger.error(f"Error generating stimulus preview: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}

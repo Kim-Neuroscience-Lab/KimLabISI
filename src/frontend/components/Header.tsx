@@ -1,17 +1,6 @@
-import React, { useEffect } from 'react'
-import { Video, Columns3, BrainCircuit, BookMarked, MonitorCheck, Settings, LucideIcon } from 'lucide-react'
-
-interface SystemState {
-  isConnected: boolean
-  isExperimentRunning: boolean
-  currentProgress: number
-  systemStatus: {
-    camera: 'online' | 'offline' | 'error'
-    display: 'online' | 'offline' | 'error'
-    stimulus: 'online' | 'offline' | 'error'
-    parameters: 'online' | 'offline' | 'error'
-  }
-}
+import React from 'react'
+import { Video, Columns3, BrainCircuit, BookMarked, MonitorCheck, Settings, Cable, LucideIcon } from 'lucide-react'
+import { useHealthMonitor } from '../hooks/useHealthMonitor'
 
 interface TabConfig {
   id: 'camera' | 'stimulus' | 'analysis'
@@ -20,50 +9,41 @@ interface TabConfig {
 }
 
 interface HeaderProps {
-  systemState: SystemState
   activeTab: 'camera' | 'stimulus' | 'analysis' | 'startup'
   onTabChange?: (tab: 'camera' | 'stimulus' | 'analysis') => void
+  lastMessage?: any
+  isExperimentRunning?: boolean
 }
 
 const Header: React.FC<HeaderProps> = ({
-  systemState,
   activeTab,
-  onTabChange
+  onTabChange,
+  lastMessage,
+  isExperimentRunning = false
 }) => {
+  const { healthState, isHealthy, hasErrors, isInitializing } = useHealthMonitor({ lastMessage })
+
   const getIconColor = (status: string) => {
     switch (status) {
       case 'online': return 'text-sci-success-400'
       case 'error': return 'text-sci-error-400'
+      case 'degraded': return 'text-yellow-400'
       default: return 'text-sci-secondary-500'
     }
   }
 
-
   const getOverallStatus = () => {
-    const parametersOnline = systemState.systemStatus.parameters === 'online'
-    const displayOnline = systemState.systemStatus.display === 'online'
-    const cameraOnline = systemState.systemStatus.camera === 'online'
-    const stimulusOnline = systemState.systemStatus.stimulus === 'online'
-
-    const hasError = systemState.systemStatus.parameters === 'error' ||
-                     systemState.systemStatus.display === 'error' ||
-                     systemState.systemStatus.camera === 'error' ||
-                     systemState.systemStatus.stimulus === 'error'
-
-    // All systems must be online for OK status
-    const allSystemsOnline = parametersOnline && displayOnline && cameraOnline && stimulusOnline
-
-    // Show connecting state when not everything is online but no explicit errors
-    const isConnecting = !allSystemsOnline && !hasError
-
-    if (hasError) {
-      return { text: 'ERROR', color: 'text-sci-error-400' }
-    } else if (allSystemsOnline) {
-      return { text: 'OK', color: 'text-sci-success-400' }
-    } else if (isConnecting) {
-      return { text: 'CONNECTING', color: 'text-sci-secondary-200' }
-    } else {
-      return { text: 'ERROR', color: 'text-sci-error-400' }
+    switch (healthState.overall.status) {
+      case 'healthy':
+        return { text: 'OK', color: 'text-sci-success-400' }
+      case 'error':
+        return { text: 'ERROR', color: 'text-sci-error-400' }
+      case 'degraded':
+        return { text: 'DEGRADED', color: 'text-yellow-400' }
+      case 'initializing':
+        return { text: 'CONNECTING', color: 'text-sci-secondary-200' }
+      default:
+        return { text: 'UNKNOWN', color: 'text-sci-secondary-500' }
     }
   }
 
@@ -124,30 +104,36 @@ const Header: React.FC<HeaderProps> = ({
         {/* Status Icons - mirror the tab icon structure */}
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Parameters: ${systemState.systemStatus.parameters}`}
+          title={`IPC Connection: ${healthState.multi_channel_ipc.status} - ${healthState.multi_channel_ipc.message || 'Multi-channel IPC system'}`}
         >
-          <BookMarked className={`w-4 h-4 ${getIconColor(systemState.systemStatus.parameters)}`} />
+          <Cable className={`w-4 h-4 ${getIconColor(healthState.multi_channel_ipc.status)}`} />
         </div>
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Display: ${systemState.systemStatus.display}`}
+          title={`Parameters: ${healthState.parameters.status} - ${healthState.parameters.message || 'Parameter management system'}`}
         >
-          <MonitorCheck className={`w-4 h-4 ${getIconColor(systemState.systemStatus.display)}`} />
+          <BookMarked className={`w-4 h-4 ${getIconColor(healthState.parameters.status)}`} />
         </div>
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Camera: ${systemState.systemStatus.camera}`}
+          title={`Display: ${healthState.display.status} - ${healthState.display.message || 'Display management system'}`}
         >
-          <Video className={`w-4 h-4 ${getIconColor(systemState.systemStatus.camera)}`} />
+          <MonitorCheck className={`w-4 h-4 ${getIconColor(healthState.display.status)}`} />
         </div>
         <div
           className="h-12 px-3 flex items-center justify-center"
-          title={`Stimulus: ${systemState.systemStatus.stimulus}`}
+          title={`Camera: ${healthState.camera.status} - ${healthState.camera.message || 'Camera acquisition system'}`}
         >
-          <Columns3 className={`w-4 h-4 ${getIconColor(systemState.systemStatus.stimulus)}`} />
+          <Video className={`w-4 h-4 ${getIconColor(healthState.camera.status)}`} />
+        </div>
+        <div
+          className="h-12 px-3 flex items-center justify-center"
+          title={`Stimulus: ${healthState.realtime_streaming.status} - ${healthState.realtime_streaming.message || 'Realtime streaming system'}`}
+        >
+          <Columns3 className={`w-4 h-4 ${getIconColor(healthState.realtime_streaming.status)}`} />
         </div>
 
-        {systemState.isExperimentRunning && (
+        {isExperimentRunning && (
           <div className="flex items-center space-x-2 ml-4">
             <div className="w-2 h-2 bg-sci-primary-500 rounded-full animate-pulse"></div>
             <span className="text-sm font-medium text-sci-primary-400">

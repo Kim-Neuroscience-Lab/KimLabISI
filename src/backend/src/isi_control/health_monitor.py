@@ -23,7 +23,6 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class HealthStatus(Enum):
     """Standardized health status values."""
     ONLINE = "online"      # System is fully operational
@@ -198,85 +197,6 @@ class DisplayHealthChecker(BaseHealthChecker):
             )
 
 
-class StimulusHealthChecker(BaseHealthChecker):
-    """Health checker for stimulus system."""
-
-    def __init__(self):
-        super().__init__("stimulus")
-
-    def _perform_health_check(self) -> HealthCheckResult:
-        import signal
-        import threading
-        from .stimulus_manager import get_stimulus_generator
-
-        # Set up a timeout mechanism
-        result_container = [None]
-        error_container = [None]
-
-        def health_check_with_timeout():
-            try:
-                generator = get_stimulus_generator()
-
-                # Verify stimulus generator is functional
-                if generator and generator.stimulus_params and generator.spatial_config:
-                    # Test basic functionality by getting dataset info
-                    dataset_info = generator.get_dataset_info("LR", 1)
-                    if "error" not in dataset_info:
-                        result_container[0] = HealthCheckResult(
-                            system_name=self.system_name,
-                            status=HealthStatus.ONLINE,
-                            details="Stimulus generator operational",
-                            metrics={
-                                "stimulus_params": generator.stimulus_params.__dict__,
-                                "spatial_config": generator.spatial_config.__dict__,
-                                "test_dataset_frames": dataset_info.get("total_frames", 0)
-                            }
-                        )
-                    else:
-                        result_container[0] = HealthCheckResult(
-                            system_name=self.system_name,
-                            status=HealthStatus.ERROR,
-                            details="Stimulus generator test failed",
-                            error_message=dataset_info.get("error", "Unknown error")
-                        )
-                else:
-                    result_container[0] = HealthCheckResult(
-                        system_name=self.system_name,
-                        status=HealthStatus.OFFLINE,
-                        details="Stimulus generator not properly initialized"
-                    )
-            except Exception as e:
-                error_container[0] = str(e)
-
-        # Run health check in a thread with timeout
-        thread = threading.Thread(target=health_check_with_timeout)
-        thread.daemon = True
-        thread.start()
-        thread.join(timeout=5.0)  # 5 second timeout
-
-        if thread.is_alive():
-            # Thread is still running - timeout occurred
-            return HealthCheckResult(
-                system_name=self.system_name,
-                status=HealthStatus.ERROR,
-                details="Stimulus health check timed out",
-                error_message="Health check exceeded 5 second timeout"
-            )
-        elif error_container[0]:
-            return HealthCheckResult(
-                system_name=self.system_name,
-                status=HealthStatus.ERROR,
-                details="Stimulus generator test exception",
-                error_message=error_container[0]
-            )
-        elif result_container[0]:
-            return result_container[0]
-        else:
-            return HealthCheckResult(
-                system_name=self.system_name,
-                status=HealthStatus.ERROR,
-                details="Unknown stimulus health check failure"
-            )
 
 
 class ParameterHealthChecker(BaseHealthChecker):
@@ -324,6 +244,274 @@ class ParameterHealthChecker(BaseHealthChecker):
             )
 
 
+
+
+class SharedMemoryHealthChecker(BaseHealthChecker):
+    """Health checker for shared memory streaming system."""
+
+    def __init__(self):
+        super().__init__("shared_memory")
+
+    def _perform_health_check(self) -> HealthCheckResult:
+        """Check shared memory streaming system health."""
+        try:
+            from .shared_memory_stream import get_shared_memory_stream
+
+            # Get the shared memory stream instance
+            stream = get_shared_memory_stream()
+
+            if stream is None:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="Shared memory stream not initialized"
+                )
+
+            # Check if ZeroMQ socket is connected
+            if not hasattr(stream, 'metadata_socket') or stream.metadata_socket is None:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="ZeroMQ metadata socket not initialized"
+                )
+
+            # Check shared memory file accessibility
+            import os
+            shm_path = f"/tmp/{stream.stream_name}_shm"
+            if os.path.exists(shm_path):
+                # Check file permissions
+                if not os.access(shm_path, os.R_OK | os.W_OK):
+                    return HealthCheckResult(
+                        system_name=self.system_name,
+                        status=HealthStatus.ERROR,
+                        details="Shared memory file access denied",
+                        error_message=f"Cannot read/write: {shm_path}"
+                    )
+            else:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="Shared memory file not created yet",
+                    metrics={"expected_path": shm_path}
+                )
+
+            # System appears healthy
+            metrics = {
+                "zmq_socket_initialized": hasattr(stream, 'metadata_socket') and stream.metadata_socket is not None,
+                "shared_memory_path": shm_path,
+                "frame_counter": getattr(stream, 'frame_counter', 0),
+                "stream_name": stream.stream_name,
+                "buffer_size_bytes": getattr(stream, 'buffer_size_bytes', 0)
+            }
+
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ONLINE,
+                details="Shared memory streaming system operational",
+                metrics=metrics
+            )
+
+        except ImportError as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Shared memory module import failed",
+                error_message=str(e)
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Shared memory health check exception",
+                error_message=str(e)
+            )
+
+
+class MultiChannelIPCHealthChecker(BaseHealthChecker):
+    """Health checker for multi-channel IPC system."""
+
+    def __init__(self):
+        super().__init__("multi_channel_ipc")
+
+    def _perform_health_check(self) -> HealthCheckResult:
+        """Check multi-channel IPC system health."""
+        try:
+            from .multi_channel_ipc import get_multi_channel_ipc
+
+            # Get the multi-channel IPC instance
+            ipc = get_multi_channel_ipc()
+
+            if ipc is None:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="Multi-channel IPC not initialized"
+                )
+
+            # Check if channels are initialized
+            if not hasattr(ipc, 'channels') or not ipc.channels:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="IPC channels not initialized"
+                )
+
+            # Check individual channel health
+            channel_status = {}
+            all_healthy = True
+            error_messages = []
+
+            for channel_type, channel_info in ipc.channels.items():
+                try:
+                    # Check if channel has a socket (channels are stored as dictionaries)
+                    if isinstance(channel_info, dict) and channel_info.get('socket'):
+                        socket = channel_info['socket']
+                        # Test basic socket operations
+                        if socket and hasattr(socket, 'closed') and not socket.closed:
+                            channel_status[channel_type.value] = "online"
+                        else:
+                            channel_status[channel_type.value] = "offline"
+                            all_healthy = False
+                    else:
+                        # Channel doesn't have a socket (e.g., stdio channels)
+                        if isinstance(channel_info, dict) and channel_info.get('type') == 'stdio':
+                            channel_status[channel_type.value] = "online"  # stdio is always available
+                        else:
+                            channel_status[channel_type.value] = "offline"
+                            all_healthy = False
+                except Exception as e:
+                    channel_status[channel_type.value] = "error"
+                    error_messages.append(f"{channel_type.value}: {str(e)}")
+                    all_healthy = False
+
+            if all_healthy:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.ONLINE,
+                    details="All IPC channels operational",
+                    metrics={
+                        "channels": channel_status,
+                        "total_channels": len(channel_status),
+                        "healthy_channels": len([s for s in channel_status.values() if s == "online"])
+                    }
+                )
+            elif any(status == "online" for status in channel_status.values()):
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.ERROR,
+                    details="Some IPC channels are unhealthy",
+                    error_message="; ".join(error_messages) if error_messages else None,
+                    metrics={
+                        "channels": channel_status,
+                        "total_channels": len(channel_status),
+                        "healthy_channels": len([s for s in channel_status.values() if s == "online"])
+                    }
+                )
+            else:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="All IPC channels are offline",
+                    metrics={
+                        "channels": channel_status,
+                        "total_channels": len(channel_status),
+                        "healthy_channels": 0
+                    }
+                )
+
+        except ImportError as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Multi-channel IPC module import failed",
+                error_message=str(e)
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Multi-channel IPC health check exception",
+                error_message=str(e)
+            )
+
+
+class RealtimeStreamingHealthChecker(BaseHealthChecker):
+    """Health checker for realtime streaming system."""
+
+    def __init__(self):
+        super().__init__("realtime_streaming")
+
+    def _perform_health_check(self) -> HealthCheckResult:
+        """Check realtime streaming system health."""
+        try:
+            from .shared_memory_stream import get_realtime_producer
+
+            # Get realtime producer instance
+            producer = get_realtime_producer()
+
+            # Check if shared memory streaming system is available (the prerequisite)
+            from .shared_memory_stream import get_shared_memory_stream
+            stream = get_shared_memory_stream()
+            if stream is None:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="Shared memory streaming not available"
+                )
+
+            # System is ONLINE if shared memory is available, whether or not actively streaming
+            if producer is None:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.ONLINE,
+                    details="Realtime streaming ready (not active)"
+                )
+
+            # Check if producer thread is running (it's a Thread subclass)
+            is_running = producer.is_alive() and not producer._stop_event.is_set()
+
+            if is_running:
+                metrics = {
+                    "target_fps": getattr(producer, 'target_fps', 0),
+                    "thread_alive": producer.is_alive(),
+                    "stop_event_set": producer._stop_event.is_set(),
+                    "frame_interval_us": getattr(producer, 'frame_interval_us', 0)
+                }
+
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.ONLINE,
+                    details=f"Realtime streaming active at {metrics['target_fps']} FPS target",
+                    metrics=metrics
+                )
+            else:
+                return HealthCheckResult(
+                    system_name=self.system_name,
+                    status=HealthStatus.OFFLINE,
+                    details="Realtime producer not running",
+                    metrics={
+                        "thread_alive": producer.is_alive(),
+                        "stop_event_set": producer._stop_event.is_set(),
+                        "target_fps": getattr(producer, 'target_fps', 0)
+                    }
+                )
+
+        except ImportError as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Realtime streaming module import failed",
+                error_message=str(e)
+            )
+        except Exception as e:
+            return HealthCheckResult(
+                system_name=self.system_name,
+                status=HealthStatus.ERROR,
+                details="Realtime streaming health check exception",
+                error_message=str(e)
+            )
+
+
 class SystemHealthMonitor:
     """Centralized health monitoring for all ISI Control System components."""
 
@@ -345,10 +533,11 @@ class SystemHealthMonitor:
         self._register_default_checkers()
 
     def _register_default_checkers(self):
-        """Register health checkers for all standard systems."""
-        self._send_console_log("Initializing system health checkers...")
-        logger.info("Initializing system health checkers...")
+        """Register health checkers for multi-channel architecture systems."""
+        self._send_console_log("Initializing multi-channel architecture health checkers...")
+        logger.info("Initializing multi-channel architecture health checkers...")
 
+        # Hardware detection systems
         self._send_console_log("• Registering camera health checker...")
         logger.info("  • Registering camera health checker...")
         self.register_checker(CameraHealthChecker())
@@ -357,13 +546,22 @@ class SystemHealthMonitor:
         logger.info("  • Registering display health checker...")
         self.register_checker(DisplayHealthChecker())
 
-        self._send_console_log("• Registering stimulus health checker...")
-        logger.info("  • Registering stimulus health checker...")
-        self.register_checker(StimulusHealthChecker())
-
         self._send_console_log("• Registering parameter health checker...")
         logger.info("  • Registering parameter health checker...")
         self.register_checker(ParameterHealthChecker())
+
+        # Multi-channel architecture systems
+        self._send_console_log("• Registering shared memory health checker...")
+        logger.info("  • Registering shared memory health checker...")
+        self.register_checker(SharedMemoryHealthChecker())
+
+        self._send_console_log("• Registering multi-channel IPC health checker...")
+        logger.info("  • Registering multi-channel IPC health checker...")
+        self.register_checker(MultiChannelIPCHealthChecker())
+
+        self._send_console_log("• Registering realtime streaming health checker...")
+        logger.info("  • Registering realtime streaming health checker...")
+        self.register_checker(RealtimeStreamingHealthChecker())
 
         self._send_console_log("✓ All health checkers registered successfully")
         logger.info("All health checkers registered successfully")

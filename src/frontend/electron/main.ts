@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import * as path from 'node:path'
 import { spawn, execSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import * as zmq from 'zeromq'
+import * as fs from 'node:fs'
 
 // The built directory structure
 //
@@ -29,31 +31,153 @@ if (!app.requestSingleInstanceLock()) {
 
 // Global variables for processes
 let mainWindow: BrowserWindow | null = null
+let presentationWindow: BrowserWindow | null = null
 let isInitialLoad = true
 
-// Python Backend Management
-class PythonBackendManager {
+// Shared Memory Frame Reader for high-performance streaming
+class SharedMemoryFrameReader {
+  private zmqSocket: zmq.Subscriber | null = null
+  private sharedMemoryFd: number | null = null
+  private sharedMemoryPath = '/tmp/stimulus_stream_shm'
+  private isRunning = false
+
+  async initialize(zmqPort: number = 5557): Promise<void> {
+    try {
+      // Initialize ZeroMQ subscriber for frame metadata
+      this.zmqSocket = new zmq.Subscriber()
+      this.zmqSocket.connect(`tcp://localhost:${zmqPort}`)
+      this.zmqSocket.subscribe() // Subscribe to all messages
+
+      this.isRunning = true
+      console.log(`SharedMemoryFrameReader initialized on port ${zmqPort}`)
+
+      // Start listening for frame metadata
+      this.startMetadataListener()
+    } catch (error) {
+      console.error('Failed to initialize SharedMemoryFrameReader:', error)
+      throw error
+    }
+  }
+
+  private async startMetadataListener(): Promise<void> {
+    try {
+      for await (const [msg] of this.zmqSocket!) {
+        if (!this.isRunning) break
+
+        try {
+          const metadata = JSON.parse(msg.toString())
+          await this.handleFrameMetadata(metadata)
+        } catch (error) {
+          console.error('Error processing frame metadata:', error)
+        }
+      }
+    } catch (error) {
+      console.error('Metadata listener error:', error)
+    }
+  }
+
+  private async handleFrameMetadata(metadata: any): Promise<void> {
+    try {
+      // Read frame data directly from shared memory file
+      const frameData = await this.readFrameFromSharedMemory(
+        metadata.offset_bytes,
+        metadata.data_size_bytes
+      )
+
+      // Send raw binary PNG data to both main and presentation windows
+      const frameMessage = {
+        frame_id: metadata.frame_id,
+        timestamp_us: metadata.timestamp_us,
+        frame_index: metadata.frame_index,
+        direction: metadata.direction,
+        angle_degrees: metadata.angle_degrees,
+        width_px: metadata.width_px,
+        height_px: metadata.height_px,
+        frame_data: frameData  // Raw binary PNG data
+      }
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('shared-memory-frame', frameMessage)
+      }
+
+      if (presentationWindow && !presentationWindow.isDestroyed()) {
+        presentationWindow.webContents.send('shared-memory-frame', frameMessage)
+      }
+    } catch (error) {
+      console.error('Error handling frame metadata:', error)
+    }
+  }
+
+  private async readFrameFromSharedMemory(offset: number, size: number): Promise<Buffer> {
+    try {
+      // Open shared memory file if not already open
+      if (!this.sharedMemoryFd) {
+        if (!fs.existsSync(this.sharedMemoryPath)) {
+          throw new Error(`Shared memory file does not exist: ${this.sharedMemoryPath}`)
+        }
+        this.sharedMemoryFd = fs.openSync(this.sharedMemoryPath, 'r')
+      }
+
+      // Read frame data at specified offset
+      const buffer = Buffer.alloc(size)
+      const bytesRead = fs.readSync(this.sharedMemoryFd, buffer, 0, size, offset)
+
+      if (bytesRead !== size) {
+        throw new Error(`Expected to read ${size} bytes, but read ${bytesRead}`)
+      }
+
+      return buffer
+    } catch (error) {
+      console.error('Error reading from shared memory:', error)
+      throw error
+    }
+  }
+
+  cleanup(): void {
+    this.isRunning = false
+
+    if (this.zmqSocket) {
+      this.zmqSocket.close()
+      this.zmqSocket = null
+    }
+
+    if (this.sharedMemoryFd) {
+      fs.closeSync(this.sharedMemoryFd)
+      this.sharedMemoryFd = null
+    }
+
+    console.log('SharedMemoryFrameReader cleaned up')
+  }
+}
+
+// Global shared memory reader instance
+let sharedMemoryReader: SharedMemoryFrameReader | null = null
+
+// Multi-Channel IPC Backend Management
+class MultiChannelIPCManager {
   private process: ChildProcess | null = null
   private isReady = false
-  private messageQueue: any[] = []
+  private healthSocket: zmq.Subscriber | null = null
+  private syncSocket: zmq.Subscriber | null = null
   private healthCheckInterval: NodeJS.Timeout | null = null
   private startupTimeout: NodeJS.Timeout | null = null
   private readonly STARTUP_TIMEOUT = 15000 // 15 seconds
   private readonly HEALTH_CHECK_INTERVAL = 5000 // 5 seconds
+  private readonly HEALTH_PORT = 5555   // HEALTH channel (PUB/SUB) - continuous health monitoring
+  private readonly SYNC_PORT = 5558     // SYNC channel (PUB/SUB) - coordination messages after startup
 
   async start(): Promise<void> {
     // Clean up any existing processes first
     await this.cleanup()
 
     return new Promise((resolve, reject) => {
-
       try {
         const isDevelopment = process.env.NODE_ENV !== 'production' || process.env.VITE_DEV_SERVER_URL
         const rootDir = isDevelopment
           ? path.join(__dirname, '../..')
           : process.resourcesPath
 
-        // Starting Python backend with ISI Control system
+        console.log('Starting Python backend with multi-channel IPC system')
 
         // Kill any existing Python processes that might conflict
         this.killExistingPythonProcesses()
@@ -67,16 +191,39 @@ class PythonBackendManager {
           }
         })
 
+        // Monitor backend startup messages - JSON messages via CONTROL channel (stdout)
         this.process.stdout?.on('data', (data: Buffer) => {
-          const messages = data.toString().split('\n').filter(msg => msg.trim())
-          // Processing backend stdout messages
+          const output = data.toString().trim()
+          if (!output) return
 
-          for (const message of messages) {
-            if (message.includes('IPC_READY')) {
-              // Backend ready signal received
-              this.onBackendReady(resolve)
-            } else {
-              this.handleBackendMessage(message)
+          // Split by lines in case multiple JSON messages are in one chunk
+          const lines = output.split('\n').filter(line => line.trim())
+
+          for (const line of lines) {
+            try {
+              // Try to parse as JSON first (startup status messages)
+              const jsonMessage = JSON.parse(line.trim())
+              this.handleBackendMessage(jsonMessage)
+
+              // Check for IPC initialization complete
+              if (jsonMessage.type === 'startup_status' &&
+                  jsonMessage.message &&
+                  jsonMessage.message.includes('Multi-channel IPC system initialized')) {
+                // Backend IPC is ready, initialize our ZeroMQ connections
+                this.initializeZeroMQConnections().then(() => {
+                  resolve && this.onBackendReady(resolve)
+                }).catch(reject)
+              }
+            } catch (error) {
+              // Not JSON, treat as plain text log
+              console.log('Backend output:', line)
+
+              // Fallback check for legacy startup message
+              if (line.includes('Multi-channel IPC system initialized')) {
+                this.initializeZeroMQConnections().then(() => {
+                  resolve && this.onBackendReady(resolve)
+                }).catch(reject)
+              }
             }
           }
         })
@@ -84,28 +231,21 @@ class PythonBackendManager {
         this.process.stderr?.on('data', (data: Buffer) => {
           const errorMsg = data.toString()
           console.error('Python backend stderr:', errorMsg)
-          // Send error to renderer so user can see it
           if (mainWindow) {
             mainWindow.webContents.send('backend-error', `Backend error: ${errorMsg}`)
           }
         })
 
         this.process.on('error', (error) => {
-          if (error instanceof Error) {
-            console.error('Python process error:', error)
-            reject(error)
-          } else {
-            console.error('Python process error:', String(error))
-            reject(new Error(String(error)))
-          }
+          console.error('Python process error:', error)
+          reject(error)
           this.cleanup()
         })
 
         this.process.on('exit', (_code, _signal) => {
+          console.log('Backend process exited')
           this.isReady = false
           this.cleanup()
-
-          // Notify renderer of backend failure
           if (mainWindow) {
             mainWindow.webContents.send('backend-error', 'Backend process exited')
           }
@@ -120,21 +260,92 @@ class PythonBackendManager {
         }, this.STARTUP_TIMEOUT)
 
       } catch (error) {
-        if (error instanceof Error) {
-          console.error('Error starting Python backend:', error)
-          reject(error)
-        } else {
-          const unknownError = new Error(String(error))
-          console.error('Error starting Python backend:', unknownError)
-          reject(unknownError)
-        }
+        console.error('Error starting Python backend:', error)
+        reject(error)
       }
     })
   }
 
-  private onBackendReady(resolve: () => void): void {
-    // Backend initialization completed
+  private async initializeZeroMQConnections(): Promise<void> {
+    try {
+      // Initialize health channel for continuous monitoring (PUB/SUB pattern)
+      this.healthSocket = new zmq.Subscriber()
+      this.healthSocket.connect(`tcp://localhost:${this.HEALTH_PORT}`)
+      this.healthSocket.subscribe() // Subscribe to all health messages
+
+      // Initialize sync channel for system coordination (PUB/SUB pattern)
+      this.syncSocket = new zmq.Subscriber()
+      this.syncSocket.connect(`tcp://localhost:${this.SYNC_PORT}`)
+      this.syncSocket.subscribe() // Subscribe to all coordination messages
+
+      console.log('ZeroMQ PUB/SUB channels initialized successfully')
+      console.log('CONTROL channel uses stdin/stdout for startup coordination')
+
+      // Start listening for health and sync messages
+      this.startHealthListener()
+      this.startSyncListener()
+
+    } catch (error) {
+      console.error('Failed to initialize ZeroMQ connections:', error)
+      throw error
+    }
+  }
+
+  private async startSyncListener(): Promise<void> {
+    try {
+      if (!this.syncSocket) return
+
+      for await (const [msg] of this.syncSocket) {
+        try {
+          const syncMessage = JSON.parse(msg.toString())
+          this.handleSyncMessage(syncMessage)
+        } catch (error) {
+          console.error('Error processing sync message:', error)
+        }
+      }
+    } catch (error) {
+      console.error('Sync listener error:', error)
+    }
+  }
+
+  private handleSyncMessage(message: any): void {
+    console.log('Received SYNC channel message:', message)
+
+    // Forward sync coordination messages to renderer via dedicated channel
+    if (mainWindow) {
+      mainWindow.webContents.send('sync-message', message)
+    }
+  }
+
+  private handleBackendMessage(message: any): void {
+    console.log('Received CONTROL channel message via stdout:', message)
+
+    // Log system_fully_ready specifically for debugging
+    if (message.type === 'system_fully_ready') {
+      console.log('*** SYSTEM_FULLY_READY MESSAGE RECEIVED ***', message)
+    }
+
+    // Forward control messages (startup status, parameter updates, etc.) to renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('control-message', message)
+      console.log('Forwarded control-message to renderer:', message.type)
+    } else {
+      console.warn('Cannot forward message - mainWindow not available')
+    }
+  }
+
+  private async onBackendReady(resolve: () => void): Promise<void> {
+    console.log('Backend multi-channel IPC system is ready')
     this.isReady = true
+
+    // Initialize shared memory reader for high-performance streaming
+    try {
+      sharedMemoryReader = new SharedMemoryFrameReader()
+      await sharedMemoryReader.initialize()
+      console.log('Shared memory frame reader initialized')
+    } catch (error) {
+      console.error('Failed to initialize shared memory reader:', error)
+    }
 
     // Clear startup timeout
     if (this.startupTimeout) {
@@ -147,39 +358,41 @@ class PythonBackendManager {
       mainWindow.webContents.send('main-process-message', 'Backend ready')
     }
 
-    // Process queued messages
-    this.messageQueue.forEach(msg => this.send(msg))
-    this.messageQueue = []
-
     // Start health monitoring
     this.startHealthCheck()
 
     resolve()
   }
 
-  private handleBackendMessage(message: string): void {
-    // Check if message looks like JSON (starts with '{' or '[')
-    const trimmed = message.trim()
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const parsedMessage = JSON.parse(trimmed)
-        this.handleMessage(parsedMessage)
-      } catch (e) {
-        console.error('Failed to parse JSON message from backend:', message, e)
+  private startHealthCheck(): void {
+    // Health monitoring now uses PUB/SUB pattern - we listen for health updates
+    // rather than actively requesting them
+    // Note: Health listener is already started during initialization, no need to start it again
+    console.log('Health monitoring started - listening for health updates from backend')
+  }
+
+  private async startHealthListener(): Promise<void> {
+    if (!this.healthSocket) return
+
+    try {
+      for await (const [msg] of this.healthSocket) {
+        try {
+          const healthData = JSON.parse(msg.toString())
+          this.handleHealthUpdate(healthData)
+        } catch (error) {
+          console.error('Error processing health update:', error)
+        }
       }
-    } else {
-      // Regular log message - log it for debugging
-      // Backend log message received
+    } catch (error) {
+      console.error('Health listener error:', error)
     }
   }
 
-  private startHealthCheck(): void {
-    this.healthCheckInterval = setInterval(() => {
-      if (this.isReady && this.process) {
-        // Send ping to check if backend is responsive
-        this.send({ type: 'ping' })
-      }
-    }, this.HEALTH_CHECK_INTERVAL)
+  private handleHealthUpdate(healthData: any): void {
+    // Silently forward health data to renderer - don't log to console
+    if (mainWindow) {
+      mainWindow.webContents.send('health-message', healthData)
+    }
   }
 
   private killExistingPythonProcesses(): void {
@@ -192,7 +405,7 @@ class PythonBackendManager {
       }
 
       if (processes.trim()) {
-        // Terminating existing ISI backend processes
+        console.log('Terminating existing ISI backend processes')
         execSync('pkill -f "isi_control.main"')
       }
     } catch (error) {
@@ -214,14 +427,28 @@ class PythonBackendManager {
       this.healthCheckInterval = null
     }
 
+    // Cleanup shared memory reader
+    if (sharedMemoryReader) {
+      sharedMemoryReader.cleanup()
+      sharedMemoryReader = null
+    }
+
+    // Close ZeroMQ PUB/SUB sockets
+    if (this.healthSocket) {
+      this.healthSocket.close()
+      this.healthSocket = null
+    }
+
+    if (this.syncSocket) {
+      this.syncSocket.close()
+      this.syncSocket = null
+    }
+
     if (this.process) {
       try {
         this.process.kill('SIGTERM')
-
-        // Give process time to shut down gracefully
         await new Promise(resolve => setTimeout(resolve, 1000))
 
-        // Force kill if still running
         if (this.process && !this.process.killed) {
           this.process.kill('SIGKILL')
         }
@@ -233,93 +460,88 @@ class PythonBackendManager {
     }
 
     this.isReady = false
-    this.messageQueue = []
-  }
-
-  send(message: any): void {
-    if (!this.isReady || !this.process) {
-      this.messageQueue.push(message)
-      return
-    }
-
-    const jsonMessage = JSON.stringify(message) + '\n'
-    this.process.stdin?.write(jsonMessage)
   }
 
   async sendCommand(message: any): Promise<any> {
-    // Sending command to backend
     if (!this.isReady || !this.process) {
-      // Backend not ready for commands
       throw new Error('Backend not ready')
     }
 
-    return new Promise((resolve, reject) => {
-      // Create unique message ID for correlation
-      const messageId = `${Date.now()}_${Math.random()}`
-      const messageWithId = { ...message, messageId }
+    try {
+      // Send command via CONTROL channel (stdin)
+      const command = JSON.stringify(message) + '\n'
+      this.process.stdin?.write(command)
 
-      // Set up timeout
-      const timeout = setTimeout(() => {
-        this.process?.stdout?.off('data', dataHandler)
-        reject(new Error('Command timeout'))
-      }, 10000)
+      // For immediate commands during startup, we don't wait for response
+      // Backend will send response via stdout which is handled in data event
+      return { success: true }
 
-      // Response handler
-      const dataHandler = (data: Buffer) => {
-        const messages = data.toString().split('\n').filter(msg => msg.trim())
-
-        for (const msg of messages) {
-          if (!msg.startsWith('{')) continue
-
-          try {
-            const response = JSON.parse(msg)
-
-            if (response.messageId === messageId) {
-              clearTimeout(timeout)
-              this.process?.stdout?.off('data', dataHandler)
-
-              // Remove messageId and resolve with clean response
-              const { messageId: _, ...cleanResponse } = response
-              resolve(cleanResponse)
-              return
-            }
-          } catch (e) {
-            // Ignore invalid JSON
-          }
-        }
-      }
-
-      // Attach listener and send command
-      this.process.stdout?.on('data', dataHandler)
-
-      const jsonMessage = JSON.stringify(messageWithId) + '\n'
-      this.process.stdin?.write(jsonMessage)
-    })
-  }
-
-  private handleMessage(message: any): void {
-
-    // Forward to renderer process
-    if (mainWindow) {
-      mainWindow.webContents.send('python-message', message)
+    } catch (error) {
+      console.error('Command failed:', error)
+      throw error
     }
   }
 
   stop(): void {
-    if (this.process) {
-      this.process.kill()
-      this.process = null
-    }
-    this.isReady = false
+    this.cleanup()
   }
-
 }
 
-const backendManager = new PythonBackendManager()
+const backendManager = new MultiChannelIPCManager()
 
 const preload = path.join(__dirname, '../preload/preload.js')
 const url = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
 const indexHtml = path.join(process.env.DIST, 'index.html')
+
+function createPresentationWindow() {
+  // Find secondary display
+  const displays = screen.getAllDisplays()
+  const externalDisplay = displays.find((display) => {
+    return display.bounds.x !== 0 || display.bounds.y !== 0
+  })
+
+  if (!externalDisplay) {
+    console.log('No secondary display found - presentation window will not be created')
+    return
+  }
+
+  console.log(`Creating presentation window on secondary display: ${externalDisplay.bounds.width}x${externalDisplay.bounds.height}`)
+
+  // Create fullscreen window on secondary display
+  presentationWindow = new BrowserWindow({
+    x: externalDisplay.bounds.x,
+    y: externalDisplay.bounds.y,
+    width: externalDisplay.bounds.width,
+    height: externalDisplay.bounds.height,
+    fullscreen: true,
+    frame: false,  // No window frame for presentation
+    title: 'ISI Stimulus Presentation',
+    backgroundColor: '#000000',  // Black background
+    webPreferences: {
+      preload,
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true,
+    },
+  })
+
+  // Load the dedicated presentation HTML that renders only StimulusPresentationViewport
+  const presentationHtml = path.join(process.env.DIST, 'presentation.html')
+  presentationWindow.loadFile(presentationHtml)
+
+  // Close presentation window when main window closes
+  mainWindow?.on('closed', () => {
+    if (presentationWindow && !presentationWindow.isDestroyed()) {
+      presentationWindow.close()
+    }
+  })
+
+  presentationWindow.on('closed', () => {
+    presentationWindow = null
+  })
+
+  console.log('Presentation window created successfully')
+}
 
 async function createWindow() {
   // Get the primary display's work area (screen minus taskbars/docks)
@@ -385,6 +607,9 @@ async function createWindow() {
 
     // Mark that initial load is complete
     isInitialLoad = false
+
+    // Create presentation window on secondary display (if available)
+    createPresentationWindow()
   })
 
   // Handle window opening - allow internal presentation windows, block external URLs
@@ -438,6 +663,11 @@ ipcMain.handle('get-system-status', async () => {
 
 ipcMain.handle('emergency-stop', async () => {
   return await backendManager.sendCommand({ type: 'emergency_stop' })
+})
+
+ipcMain.handle('initialize-zeromq', async () => {
+  // Initialize ZeroMQ connections when frontend is ready
+  await backendManager.initializeZeroMQConnections()
 })
 
 // App event handlers

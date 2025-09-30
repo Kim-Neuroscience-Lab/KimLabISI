@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useFrameRenderer } from '../../hooks/useFrameRenderer'
 
 interface MonitorParameters {
   selected_display: string
@@ -58,7 +59,10 @@ const StimulusGenerationViewport: React.FC<StimulusGenerationViewportProps> = ({
   systemState,
   lastMessage
 }) => {
+  console.log('[STIMULUS-DEBUG] Component mounted/rendered, sendCommand:', !!sendCommand)
+
   const [backendParams, setBackendParams] = useState<StimulusParameters | null>(null)
+  const [backendMonitorParams, setBackendMonitorParams] = useState<MonitorParameters | null>(null)
   const [stimulusStatus, setStimulusStatus] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -67,173 +71,107 @@ const StimulusGenerationViewport: React.FC<StimulusGenerationViewportProps> = ({
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0)
   const [showBarMask, setShowBarMask] = useState(false)
   const [totalFrames, setTotalFrames] = useState(0)
-  const [frameImageData, setFrameImageData] = useState<string | null>(null)
   const [datasetInfo, setDatasetInfo] = useState<any>(null)
+  const [hasFrameData, setHasFrameData] = useState(false)
 
-  // Fetch initial stimulus data and dataset info
+  // Canvas-based frame rendering
+  const { canvasRef, renderFrame } = useFrameRenderer()
+
+  // Listen for shared memory frames from main process
   useEffect(() => {
-    const initializeStimulus = async () => {
-      // Component is only rendered when system is ready, so we can proceed
-      if (!sendCommand) {
-        return
+    const handleSharedMemoryFrame = (frameData: any) => {
+      console.log('Received shared memory frame:', frameData.frame_id, frameData.timestamp_us)
+
+      // Extract dataset info from frame metadata
+      if (frameData.total_frames && frameData.total_frames > 0) {
+        setTotalFrames(frameData.total_frames)
+        setDatasetInfo({
+          total_frames: frameData.total_frames,
+          start_angle: frameData.start_angle,
+          end_angle: frameData.end_angle,
+          direction: frameData.direction
+        })
       }
 
-      try {
-        setIsLoading(true)
+      // Update current frame index
+      if (frameData.frame_index !== undefined) {
+        setCurrentFrameIndex(frameData.frame_index)
+      }
 
-        // Get parameters from backend
-        const paramsResponse = await sendCommand({ type: 'get_stimulus_parameters' })
-        if (paramsResponse?.success && paramsResponse?.parameters) {
-          setBackendParams(paramsResponse.parameters)
-        } else {
-          console.warn('StimulusGenerationViewport: Failed to get parameters:', paramsResponse)
-        }
+      // Render raw binary frame data directly to canvas
+      renderFrame(frameData)
+      setHasFrameData(true)
+    }
 
-        // Get status from backend
-        try {
-          const statusResponse = await sendCommand({ type: 'get_stimulus_status' })
-          if (statusResponse?.success) {
-            setStimulusStatus(statusResponse.status)
-          } else {
-            console.warn('StimulusGenerationViewport: Failed to get status:', statusResponse)
-          }
-        } catch (error) {
-          console.warn('StimulusGenerationViewport: Status request failed:', error.message)
-        }
+    // Register IPC listener for shared memory frames via electronAPI
+    if (window.electronAPI?.onSharedMemoryFrame) {
+      window.electronAPI.onSharedMemoryFrame(handleSharedMemoryFrame)
+    }
 
-        // Get dataset info for default direction
-        try {
-          await loadDatasetInfo('LR')
-        } catch (error) {
-          console.warn('StimulusGenerationViewport: Dataset loading failed:', error.message)
-        }
-      } catch (error) {
-        console.error('StimulusGenerationViewport: Failed to initialize stimulus:', error)
-      } finally {
-        setIsLoading(false)
+    return () => {
+      if (window.electronAPI?.removeSharedMemoryListener) {
+        window.electronAPI.removeSharedMemoryListener()
       }
     }
+  }, [renderFrame])
 
-    initializeStimulus()
-  }, [sendCommand])
-
-  // Listen for stimulus parameter updates from backend
+  // Stop loading once we have frame data
   useEffect(() => {
-    if (lastMessage?.type === 'stimulus_parameters_updated') {
-      setBackendParams(lastMessage.parameters)
-      // Reload dataset info and current frame when parameters change
-      loadDatasetInfo(direction)
+    if (hasFrameData) {
+      setIsLoading(false)
     }
-    if (lastMessage?.type === 'stimulus_status') {
-      setStimulusStatus(lastMessage)
-    }
-  }, [lastMessage, direction])
-
-  // Send monitor parameters to backend when they change
-  useEffect(() => {
-    if (monitorParams && sendCommand) {
-      sendCommand({
-        type: 'update_spatial_configuration',
-        spatial_config: {
-          monitor_distance_cm: monitorParams.monitor_distance_cm,
-          monitor_lateral_angle_deg: monitorParams.monitor_lateral_angle_deg,
-          monitor_tilt_angle_deg: monitorParams.monitor_tilt_angle_deg,
-          monitor_width_cm: monitorParams.monitor_width_cm,
-          monitor_height_cm: monitorParams.monitor_height_cm,
-          monitor_width_px: monitorParams.monitor_width_px,
-          monitor_height_px: monitorParams.monitor_height_px,
-          monitor_fps: monitorParams.monitor_fps
-        }
-      }).then(() => {
-        // Regenerate stimulus when monitor parameters change
-        loadDatasetInfo(direction)
-      }).catch(error => {
-        console.error('Failed to update spatial configuration:', error)
-      })
-    }
-  }, [monitorParams, sendCommand, direction])
-
-  // Send stimulus parameters to backend when they change
-  useEffect(() => {
-    if (stimulusParams && sendCommand) {
-      sendCommand({
-        type: 'update_stimulus_parameters',
-        parameters: stimulusParams
-      }).then(() => {
-        // Regenerate stimulus when stimulus parameters change
-        loadDatasetInfo(direction)
-      }).catch(error => {
-        console.error('Failed to update stimulus parameters:', error)
-      })
-    }
-  }, [stimulusParams, sendCommand, direction])
+  }, [hasFrameData])
 
   // Use backend parameters if available, fallback to frontend parameters
   const displayParams = backendParams || stimulusParams
 
-  // Load dataset info for a direction
-  const loadDatasetInfo = async (dir: string) => {
-    if (!sendCommand) {
-      return
-    }
-
-    try {
-      const infoResponse = await sendCommand({
-        type: 'get_stimulus_info',
-        direction: dir,
-        num_cycles: 3
-      })
-
-      if (infoResponse?.success) {
-        setDatasetInfo(infoResponse)
-        setTotalFrames(infoResponse.total_frames)
-        // Reset to frame 0 and load default frame (LR, frame 0, no bar mask)
-        setCurrentFrameIndex(0)
-        await loadFrame(dir, 0, false)
-      } else {
-        console.error('StimulusGenerationViewport: Failed to load dataset info:', infoResponse)
-      }
-    } catch (error) {
-      console.error('StimulusGenerationViewport: Exception loading dataset info:', error)
-    }
-  }
-
-  // Load a specific frame
+  // Request a frame from the backend
   const loadFrame = async (dir: string, frameIndex: number, showMask: boolean) => {
+    console.log('[STIMULUS-DEBUG] loadFrame called:', { dir, frameIndex, showMask, hasSendCommand: !!sendCommand })
+
     if (!sendCommand) {
+      console.error('[STIMULUS-DEBUG] sendCommand is not available')
       return
     }
 
     try {
-      const frameResponse = await sendCommand({
+      console.log('[STIMULUS-DEBUG] Sending get_stimulus_frame command...')
+      await sendCommand({
         type: 'get_stimulus_frame',
         direction: dir,
         frame_index: frameIndex,
         show_bar_mask: showMask,
         num_cycles: 3
       })
-
-      if (frameResponse?.success && frameResponse.frame_data) {
-        setFrameImageData(frameResponse.frame_data)
-      } else {
-        console.error('StimulusGenerationViewport: Failed to load frame:', frameResponse)
-      }
+      console.log('[STIMULUS-DEBUG] get_stimulus_frame command sent successfully')
+      // Frame will arrive via shared memory with metadata
     } catch (error) {
-      console.error('StimulusGenerationViewport: Exception loading frame:', error)
+      console.error('[STIMULUS-DEBUG] Failed to request frame:', error)
     }
   }
 
-  // Load frame when controls change
+  // Request initial frame on mount
   useEffect(() => {
-    if (totalFrames > 0) {
+    console.log('[STIMULUS-DEBUG] Initial frame useEffect triggered:', { hasSendCommand: !!sendCommand, direction, showBarMask })
+    if (sendCommand) {
+      console.log('[STIMULUS-DEBUG] Calling loadFrame for initial frame')
+      loadFrame(direction, 0, showBarMask)
+    } else {
+      console.warn('[STIMULUS-DEBUG] sendCommand not available in initial frame useEffect')
+    }
+  }, [sendCommand])
+
+  // Request frame when controls change
+  useEffect(() => {
+    if (totalFrames > 0 && sendCommand) {
       loadFrame(direction, currentFrameIndex, showBarMask)
     }
-  }, [direction, currentFrameIndex, showBarMask, totalFrames])
+  }, [direction, currentFrameIndex, showBarMask, totalFrames, sendCommand])
 
   // Direction change handler
   const handleDirectionChange = (newDirection: 'LR' | 'RL' | 'TB' | 'BT') => {
     setDirection(newDirection)
-    loadDatasetInfo(newDirection) // This will reset frame index to 0
+    setCurrentFrameIndex(0)
   }
 
   const startStimulus = async () => {
@@ -256,6 +194,8 @@ const StimulusGenerationViewport: React.FC<StimulusGenerationViewportProps> = ({
     }
   }
 
+  console.log('[STIMULUS-DEBUG] render: totalFrames =', totalFrames, 'hasFrameData =', hasFrameData, 'hasSendCommand =', !!sendCommand)
+
   return (
     <div className={`flex flex-col h-full max-h-full ${className}`}>
       {/* Stimulus Display Container */}
@@ -267,26 +207,27 @@ const StimulusGenerationViewport: React.FC<StimulusGenerationViewportProps> = ({
               <div className="text-sm mt-2">Initializing parameters...</div>
             </div>
           </div>
-        ) : frameImageData ? (
-          <img
-            src={frameImageData}
-            alt={`Stimulus frame ${currentFrameIndex}`}
-            className="absolute inset-0 w-full h-full object-contain"
-            style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              width: '100%',
-              height: '100%'
-            }}
-          />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center text-sci-secondary-400">
-              <div className="text-4xl mb-4">⚠️</div>
-              <div className="text-lg">No Frame Data</div>
-              <div className="text-sm mt-2">Check backend connection</div>
-            </div>
-          </div>
+          <>
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain'
+              }}
+            />
+            {!hasFrameData && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center text-sci-secondary-400">
+                  <div className="text-4xl mb-4">⚠️</div>
+                  <div className="text-lg">No Frame Data</div>
+                  <div className="text-sm mt-2">Check backend connection</div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -23,9 +23,17 @@ export interface ElectronAPI {
   onPythonMessage: (callback: (message: any) => void) => void
   removeAllPythonListeners: () => void
 
+  // Multi-channel IPC event listeners
+  onControlMessage: (callback: (message: any) => void) => void
+  onSyncMessage: (callback: (message: any) => void) => void
+  onHealthMessage: (callback: (message: any) => void) => void
+  onSharedMemoryFrame: (callback: (frameData: any) => void) => void
+  removeSharedMemoryListener: () => void
+
   // System control
   getSystemStatus: () => Promise<{ success: boolean }>
   emergencyStop: () => Promise<{ success: boolean }>
+  initializeZeroMQ: () => Promise<void>
 
   // General IPC
   onMainMessage: (callback: (message: string) => void) => void
@@ -44,11 +52,37 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.removeAllListeners('python-message')
     ipcRenderer.removeAllListeners('main-process-message')
     ipcRenderer.removeAllListeners('backend-error')
+    ipcRenderer.removeAllListeners('control-message')
+    ipcRenderer.removeAllListeners('sync-message')
+    ipcRenderer.removeAllListeners('health-message')
+    ipcRenderer.removeAllListeners('shared-memory-frame')
+  },
+
+  // Multi-channel IPC event listeners
+  onControlMessage: (callback: (message: any) => void) => {
+    ipcRenderer.on('control-message', (_event, message) => callback(message))
+  },
+
+  onSyncMessage: (callback: (message: any) => void) => {
+    ipcRenderer.on('sync-message', (_event, message) => callback(message))
+  },
+
+  onHealthMessage: (callback: (message: any) => void) => {
+    ipcRenderer.on('health-message', (_event, message) => callback(message))
+  },
+
+  onSharedMemoryFrame: (callback: (frameData: any) => void) => {
+    ipcRenderer.on('shared-memory-frame', (_event, frameData) => callback(frameData))
+  },
+
+  removeSharedMemoryListener: () => {
+    ipcRenderer.removeAllListeners('shared-memory-frame')
   },
 
   // System control
   getSystemStatus: () => ipcRenderer.invoke('get-system-status'),
   emergencyStop: () => ipcRenderer.invoke('emergency-stop'),
+  initializeZeroMQ: () => ipcRenderer.invoke('initialize-zeromq'),
 
   // General IPC
   onMainMessage: (callback: (message: string) => void) => {

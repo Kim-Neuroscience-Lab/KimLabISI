@@ -64,6 +64,7 @@ export interface AllParameters {
 
 export function useParameterManager(sendCommand?: (command: any) => Promise<any>, lastMessage?: any) {
   const [parameters, setParameters] = useState<AllParameters>({})
+  const [parameterConfig, setParameterConfig] = useState<any>({})
   const [isLoading, setIsLoading] = useState(true)
   const [lastError, setLastError] = useState<string | null>(null)
 
@@ -91,13 +92,29 @@ export function useParameterManager(sendCommand?: (command: any) => Promise<any>
     }
   }, [sendCommand])
 
+  // Fetch parameter info including validation boundaries
+  const fetchParameterInfo = useCallback(async () => {
+    if (!sendCommand) return
+
+    try {
+      const response = await sendCommand({ type: 'get_parameter_info' })
+
+      if (response?.success && response?.info?.parameter_config) {
+        setParameterConfig(response.info.parameter_config)
+      }
+    } catch (error) {
+      console.error('useParameterManager: Error fetching parameter info:', error)
+    }
+  }, [sendCommand])
+
   // Update specific parameter category
   const updateParameters = useCallback(async (category: keyof AllParameters, newParams: any) => {
     if (!sendCommand) return
 
     try {
       const response = await sendCommand({
-        type: `update_${category}_parameters`,
+        type: 'update_parameter_group',
+        group_name: category,
         parameters: newParams
       })
 
@@ -124,11 +141,15 @@ export function useParameterManager(sendCommand?: (command: any) => Promise<any>
       setParameters(lastMessage.parameters)
       setIsLoading(false)
       setLastError(null)
+
+      // Fetch parameter info after parameters are loaded
+      fetchParameterInfo()
     }
-  }, [lastMessage])
+  }, [lastMessage, fetchParameterInfo])
 
   return {
     parameters,
+    parameterConfig,
     isLoading,
     lastError,
     fetchAllParameters,

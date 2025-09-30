@@ -19,19 +19,39 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
-class StartupPhase(Enum):
-    """Phases of the startup sequence."""
+class SystemState(Enum):
+    """
+    Single source of truth for system state.
+    Backend controls ALL state transitions. Frontend displays state directly.
+    """
     INITIALIZING = "initializing"
-    HEALTH_CHECKS = "health_checks"
-    HARDWARE_DETECTION = "hardware_detection"
-    SYSTEM_READY = "system_ready"
-    FAILED = "failed"
+    WAITING_FRONTEND = "waiting_frontend"
+    IPC_READY = "ipc_ready"
+    PARAMETERS_LOADED = "parameters_loaded"
+    HARDWARE_DETECTED = "hardware_detected"
+    SYSTEMS_VALIDATED = "systems_validated"
+    READY = "ready"
+    ERROR = "error"
+
+    def get_display_text(self) -> str:
+        """Get UI-ready display text for this state."""
+        display_texts = {
+            SystemState.INITIALIZING: "Initializing backend systems...",
+            SystemState.WAITING_FRONTEND: "Waiting for frontend connection...",
+            SystemState.IPC_READY: "Communication channels established",
+            SystemState.PARAMETERS_LOADED: "Parameters loaded successfully",
+            SystemState.HARDWARE_DETECTED: "Hardware detected and configured",
+            SystemState.SYSTEMS_VALIDATED: "All systems validated",
+            SystemState.READY: "System ready for experiments",
+            SystemState.ERROR: "System initialization failed"
+        }
+        return display_texts.get(self, self.value)
 
 
 @dataclass
 class StartupResult:
     """Result of startup coordination."""
-    phase: StartupPhase
+    state: SystemState
     success: bool
     message: str
     details: Optional[Dict[str, Any]] = None
@@ -39,10 +59,19 @@ class StartupResult:
 
 
 class StartupCoordinator:
-    """Centralized coordinator for all system initialization."""
+    """
+    Centralized coordinator for all system initialization.
+
+    Architecture principles:
+    1. Single source of truth - only this class tracks system state
+    2. Backend controls all state transitions
+    3. Frontend displays state directly without interpretation
+    4. Proper channel handshake before any coordination messages
+    5. All business logic in backend, frontend is pure view layer
+    """
 
     def __init__(self):
-        self.current_phase = StartupPhase.INITIALIZING
+        self.current_state = SystemState.INITIALIZING
         self.startup_results: Dict[str, Any] = {}
         self.hardware_info: Dict[str, List[str]] = {
             'cameras': [],
@@ -50,13 +79,90 @@ class StartupCoordinator:
         }
         self.health_results: Dict[str, Any] = {}
         self._startup_lock = asyncio.Lock()
+        self.frontend_ready = False  # Track frontend connection state
+        self.backend_instance = None  # Reference to backend for IPC
 
-    async def coordinate_startup(self, send_message_callback=None) -> StartupResult:
+    def broadcast_state(self, state: SystemState, details: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
         """
-        Coordinate the complete system startup sequence.
+        Broadcast state change to frontend via proper channel.
+
+        This is the ONLY method that sends state updates.
+        Frontend displays this state directly without interpretation.
+        """
+        self.current_state = state
+
+        message = {
+            "type": "system_state",
+            "state": state.value,
+            "display_text": state.get_display_text(),
+            "is_ready": state == SystemState.READY,
+            "is_error": state == SystemState.ERROR,
+            "timestamp": time.time()
+        }
+
+        if details:
+            message["details"] = details
+
+        if error:
+            message["error"] = error
+
+        # Use CONTROL channel during early startup, SYNC channel after frontend ready
+        from .multi_channel_ipc import get_multi_channel_ipc
+        ipc = get_multi_channel_ipc()
+
+        if self.frontend_ready and ipc:
+            # Use SYNC channel for state broadcasts after handshake complete
+            success = ipc.send_sync_message(message)
+            if success:
+                logger.info(f"State broadcast via SYNC: {state.value}")
+            else:
+                logger.warning(f"Failed to broadcast state via SYNC: {state.value}")
+        elif ipc:
+            # Use CONTROL channel during early startup before frontend connects
+            success = ipc.send_control_message(message)
+            if success:
+                logger.info(f"State broadcast via CONTROL: {state.value}")
+            else:
+                logger.warning(f"Failed to broadcast state via CONTROL: {state.value}")
+
+    async def wait_for_frontend_ready(self, timeout: float = 10.0) -> bool:
+        """
+        Wait for frontend to establish ZeroMQ connections and send ready signal.
+
+        This implements the proper handshake protocol:
+        1. Backend initializes ZeroMQ sockets
+        2. Backend broadcasts "waiting for frontend" state
+        3. Frontend connects to ZeroMQ
+        4. Frontend sends "frontend_ready" command via CONTROL channel (stdin)
+        5. Backend receives confirmation and proceeds
+        """
+        logger.info("Waiting for frontend to establish connections...")
+        self.broadcast_state(SystemState.WAITING_FRONTEND)
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.frontend_ready:
+                logger.info("Frontend connection confirmed")
+                return True
+            await asyncio.sleep(0.1)
+
+        logger.error("Frontend connection timeout")
+        return False
+
+    async def coordinate_startup(self, backend_instance=None) -> StartupResult:
+        """
+        Coordinate the complete system startup sequence with proper state machine.
+
+        New architecture:
+        1. Initialize IPC channels
+        2. Wait for frontend to connect (handshake)
+        3. Load parameters
+        4. Detect and configure hardware
+        5. Validate all systems
+        6. Broadcast READY state
 
         Args:
-            send_message_callback: Function to send status updates to frontend
+            backend_instance: Reference to backend for command handling
 
         Returns:
             StartupResult indicating final startup status
@@ -64,149 +170,195 @@ class StartupCoordinator:
         async with self._startup_lock:
             try:
                 logger.info("Starting coordinated system initialization...")
-                self.current_phase = StartupPhase.INITIALIZING
+                self.backend_instance = backend_instance
+                self.broadcast_state(SystemState.INITIALIZING)
 
-                if send_message_callback:
-                    send_message_callback({
-                        "type": "startup_status",
-                        "phase": self.current_phase.value,
-                        "message": "Initializing system startup..."
-                    })
-
-                # Phase 1: Health Checks
-                result = await self._phase_1_health_checks(send_message_callback)
+                # Phase 1: Initialize IPC channels
+                result = await self._initialize_ipc(backend_instance)
                 if not result.success:
+                    self.broadcast_state(SystemState.ERROR, error=result.error)
                     return result
 
-                # Phase 2: Hardware Detection
-                result = await self._phase_2_hardware_detection(send_message_callback)
+                # Phase 2: Wait for frontend connection (handshake)
+                frontend_ready = await self.wait_for_frontend_ready(timeout=15.0)
+                if not frontend_ready:
+                    error_msg = "Frontend failed to establish connection"
+                    logger.error(error_msg)
+                    self.broadcast_state(SystemState.ERROR, error=error_msg)
+                    return StartupResult(
+                        state=SystemState.ERROR,
+                        success=False,
+                        message="Frontend connection failed",
+                        error=error_msg
+                    )
+
+                self.broadcast_state(SystemState.IPC_READY)
+
+                # Phase 3: Load parameters
+                result = await self._load_parameters()
                 if not result.success:
+                    self.broadcast_state(SystemState.ERROR, error=result.error)
                     return result
 
-                # Phase 3: System Ready
-                result = await self._phase_3_system_ready(send_message_callback)
-                return result
+                self.broadcast_state(SystemState.PARAMETERS_LOADED)
+
+                # Phase 4: Detect and configure hardware
+                result = await self._detect_hardware()
+                if not result.success:
+                    self.broadcast_state(SystemState.ERROR, error=result.error)
+                    return result
+
+                self.broadcast_state(SystemState.HARDWARE_DETECTED, details=result.details)
+
+                # Phase 5: Validate all systems
+                result = await self._validate_systems()
+                if not result.success:
+                    self.broadcast_state(SystemState.ERROR, error=result.error)
+                    return result
+
+                self.broadcast_state(SystemState.SYSTEMS_VALIDATED)
+
+                # Phase 6: System ready
+                logger.info("System initialization complete - All systems operational")
+                self.broadcast_state(SystemState.READY)
+
+                return StartupResult(
+                    state=SystemState.READY,
+                    success=True,
+                    message="System startup completed successfully",
+                    details={
+                        "hardware": self.hardware_info,
+                        "health": {name: result.status.value for name, result in self.health_results.items()}
+                    }
+                )
 
             except Exception as e:
                 logger.error(f"Startup coordination failed: {e}")
-                self.current_phase = StartupPhase.FAILED
+                self.broadcast_state(SystemState.ERROR, error=str(e))
                 return StartupResult(
-                    phase=StartupPhase.FAILED,
+                    state=SystemState.ERROR,
                     success=False,
                     message="System startup failed",
                     error=str(e)
                 )
 
-    async def _phase_1_health_checks(self, send_message_callback=None) -> StartupResult:
-        """Phase 1: Coordinated health checks for all systems."""
-        logger.info("Phase 1: Starting coordinated health checks...")
-        self.current_phase = StartupPhase.HEALTH_CHECKS
-
-        if send_message_callback:
-            send_message_callback({
-                "type": "startup_status",
-                "phase": self.current_phase.value,
-                "message": "Checking system health..."
-            })
+    async def _initialize_ipc(self, backend_instance=None) -> StartupResult:
+        """Initialize multi-channel IPC system (ZeroMQ sockets)."""
+        logger.info("Initializing multi-channel IPC system...")
 
         try:
-            # Import here to avoid circular imports
-            from .health_monitor import get_health_monitor
+            await asyncio.sleep(0.3)  # Brief delay for visibility
 
-            # Get health monitor instance
-            health_monitor = get_health_monitor()
+            # Initialize multi-channel IPC system
+            from .multi_channel_ipc import get_multi_channel_ipc
 
-            # Perform coordinated health checks (no concurrent access)
-            logger.info("Performing health checks for all systems...")
-            health_results = health_monitor.check_all_systems_health(use_cache=False)
+            # Get or create the multi-channel IPC instance
+            ipc = get_multi_channel_ipc()
 
-            self.health_results = health_results
-
-            # Check if all systems are healthy
-            failed_systems = []
-            for system_name, result in health_results.items():
-                if not result.is_healthy:
-                    failed_systems.append(f"{system_name}: {result.status.value}")
-                    if result.error_message:
-                        failed_systems[-1] += f" ({result.error_message})"
-
-            if failed_systems:
-                error_msg = f"Health check failed for: {', '.join(failed_systems)}"
+            if ipc is None:
+                error_msg = "Failed to initialize multi-channel IPC system"
                 logger.error(error_msg)
-
-                if send_message_callback:
-                    send_message_callback({
-                        "type": "startup_status",
-                        "phase": self.current_phase.value,
-                        "message": error_msg,
-                        "error": True
-                    })
-
-                self.current_phase = StartupPhase.FAILED
                 return StartupResult(
-                    phase=StartupPhase.FAILED,
+                    state=SystemState.ERROR,
                     success=False,
-                    message="System health checks failed",
-                    error=error_msg,
-                    details={"failed_systems": failed_systems}
+                    message="Multi-channel IPC initialization failed",
+                    error=error_msg
                 )
 
-            # All systems healthy
-            healthy_systems = list(health_results.keys())
-            success_msg = f"✓ All systems healthy: {', '.join(healthy_systems)}"
-            logger.info(success_msg)
+            # Initialize shared memory system
+            from .shared_memory_stream import get_shared_memory_stream
+            stream = get_shared_memory_stream()
 
-            if send_message_callback:
-                send_message_callback({
-                    "type": "startup_status",
-                    "phase": self.current_phase.value,
-                    "message": success_msg
-                })
+            if stream is None:
+                error_msg = "Failed to initialize shared memory streaming system"
+                logger.error(error_msg)
+                return StartupResult(
+                    state=SystemState.ERROR,
+                    success=False,
+                    message="Shared memory system initialization failed",
+                    error=error_msg
+                )
 
-                # Immediately update system health status for header icons
-                hardware_status = {}
-                for system_name, result in health_results.items():
-                    hardware_status[system_name] = result.status.value
+            # Store references in backend instance if provided
+            if backend_instance:
+                backend_instance.multi_channel_ipc = ipc
+                backend_instance.shared_memory_stream = stream
 
-                send_message_callback({
-                    "type": "system_health",
-                    "hardware_status": hardware_status
-                })
+                # Start health monitoring on the multi-channel system
+                ipc.start_health_monitoring(
+                    callback=backend_instance._handle_health_update,
+                    interval_sec=0.1
+                )
+
+            logger.info("✓ Multi-channel IPC system initialized successfully")
 
             return StartupResult(
-                phase=StartupPhase.HEALTH_CHECKS,
+                state=SystemState.INITIALIZING,
                 success=True,
-                message="Health checks completed successfully",
-                details={"healthy_systems": healthy_systems}
+                message="Multi-channel IPC system initialized successfully"
             )
 
         except Exception as e:
-            error_msg = f"Health check phase failed: {e}"
+            error_msg = f"Multi-channel IPC initialization failed: {e}"
             logger.error(error_msg)
-            self.current_phase = StartupPhase.FAILED
             return StartupResult(
-                phase=StartupPhase.FAILED,
+                state=SystemState.ERROR,
                 success=False,
-                message="Health check phase failed",
+                message="Multi-channel IPC initialization failed",
                 error=error_msg
             )
 
-    async def _phase_2_hardware_detection(self, send_message_callback=None) -> StartupResult:
-        """Phase 2: Coordinated hardware detection after health checks pass."""
-        logger.info("Phase 2: Starting coordinated hardware detection...")
-        self.current_phase = StartupPhase.HARDWARE_DETECTION
-
-        if send_message_callback:
-            send_message_callback({
-                "type": "startup_status",
-                "phase": self.current_phase.value,
-                "message": "Detecting hardware..."
-            })
+    async def _load_parameters(self) -> StartupResult:
+        """Load and validate parameter system."""
+        logger.info("Loading parameter system...")
 
         try:
-            # Import here to avoid circular imports
+            await asyncio.sleep(0.3)
+            from .health_monitor import get_health_monitor
+            health_monitor = get_health_monitor()
+
+            # Check parameter system health
+            result = health_monitor.check_system_health('parameters')
+            logger.info(f"Parameter system health: {result.status.value}")
+
+            if not result.is_healthy:
+                error_msg = f"Parameter system check failed: {result.status.value}"
+                if result.error_message:
+                    error_msg += f" ({result.error_message})"
+                logger.error(error_msg)
+                return StartupResult(
+                    state=SystemState.ERROR,
+                    success=False,
+                    message="Parameter system validation failed",
+                    error=error_msg
+                )
+
+            logger.info("✓ Parameter system loaded successfully")
+            return StartupResult(
+                state=SystemState.PARAMETERS_LOADED,
+                success=True,
+                message="Parameter system loaded successfully"
+            )
+
+        except Exception as e:
+            error_msg = f"Parameter system initialization failed: {e}"
+            logger.error(error_msg)
+            return StartupResult(
+                state=SystemState.ERROR,
+                success=False,
+                message="Parameter system initialization failed",
+                error=error_msg
+            )
+
+    async def _detect_hardware(self) -> StartupResult:
+        """Detect and configure hardware (cameras and displays)."""
+        logger.info("Detecting hardware...")
+
+        try:
+            await asyncio.sleep(0.3)
             from .camera_manager import handle_detect_cameras
             from .display_manager import handle_detect_displays
+            from .parameter_manager import get_parameter_manager
 
             detected_hardware = {}
 
@@ -217,7 +369,7 @@ class StartupCoordinator:
                 cameras = camera_result.get("cameras", [])
                 detected_hardware['cameras'] = cameras
                 self.hardware_info['cameras'] = cameras
-                logger.info(f"✓ Found {len(cameras)} camera(s): {', '.join(cameras)}")
+                logger.info(f"✓ Found {len(cameras)} camera(s)")
             else:
                 logger.warning("✗ Camera detection failed")
                 detected_hardware['cameras'] = []
@@ -230,206 +382,211 @@ class StartupCoordinator:
                 display_names = [d.get("name", "Unknown") for d in displays]
                 detected_hardware['displays'] = display_names
                 self.hardware_info['displays'] = display_names
-                logger.info(f"✓ Found {len(displays)} display(s): {', '.join(display_names)}")
+                logger.info(f"✓ Found {len(displays)} display(s)")
             else:
                 logger.warning("✗ Display detection failed")
                 detected_hardware['displays'] = []
 
-            # Update parameter manager with detected hardware
-            from .parameter_manager import get_parameter_manager
+            # Update parameter manager with detected hardware and auto-select devices
             param_manager = get_parameter_manager()
 
-            # Update camera hardware list and auto-select first camera
+            # Auto-configure camera
             if detected_hardware.get('cameras'):
+                from .camera_manager import camera_manager
                 current_params = param_manager.load_parameters()
                 camera_updates = {'available_cameras': detected_hardware['cameras']}
 
                 # Auto-select first camera if none selected
-                auto_selected = False
-                target_camera_name = current_params.camera.selected_camera
                 if not current_params.camera.selected_camera:
-                    target_camera_name = detected_hardware['cameras'][0]
-                    camera_updates['selected_camera'] = target_camera_name
-                    auto_selected = True
-                    logger.info(f"Auto-selected first camera: {target_camera_name}")
+                    camera_updates['selected_camera'] = detected_hardware['cameras'][0]
 
-                # Get camera capabilities for selected camera (whether auto-selected or already selected)
-                if target_camera_name in detected_hardware['cameras']:
-                    try:
-                        from .camera_manager import camera_manager
-                        # Find camera info from already detected cameras
-                        cameras = camera_manager.detected_cameras
-                        target_camera = None
-                        for cam in cameras:
-                            if cam.name == target_camera_name and cam.is_available:
-                                target_camera = cam
-                                break
-
-                        if target_camera and target_camera.properties:
-                            # Use capabilities from the detection phase (already captured)
-                            props = target_camera.properties
-                            capabilities_updates = {
-                                'camera_fps': int(props.get('fps', -1)) if props.get('fps', 0) > 0 else -1,
-                                'camera_width_px': props.get('width', -1),
-                                'camera_height_px': props.get('height', -1)
-                            }
-                            camera_updates.update(capabilities_updates)
-                            action = "Auto-detected" if auto_selected else "Updated"
-                            logger.info(f"{action} camera capabilities from detection: {props}")
-                        else:
-                            logger.warning(f"Failed to get capabilities for camera {target_camera_name} from detection")
-                    except Exception as e:
-                        logger.error(f"Error getting camera capabilities: {e}")
+                    # Get capabilities for auto-selected camera
+                    target_camera = next((cam for cam in camera_manager.detected_cameras
+                                        if cam.name == camera_updates['selected_camera'] and cam.is_available), None)
+                    if target_camera and target_camera.properties:
+                        props = target_camera.properties
+                        camera_updates.update({
+                            'camera_fps': int(props.get('fps', -1)) if props.get('fps', 0) > 0 else -1,
+                            'camera_width_px': props.get('width', -1),
+                            'camera_height_px': props.get('height', -1)
+                        })
 
                 param_manager.update_camera_parameters(camera_updates)
 
-            # Update display hardware list and auto-select first display
+            # Auto-configure display
             if detected_hardware.get('displays'):
+                from .display_manager import display_manager
                 current_params = param_manager.load_parameters()
                 display_updates = {'available_displays': detected_hardware['displays']}
 
-                # Auto-select display if none selected (prefer secondary/external displays for stimulus)
-                auto_selected_display = False
-                target_display_name = current_params.monitor.selected_display
+                # Auto-select display (prefer secondary)
                 if not current_params.monitor.selected_display:
-                    # Get full display objects to check primary/secondary status
-                    from .display_manager import display_manager
                     available_displays = display_manager.displays
-
-                    # Try to find a secondary (non-primary) display first
                     secondary_display = next((d for d in available_displays if not d.is_primary and d.is_available), None)
-                    if secondary_display:
-                        target_display_name = secondary_display.name
-                        logger.info(f"Auto-selected secondary display for stimulus: {target_display_name}")
-                    else:
-                        # Fall back to primary display if no secondary available
-                        primary_display = next((d for d in available_displays if d.is_primary and d.is_available), None)
-                        if primary_display:
-                            target_display_name = primary_display.name
-                            logger.info(f"Auto-selected primary display (no secondary available): {target_display_name}")
-                        else:
-                            # Ultimate fallback to first in list
-                            target_display_name = detected_hardware['displays'][0]
-                            logger.info(f"Auto-selected first available display: {target_display_name}")
+                    target_display = secondary_display or next((d for d in available_displays if d.is_available), None)
 
-                    display_updates['selected_display'] = target_display_name
-                    auto_selected_display = True
-
-                # Get display capabilities for selected display (whether auto-selected or already selected)
-                if target_display_name in detected_hardware['displays']:
-                    try:
-                        from .display_manager import display_manager
-                        # Find display info from already detected displays
-                        displays = display_manager.displays
-                        target_display = None
-                        for display in displays:
-                            if display.name == target_display_name and display.is_available:
-                                target_display = display
-                                break
-
-                        if target_display:
-                            # Use capabilities from the detection phase (already captured)
-                            capabilities_updates = {
-                                'monitor_fps': int(target_display.refresh_rate) if target_display.refresh_rate > 0 else -1,
-                                'monitor_width_px': target_display.width,
-                                'monitor_height_px': target_display.height
-                            }
-                            display_updates.update(capabilities_updates)
-                            action = "Auto-detected" if auto_selected_display else "Updated"
-                            logger.info(f"{action} display capabilities from detection: {target_display.width}x{target_display.height} @ {target_display.refresh_rate}Hz")
-                        else:
-                            logger.warning(f"Failed to get capabilities for display {target_display_name} from detection")
-                    except Exception as e:
-                        logger.error(f"Error getting display capabilities: {e}")
+                    if target_display:
+                        display_updates['selected_display'] = target_display.name
+                        display_updates.update({
+                            'monitor_fps': int(target_display.refresh_rate) if target_display.refresh_rate > 0 else -1,
+                            'monitor_width_px': target_display.width,
+                            'monitor_height_px': target_display.height
+                        })
 
                 param_manager.update_monitor_parameters(display_updates)
 
-            # Send parameter update notification to frontend
-            if send_message_callback:
-                try:
-                    all_params = param_manager.get_all_parameters()
-                    send_message_callback({
-                        "type": "parameters_updated",
-                        "parameters": all_params
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to send parameter update: {e}")
+            # Broadcast parameter update via SYNC channel
+            from .multi_channel_ipc import get_multi_channel_ipc
+            ipc = get_multi_channel_ipc()
+            all_params = param_manager.get_all_parameters()
+            ipc.send_sync_message({
+                "type": "parameters_updated",
+                "parameters": all_params
+            })
 
-            # Send startup status update
-            if send_message_callback:
-                hardware_summary = []
-                if detected_hardware.get('cameras'):
-                    hardware_summary.append(f"{len(detected_hardware['cameras'])} camera(s)")
-                if detected_hardware.get('displays'):
-                    hardware_summary.append(f"{len(detected_hardware['displays'])} display(s)")
-
-                send_message_callback({
-                    "type": "startup_status",
-                    "phase": self.current_phase.value,
-                    "message": f"✓ Hardware detected: {', '.join(hardware_summary)}"
-                })
-
+            logger.info("✓ Hardware detection and configuration complete")
             return StartupResult(
-                phase=StartupPhase.HARDWARE_DETECTION,
+                state=SystemState.HARDWARE_DETECTED,
                 success=True,
                 message="Hardware detection completed successfully",
                 details=detected_hardware
             )
 
         except Exception as e:
-            error_msg = f"Hardware detection phase failed: {e}"
+            error_msg = f"Hardware detection failed: {e}"
             logger.error(error_msg)
-            self.current_phase = StartupPhase.FAILED
             return StartupResult(
-                phase=StartupPhase.FAILED,
+                state=SystemState.ERROR,
                 success=False,
-                message="Hardware detection phase failed",
+                message="Hardware detection failed",
                 error=error_msg
             )
 
-    async def _phase_3_system_ready(self, send_message_callback=None) -> StartupResult:
-        """Phase 3: Declare system ready after all checks pass."""
-        logger.info("Phase 3: System initialization complete")
-        self.current_phase = StartupPhase.SYSTEM_READY
+    async def _validate_systems(self) -> StartupResult:
+        """Validate all systems are healthy and ready."""
+        logger.info("Validating all systems...")
 
-        ready_message = "Backend system: Online - All systems operational!"
-        logger.info(ready_message)
+        try:
+            await asyncio.sleep(0.3)
+            from .health_monitor import get_health_monitor
+            health_monitor = get_health_monitor()
 
-        if send_message_callback:
-            send_message_callback({
-                "type": "log_message",
-                "message": ready_message,
-                "level": "info"
-            })
+            # Check all critical systems
+            systems_to_check = ['parameters', 'display', 'camera', 'shared_memory', 'multi_channel_ipc', 'realtime_streaming']
+            failed_systems = []
 
-            send_message_callback({
-                "type": "startup_status",
-                "phase": self.current_phase.value,
-                "message": "System ready for experiments"
-            })
+            for system_name in systems_to_check:
+                try:
+                    result = health_monitor.check_system_health(system_name)
+                    self.health_results[system_name] = result
+                    logger.info(f"System validation - {system_name}: {result.status.value}")
 
-        return StartupResult(
-            phase=StartupPhase.SYSTEM_READY,
-            success=True,
-            message="System startup completed successfully",
-            details={
-                "hardware": self.hardware_info,
-                "health": {name: result.status.value for name, result in self.health_results.items()}
-            }
-        )
+                    if not result.is_healthy:
+                        failed_systems.append(f"{system_name}: {result.status.value}")
+                        if result.error_message:
+                            failed_systems[-1] += f" ({result.error_message})"
+                except Exception as e:
+                    logger.error(f"Validation failed for {system_name}: {e}")
+                    failed_systems.append(f"{system_name}: {str(e)}")
+
+            if failed_systems:
+                error_msg = f"System validation failed: {', '.join(failed_systems)}"
+                logger.error(error_msg)
+                return StartupResult(
+                    state=SystemState.ERROR,
+                    success=False,
+                    message="System validation failed",
+                    error=error_msg
+                )
+
+            # Validate stimulus generator can be created
+            try:
+                from .stimulus_manager import get_stimulus_generator
+                stimulus_generator = get_stimulus_generator()
+                logger.info(f"✓ Stimulus generator validated: {type(stimulus_generator).__name__}")
+            except Exception as e:
+                error_msg = f"Stimulus generator validation failed: {e}"
+                logger.error(error_msg)
+                return StartupResult(
+                    state=SystemState.ERROR,
+                    success=False,
+                    message="Stimulus generator validation failed",
+                    error=error_msg
+                )
+
+            logger.info("✓ All systems validated successfully")
+            return StartupResult(
+                state=SystemState.SYSTEMS_VALIDATED,
+                success=True,
+                message="All systems validated successfully"
+            )
+
+        except Exception as e:
+            error_msg = f"System validation failed: {e}"
+            logger.error(error_msg)
+            return StartupResult(
+                state=SystemState.ERROR,
+                success=False,
+                message="System validation failed",
+                error=error_msg
+            )
 
     def is_ready(self) -> bool:
         """Check if system is fully ready for operations."""
-        return self.current_phase == StartupPhase.SYSTEM_READY
+        return self.current_state == SystemState.READY
 
     def get_startup_status(self) -> Dict[str, Any]:
         """Get current startup status information."""
         return {
-            "phase": self.current_phase.value,
+            "state": self.current_state.value,
             "is_ready": self.is_ready(),
             "hardware": self.hardware_info,
             "health": {name: result.status.value for name, result in self.health_results.items()} if self.health_results else {}
         }
+
+    async def _wait_for_frontend_ready(self, backend_instance, timeout: float = 10.0) -> bool:
+        """Coordinate frontend startup readiness via CONTROL channel."""
+        try:
+            logger.info("Coordinating frontend startup via CONTROL channel...")
+
+            ping_id = f"startup_ready_check_{int(time.time() * 1000)}"
+
+            # Send startup readiness command via CONTROL channel (stdout)
+            from .multi_channel_ipc import get_multi_channel_ipc
+            ipc = get_multi_channel_ipc()
+
+            startup_command = {
+                "type": "startup_coordination",
+                "command": "check_frontend_ready",
+                "ping_id": ping_id,
+                "timestamp": time.time()
+            }
+
+            success = ipc.send_control_message(startup_command)
+            if not success:
+                logger.error("Failed to send startup coordination command")
+                return False
+
+            logger.info("Sent startup coordination command, waiting for frontend response...")
+
+            # Wait for response via CONTROL channel (stdin)
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                if ping_id in backend_instance.startup_ping_responses:
+                    response = backend_instance.startup_ping_responses[ping_id]
+                    if response.get("received") and response.get("success"):
+                        logger.info("Frontend startup coordination successful")
+                        # Clean up the response
+                        del backend_instance.startup_ping_responses[ping_id]
+                        return True
+                await asyncio.sleep(0.1)
+
+            logger.error("Frontend startup coordination timeout - no response received")
+            return False
+
+        except Exception as e:
+            logger.error(f"Frontend startup coordination failed: {e}")
+            return False
 
 
 # Global startup coordinator instance

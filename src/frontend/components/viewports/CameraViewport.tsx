@@ -19,6 +19,14 @@ interface SystemState {
   }
 }
 
+interface TimingCorrelation {
+  cameraTimestamp: number
+  stimulusFrameId?: number
+  stimulusTimestamp?: number
+  timeDifference?: number
+  correlationStatus: 'pending' | 'matched' | 'timeout'
+}
+
 interface CameraViewportProps {
   className?: string
   cameraParams?: CameraParameters
@@ -32,12 +40,22 @@ const CameraViewport: React.FC<CameraViewportProps> = ({
   cameraParams,
   sendCommand,
   systemState,
-  lastMessage: _lastMessage
+  lastMessage
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamError, setStreamError] = useState<string | null>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
+
+  // Hardware timing correlation state
+  const [recentStimulusFrames, setRecentStimulusFrames] = useState<Array<{
+    frameId: number
+    timestamp: number
+    direction: string
+    frameIndex: number
+  }>>([])
+  const [timingCorrelations, setTimingCorrelations] = useState<TimingCorrelation[]>([])
+  const [lastCorrelation, setLastCorrelation] = useState<TimingCorrelation | null>(null)
 
   const startCameraStream = async () => {
     if (!cameraParams?.selected_camera) {
@@ -167,6 +185,87 @@ const CameraViewport: React.FC<CameraViewportProps> = ({
     }
   }, [])
 
+  // Listen for stimulus frame events to track timing correlation
+  useEffect(() => {
+    if (!lastMessage) return
+
+    // Track stimulus frame events for timing correlation
+    if (lastMessage.type === 'stimulus_frame_presented') {
+      const frameData = {
+        frameId: lastMessage.frame_id,
+        timestamp: lastMessage.timestamp_us || Date.now() * 1000, // Convert to microseconds if needed
+        direction: lastMessage.direction,
+        frameIndex: lastMessage.frame_index
+      }
+
+      setRecentStimulusFrames(prev => {
+        // Keep only recent frames (last 10 seconds worth)
+        const cutoffTime = frameData.timestamp - 10_000_000 // 10 seconds in microseconds
+        const filtered = prev.filter(frame => frame.timestamp > cutoffTime)
+        return [...filtered, frameData].slice(-100) // Keep max 100 frames
+      })
+
+      console.log('CameraViewport: Tracked stimulus frame for correlation:', frameData)
+    }
+  }, [lastMessage])
+
+  // Capture frame with timing correlation
+  const captureFrameWithCorrelation = () => {
+    if (!videoRef.current || !isStreaming) return
+
+    const captureTimestamp = performance.now() * 1000 // Convert to microseconds
+    const video = videoRef.current
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(video, 0, 0)
+
+      // Convert to blob and download
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `camera_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.png`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+        }
+      })
+
+      // Find matching stimulus frame for correlation
+      const correlationWindow = 50_000 // 50ms in microseconds
+      const matchingFrame = recentStimulusFrames.find(frame =>
+        Math.abs(frame.timestamp - captureTimestamp) < correlationWindow
+      )
+
+      const correlation: TimingCorrelation = {
+        cameraTimestamp: captureTimestamp,
+        stimulusFrameId: matchingFrame?.frameId,
+        stimulusTimestamp: matchingFrame?.timestamp,
+        timeDifference: matchingFrame ? captureTimestamp - matchingFrame.timestamp : undefined,
+        correlationStatus: matchingFrame ? 'matched' : 'timeout'
+      }
+
+      setLastCorrelation(correlation)
+      setTimingCorrelations(prev => [...prev.slice(-19), correlation]) // Keep last 20 correlations
+
+      console.log('CameraViewport: Frame capture correlation:', correlation)
+
+      // Notify backend of capture with correlation data
+      sendCommand?.({
+        type: 'camera_capture',
+        camera_name: cameraParams?.selected_camera,
+        timestamp: captureTimestamp,
+        correlation: correlation
+      }).catch(console.error)
+    }
+  }
+
   return (
     <div className={`flex flex-col h-full min-h-0 ${className}`}>
       {/* Camera Feed Container */}
@@ -228,7 +327,7 @@ const CameraViewport: React.FC<CameraViewportProps> = ({
               Stop Camera
             </button>
             <button
-              onClick={captureFrame}
+              onClick={captureFrameWithCorrelation}
               className="px-4 py-2 bg-sci-accent-600 text-white rounded text-sm font-medium hover:bg-sci-accent-700 transition-colors"
             >
               Capture Frame
@@ -249,6 +348,100 @@ const CameraViewport: React.FC<CameraViewportProps> = ({
           'No camera configured'
         )}
       </div>
+
+      {/* Timing Correlation Display */}
+      {isStreaming && (
+        <div className="mt-4 p-3 bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg">
+          <div className="text-sm font-medium text-sci-secondary-200 mb-2">
+            Hardware Timing Correlation
+          </div>
+
+          {/* Last Correlation */}
+          {lastCorrelation && (
+            <div className="mb-3 p-2 bg-sci-secondary-900 rounded">
+              <div className="text-xs text-sci-secondary-300 mb-1">Last Capture:</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-sci-secondary-400">Status:</span>
+                  <span className={`ml-1 font-medium ${
+                    lastCorrelation.correlationStatus === 'matched'
+                      ? 'text-sci-success-400'
+                      : 'text-sci-error-400'
+                  }`}>
+                    {lastCorrelation.correlationStatus.toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-sci-secondary-400">Frame ID:</span>
+                  <span className="ml-1 text-sci-secondary-200">
+                    {lastCorrelation.stimulusFrameId || 'N/A'}
+                  </span>
+                </div>
+                {lastCorrelation.timeDifference !== undefined && (
+                  <div className="col-span-2">
+                    <span className="text-sci-secondary-400">Time Diff:</span>
+                    <span className={`ml-1 font-medium ${
+                      Math.abs(lastCorrelation.timeDifference) < 16_667 // < 1 frame at 60fps
+                        ? 'text-sci-success-400'
+                        : Math.abs(lastCorrelation.timeDifference) < 33_333 // < 2 frames at 60fps
+                        ? 'text-yellow-400'
+                        : 'text-sci-error-400'
+                    }`}>
+                      {(lastCorrelation.timeDifference / 1000).toFixed(2)}ms
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Recent Stimulus Frames */}
+          <div className="mb-2">
+            <div className="text-xs text-sci-secondary-400 mb-1">
+              Recent Stimulus Frames: {recentStimulusFrames.length}
+            </div>
+            {recentStimulusFrames.length === 0 && (
+              <div className="text-xs text-sci-secondary-500 italic">
+                No stimulus frames detected
+              </div>
+            )}
+            {recentStimulusFrames.slice(-3).map((frame, index) => (
+              <div key={`${frame.frameId}-${frame.timestamp}`} className="text-xs text-sci-secondary-300">
+                Frame {frame.frameId} ({frame.direction}) • {((Date.now() * 1000 - frame.timestamp) / 1000000).toFixed(1)}s ago
+              </div>
+            ))}
+          </div>
+
+          {/* Correlation Statistics */}
+          {timingCorrelations.length > 0 && (
+            <div className="text-xs">
+              <div className="text-sci-secondary-400 mb-1">
+                Recent Correlations: {timingCorrelations.length}
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-sci-success-400">
+                    {timingCorrelations.filter(c => c.correlationStatus === 'matched').length}
+                  </span>
+                  <span className="text-sci-secondary-500 ml-1">matched</span>
+                </div>
+                <div>
+                  <span className="text-sci-error-400">
+                    {timingCorrelations.filter(c => c.correlationStatus === 'timeout').length}
+                  </span>
+                  <span className="text-sci-secondary-500 ml-1">timeout</span>
+                </div>
+                <div>
+                  <span className="text-sci-secondary-300">
+                    {((timingCorrelations.filter(c => c.correlationStatus === 'matched').length / timingCorrelations.length) * 100).toFixed(0)}%
+                  </span>
+                  <span className="text-sci-secondary-500 ml-1">rate</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

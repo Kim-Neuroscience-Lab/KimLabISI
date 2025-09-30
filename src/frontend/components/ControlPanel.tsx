@@ -127,64 +127,48 @@ const createMonitorParameterConfigs = (autoDetected: boolean): ParameterConfig[]
     key: 'monitor_distance_cm',
     label: 'Monitor Distance',
     type: 'number',
-    min: 1,
-    max: 100,
     unit: 'cm'
   },
   {
     key: 'monitor_lateral_angle_deg',
     label: 'Lateral Angle',
     type: 'number',
-    min: -90,
-    max: 90,
     unit: '°'
   },
   {
     key: 'monitor_tilt_angle_deg',
     label: 'Tilt Angle',
     type: 'number',
-    min: -90,
-    max: 90,
     unit: '°'
   },
   {
     key: 'monitor_width_cm',
     label: 'Monitor Width',
     type: 'number',
-    min: 10,
-    max: 200,
     unit: 'cm'
   },
   {
     key: 'monitor_height_cm',
     label: 'Monitor Height',
     type: 'number',
-    min: 10,
-    max: 200,
     unit: 'cm'
   },
   {
     key: 'monitor_width_px',
     label: 'Monitor Width (px)',
     type: 'number',
-    min: 640,
-    max: 4096,
     disabled: autoDetected
   },
   {
     key: 'monitor_height_px',
     label: 'Monitor Height (px)',
     type: 'number',
-    min: 480,
-    max: 2160,
     disabled: autoDetected
   },
   {
     key: 'monitor_fps',
     label: 'Monitor FPS',
     type: 'number',
-    min: 30,
-    max: 240,
     unit: 'fps',
     disabled: autoDetected
   }
@@ -195,32 +179,24 @@ const stimulusParameterConfigs: ParameterConfig[] = [
     key: 'checker_size_deg',
     label: 'Checker Size',
     type: 'number',
-    min: 1,
-    max: 100,
     unit: '°'
   },
   {
     key: 'bar_width_deg',
     label: 'Bar Width',
     type: 'number',
-    min: 1,
-    max: 100,
     unit: '°'
   },
   {
     key: 'drift_speed_deg_per_sec',
     label: 'Drift Speed',
     type: 'number',
-    min: 0.1,
-    max: 50,
     unit: '°/s'
   },
   {
     key: 'strobe_rate_hz',
     label: 'Strobe Rate',
     type: 'number',
-    min: 0.1,
-    max: 100,
     unit: 'Hz'
   },
   {
@@ -238,24 +214,18 @@ const acquisitionParameterConfigs: ParameterConfig[] = [
     key: 'baseline_sec',
     label: 'Baseline Duration',
     type: 'number',
-    min: 0.1,
-    max: 60,
     unit: 's'
   },
   {
     key: 'between_sec',
     label: 'Between Trials',
     type: 'number',
-    min: 0.1,
-    max: 60,
     unit: 's'
   },
   {
     key: 'cycles',
     label: 'Number of Cycles',
-    type: 'number',
-    min: 1,
-    max: 100
+    type: 'number'
   }
 ]
 
@@ -264,24 +234,18 @@ const analysisParameterConfigs: ParameterConfig[] = [
     key: 'ring_size_mm',
     label: 'Ring Size',
     type: 'number',
-    min: 0.1,
-    max: 10,
     unit: 'mm'
   },
   {
     key: 'vfs_threshold_sd',
     label: 'VFS Threshold',
     type: 'number',
-    min: 0.1,
-    max: 10,
     unit: 'SD'
   },
   {
     key: 'smoothing_sigma',
     label: 'Smoothing Sigma',
     type: 'number',
-    min: 0.1,
-    max: 5,
     step: 0.1
   },
   {
@@ -296,23 +260,17 @@ const analysisParameterConfigs: ParameterConfig[] = [
     key: 'phase_filter_sigma',
     label: 'Phase Filter Sigma',
     type: 'number',
-    min: 0.1,
-    max: 10,
     step: 0.1
   },
   {
     key: 'gradient_window_size',
     label: 'Gradient Window Size',
-    type: 'number',
-    min: 1,
-    max: 20
+    type: 'number'
   },
   {
     key: 'area_min_size_mm2',
     label: 'Min Area Size',
     type: 'number',
-    min: 0.01,
-    max: 5,
     unit: 'mm²'
   },
   {
@@ -337,8 +295,6 @@ const createCameraParameterConfigs = (autoDetected: boolean): ParameterConfig[] 
     key: 'camera_fps',
     label: 'Camera FPS',
     type: 'number',
-    min: 1,
-    max: 240,
     unit: 'fps',
     disabled: autoDetected
   },
@@ -346,8 +302,6 @@ const createCameraParameterConfigs = (autoDetected: boolean): ParameterConfig[] 
     key: 'camera_width_px',
     label: 'Camera Width',
     type: 'number',
-    min: 64,
-    max: 4096,
     unit: 'px',
     disabled: autoDetected
   },
@@ -355,8 +309,6 @@ const createCameraParameterConfigs = (autoDetected: boolean): ParameterConfig[] 
     key: 'camera_height_px',
     label: 'Camera Height',
     type: 'number',
-    min: 64,
-    max: 4096,
     unit: 'px',
     disabled: autoDetected
   }
@@ -424,6 +376,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     analysisParams,
     availableCameras,
     availableDisplays,
+    parameterConfig,
     updateParameters,
     isLoading: parametersLoading
   } = useParameterManager(sendCommand, lastMessage)
@@ -434,6 +387,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   // Handle parameter changes by updating backend directly
   const handleParameterChange = React.useCallback(async (section: string, params: Record<string, any>) => {
     try {
+      // Send all parameters to backend, including empty strings
+      // Let backend handle validation and empty string conversion
       await updateParameters(section as any, params)
     } catch (error) {
       console.error(`Failed to update ${section} parameters:`, error)
@@ -600,7 +555,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: FolderCog,
       configs: sessionParameterConfigs,
       initialValues: sessionParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('session', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('session', params),
+      validationBoundaries: parameterConfig?.session
     },
     {
       key: 'monitor',
@@ -612,7 +568,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           : config
       ),
       initialValues: monitorParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('monitor', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('monitor', params),
+      validationBoundaries: parameterConfig?.monitor
     },
     {
       key: 'stimulus',
@@ -620,7 +577,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: Columns3Cog,
       configs: stimulusParameterConfigs,
       initialValues: stimulusParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('stimulus', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('stimulus', params),
+      validationBoundaries: parameterConfig?.stimulus
     },
     {
       key: 'camera',
@@ -632,7 +590,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           : config
       ),
       initialValues: cameraParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('camera', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('camera', params),
+      validationBoundaries: parameterConfig?.camera
     },
     {
       key: 'acquisition',
@@ -640,7 +599,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: FileVideoCamera,
       configs: acquisitionParameterConfigs,
       initialValues: acquisitionParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('acquisition', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('acquisition', params),
+      validationBoundaries: parameterConfig?.acquisition
     },
     {
       key: 'analysis',
@@ -648,7 +608,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: BrainCog,
       configs: analysisParameterConfigs,
       initialValues: analysisParams,
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('analysis', params)
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('analysis', params),
+      validationBoundaries: parameterConfig?.analysis
     }
   ], [
     sessionParams,
@@ -661,6 +622,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     displayParametersAutoDetected,
     acquisitionParams,
     analysisParams,
+    parameterConfig,
     handleParameterChange
   ])
 
@@ -706,7 +668,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
         {/* Parameter Sections */}
-        {sectionConfigs.map(({ key, title, icon, configs, initialValues, onParametersChange }) => (
+        {sectionConfigs.map(({ key, title, icon, configs, initialValues, onParametersChange, validationBoundaries }) => (
           <CollapsibleSection
             key={key}
             title={title}
@@ -720,6 +682,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               initialValues={initialValues}
               configs={configs}
               onParametersChange={onParametersChange}
+              validationBoundaries={validationBoundaries}
             />
           </CollapsibleSection>
         ))}

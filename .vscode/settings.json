@@ -15,5 +15,15 @@
     "python.terminal.activateEnvInCurrentTerminal": true,
     "python.analysis.extraPaths": [
         "./backend/src"
+    ],
+    "cSpell.words": [
+        "BFRM",
+        "fromarray",
+        "getpid",
+        "inproc",
+        "NOBLOCK",
+        "pgrep",
+        "pkill",
+        "taskbars"
     ]
 }

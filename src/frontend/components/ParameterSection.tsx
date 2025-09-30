@@ -19,16 +19,19 @@ interface ParameterSectionProps {
   initialValues: Record<string, any>
   configs: ParameterConfig[]
   onParametersChange?: (parameters: Record<string, any>) => void
+  validationBoundaries?: Record<string, any>
 }
 
 export const ParameterSection: React.FC<ParameterSectionProps> = ({
   title: _title,
   initialValues,
   configs,
-  onParametersChange
+  onParametersChange,
+  validationBoundaries
 }) => {
   const handleParameterChange = (key: string, value: string | number) => {
     // Send change directly to parent - no local state management
+    // Let the FormField handle empty string validation
     onParametersChange?.({ ...initialValues, [key]: value })
   }
 
@@ -48,6 +51,7 @@ export const ParameterSection: React.FC<ParameterSectionProps> = ({
           unit={config.unit}
           placeholder={config.placeholder}
           disabled={config.disabled}
+          validationBounds={validationBoundaries?.[config.key]}
         />
       ))}
     </div>
