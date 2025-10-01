@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import ControlPanel from './components/ControlPanel'
 import MainViewport from './components/MainViewport'
 import Console from './components/Console'
-import { useISISystem } from './hooks/useISISystem'
-import { useParameterManager } from './hooks/useParameterManager'
+import { useSystemContext } from './context/SystemContext'
+import { useParameters } from './hooks/useParameters'
 
 function App() {
   const [isExperimentRunning, setIsExperimentRunning] = useState(false)
@@ -23,12 +23,11 @@ function App() {
     isError,
     errorMessage,
     connectionError,
-    lastMessage,
-    lastParametersSnapshot,
+    lastControlMessage,
     sendCommand
-  } = useISISystem()
+  } = useSystemContext()
 
-  const parameterState = useParameterManager(lastParametersSnapshot, sendCommand)
+  const parameterState = useParameters()
 
   // Use centralized hardware status management
   // Remove hardware status hook - backend will manage all health checking
@@ -44,42 +43,44 @@ function App() {
 
   // Handle incoming messages from Python backend
   useEffect(() => {
-    if (lastMessage) {
-      console.log('Received message:', lastMessage.type, lastMessage)
-
-      // Handle different message types
-      switch (lastMessage.type) {
-        case 'system_state':
-          // State updates handled by useISISystem hook
-          if (lastMessage.state === 'ready') {
-            addLogMessage('✓ System ready - all startup checks passed')
-          }
-          break
-
-        case 'system_status':
-          setIsExperimentRunning(lastMessage.experiment_running)
-          break
-
-        case 'experiment_progress':
-          setCurrentProgress(lastMessage.progress)
-          break
-
-        case 'log_message':
-          addLogMessage(lastMessage.message)
-          break
-
-        case 'session_started':
-          setCurrentSession(lastMessage.session_name)
-          addLogMessage(`Session started: ${lastMessage.session_name}`)
-          break
-
-        case 'session_stopped':
-          setCurrentSession(null)
-          addLogMessage('Session stopped')
-          break
-      }
+    if (!lastControlMessage) {
+      return
     }
-  }, [lastMessage])
+
+    switch (lastControlMessage.type) {
+      case 'system_state':
+        if (lastControlMessage.state === 'ready') {
+          addLogMessage('✓ System ready - all startup checks passed')
+        }
+        break
+
+      case 'system_status':
+        setIsExperimentRunning(Boolean(lastControlMessage.experiment_running))
+        break
+
+      case 'experiment_progress':
+        setCurrentProgress(lastControlMessage.progress ?? 0)
+        break
+
+      case 'log_message':
+        if (lastControlMessage.message) {
+          addLogMessage(lastControlMessage.message)
+        }
+        break
+
+      case 'session_started':
+        setCurrentSession(lastControlMessage.session_name ?? null)
+        if (lastControlMessage.session_name) {
+          addLogMessage(`Session started: ${lastControlMessage.session_name}`)
+        }
+        break
+
+      case 'session_stopped':
+        setCurrentSession(null)
+        addLogMessage('Session stopped')
+        break
+    }
+  }, [lastControlMessage])
 
   // Backend automatically manages health checking and sends updates
 

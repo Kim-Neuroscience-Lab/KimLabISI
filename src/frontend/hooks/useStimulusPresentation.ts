@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
+import { useSystemContext } from '../context/SystemContext'
 
 interface PresentationState {
   isPresenting: boolean
@@ -7,114 +8,80 @@ interface PresentationState {
   statusMessage?: string
 }
 
-interface UseStimulusPresentationOptions {
-  sendCommand?: (command: any) => Promise<any>
-  lastMessage?: any
-}
+export const useStimulusPresentation = () => {
+  const { lastControlMessage, sendCommand } = useSystemContext()
 
-const useStimulusPresentation = ({
-  sendCommand,
-  lastMessage
-}: UseStimulusPresentationOptions) => {
-  const [presentationState, setPresentationState] = useState<PresentationState>({
-    isPresenting: false,
-    isPresentationAvailable: false,
-    presentationStatus: 'disabled',
-    statusMessage: 'Initializing presentation system...'
-  })
+  const state: PresentationState = useMemo(() => {
+    if (!lastControlMessage) {
+      return {
+        isPresenting: false,
+        isPresentationAvailable: false,
+        presentationStatus: 'disabled',
+        statusMessage: 'Initializing presentation system...'
+      }
+    }
 
-  // Handle backend presentation messages
-  useEffect(() => {
-    if (!lastMessage) return
-
-    switch (lastMessage.type) {
+    switch (lastControlMessage.type) {
       case 'presentation_status':
-        setPresentationState(prev => ({
-          ...prev,
-          presentationStatus: lastMessage.status,
-          isPresentationAvailable: lastMessage.status === 'ready' || lastMessage.status === 'active',
-          statusMessage: lastMessage.message
-        }))
-        break
+        return {
+          isPresenting: lastControlMessage.status === 'active',
+          isPresentationAvailable: lastControlMessage.status === 'ready' || lastControlMessage.status === 'active',
+          presentationStatus: lastControlMessage.status,
+          statusMessage: lastControlMessage.message
+        }
 
       case 'presentation_started':
-        setPresentationState(prev => ({
-          ...prev,
+        return {
           isPresenting: true,
+          isPresentationAvailable: true,
           presentationStatus: 'active',
           statusMessage: 'Presentation active'
-        }))
-        break
+        }
 
       case 'presentation_stopped':
-        setPresentationState(prev => ({
-          ...prev,
+        return {
           isPresenting: false,
+          isPresentationAvailable: true,
           presentationStatus: 'ready',
           statusMessage: 'Presentation stopped'
-        }))
-        break
+        }
 
       case 'presentation_error':
-        setPresentationState(prev => ({
-          ...prev,
+        return {
           isPresenting: false,
+          isPresentationAvailable: false,
           presentationStatus: 'error',
-          statusMessage: lastMessage.error || 'Presentation error occurred'
-        }))
-        break
-    }
-  }, [lastMessage])
+          statusMessage: lastControlMessage.error || 'Presentation error occurred'
+        }
 
-  // Request presentation start from backend
+      default:
+        return {
+          isPresenting: false,
+          isPresentationAvailable: false,
+          presentationStatus: 'disabled',
+          statusMessage: 'Initializing presentation system...'
+        }
+    }
+  }, [lastControlMessage])
+
   const startPresentation = useCallback(async () => {
-    if (!sendCommand) {
-      throw new Error('Send command function not available')
-    }
-
-    try {
-      await sendCommand({
-        type: 'start_presentation'
-      })
-    } catch (error) {
-      console.error('Failed to start presentation:', error)
-      throw error
-    }
+    await sendCommand({ type: 'start_presentation' })
   }, [sendCommand])
 
-  // Request presentation stop from backend
   const stopPresentation = useCallback(async () => {
-    if (!sendCommand) {
-      throw new Error('Send command function not available')
-    }
-
-    try {
-      await sendCommand({
-        type: 'stop_presentation'
-      })
-    } catch (error) {
-      console.error('Failed to stop presentation:', error)
-      throw error
-    }
+    await sendCommand({ type: 'stop_presentation' })
   }, [sendCommand])
 
-  // Toggle presentation state
   const togglePresentation = useCallback(async () => {
-    if (presentationState.isPresenting) {
+    if (state.isPresenting) {
       await stopPresentation()
     } else {
       await startPresentation()
     }
-  }, [presentationState.isPresenting, startPresentation, stopPresentation])
+  }, [startPresentation, stopPresentation, state.isPresenting])
 
   return {
-    // State
-    isPresenting: presentationState.isPresenting,
-    isPresentationAvailable: presentationState.isPresentationAvailable,
-    presentationStatus: presentationState.presentationStatus,
-    statusMessage: presentationState.statusMessage,
-
-    // Actions - backend coordinated
+    ...state,
     startPresentation,
     stopPresentation,
     togglePresentation

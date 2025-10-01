@@ -5,6 +5,7 @@ import StartupViewport from './viewports/StartupViewport'
 import StimulusGenerationViewport from './viewports/StimulusGenerationViewport'
 import AnalysisViewport from './viewports/AnalysisViewport'
 import useStimulusPresentation from '../hooks/useStimulusPresentation'
+import { useParameters } from '../hooks/useParameters'
 
 interface SystemState {
   isConnected: boolean
@@ -19,7 +20,7 @@ interface SystemState {
 interface MainViewportProps {
   systemState: SystemState
   sendCommand?: (command: any) => Promise<any>
-  parameterState: ReturnType<typeof useParameterManager>
+  parameterState: ReturnType<typeof useParameters>
   // New unified state from useISISystem
   systemStateStr?: string
   displayText?: string

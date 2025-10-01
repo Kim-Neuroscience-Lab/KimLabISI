@@ -10,7 +10,7 @@ import {
   LucideIcon
 } from 'lucide-react'
 import { ParameterSection, ParameterConfig } from './ParameterSection'
-import { useParameterManager } from '../hooks/useParameterManager'
+import { useParameters } from '../hooks/useParameters'
 // Moved types locally since useHardwareStatus hook has been removed
 export type SystemStatusValue = 'online' | 'offline' | 'error'
 
@@ -319,7 +319,7 @@ interface ControlPanelProps {
   isExperimentRunning: boolean
   systemStatus: SystemStatus
   onStopExperiment: () => void
-  parameterState: ReturnType<typeof useParameterManager>
+  parameterState: ReturnType<typeof useParameters>
   sendCommand?: (command: any) => Promise<any>
   onCollapseChange?: (isCollapsed: boolean) => void
   isReady: boolean
