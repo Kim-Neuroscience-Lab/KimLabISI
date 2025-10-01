@@ -29,10 +29,12 @@ export const ParameterSection: React.FC<ParameterSectionProps> = ({
   onParametersChange,
   validationBoundaries
 }) => {
+  const resolvedValues = initialValues ?? {}
+
   const handleParameterChange = (key: string, value: string | number) => {
     // Send change directly to parent - no local state management
     // Let the FormField handle empty string validation
-    onParametersChange?.({ ...initialValues, [key]: value })
+    onParametersChange?.({ ...resolvedValues, [key]: value })
   }
 
   return (
@@ -41,7 +43,7 @@ export const ParameterSection: React.FC<ParameterSectionProps> = ({
         <FormField
           key={config.key}
           label={config.label}
-          value={initialValues[config.key] ?? ''}
+          value={resolvedValues[config.key] ?? ''}
           onChange={(value) => handleParameterChange(config.key, value)}
           type={config.type}
           options={config.options}

@@ -30,7 +30,10 @@ export default defineConfig({
     build: {
       outDir: resolve(__dirname, 'dist-electron-vite/renderer'),
       rollupOptions: {
-        input: resolve(__dirname, 'src/frontend/index.html')
+        input: {
+          index: resolve(__dirname, 'src/frontend/index.html'),
+          presentation: resolve(__dirname, 'src/frontend/presentation.html')
+        }
       }
     }
   }

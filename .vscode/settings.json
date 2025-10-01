@@ -20,6 +20,7 @@
         "BFRM",
         "fromarray",
         "getpid",
+        "initialised",
         "inproc",
         "NOBLOCK",
         "pgrep",

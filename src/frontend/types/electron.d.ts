@@ -4,24 +4,14 @@
  */
 
 export interface ElectronAPI {
-  // Python backend communication via CONTROL channel
-  sendToPython: (message: any) => Promise<{ success: boolean }>
-  onPythonMessage: (callback: (message: any) => void) => void
-  removeAllPythonListeners: () => void
-
-  // Multi-channel IPC event listeners
   onControlMessage: (callback: (message: any) => void) => void
   onSyncMessage: (callback: (message: any) => void) => void
   onHealthMessage: (callback: (message: any) => void) => void
-  onSharedMemoryFrame: (callback: (frameData: SharedMemoryFrameData) => void) => void
-  removeSharedMemoryListener: () => void
-
-  // System control
-  getSystemStatus: () => Promise<{ success: boolean }>
-  emergencyStop: () => Promise<{ success: boolean }>
-
-  // General IPC
-  onMainMessage: (callback: (message: string) => void) => void
+  sendToPython: (message: any) => Promise<{ success: boolean; error?: string }>
+  sendStartupCommand: (message: any) => Promise<{ success: boolean }>
+  emergencyStop: () => Promise<any>
+  initializeZeroMQ: () => Promise<void>
+  getSystemStatus: () => Promise<any>
   onBackendError: (callback: (error: string) => void) => void
 }
 
@@ -60,11 +50,5 @@ export interface ControlMessage {
 declare global {
   interface Window {
     electronAPI: ElectronAPI
-    ipcRenderer: {
-      on: (channel: string, listener: (...args: any[]) => void) => void
-      off: (channel: string, listener: (...args: any[]) => void) => void
-      send: (channel: string, ...args: unknown[]) => void
-      invoke: (channel: string, ...args: unknown[]) => Promise<any>
-    }
   }
 }

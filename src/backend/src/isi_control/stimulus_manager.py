@@ -12,12 +12,13 @@ from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
 from logging import Logger
+from .logging_utils import get_logger
 
 
 # Import existing spatial transformation components
 from .spherical_transform import SphericalTransform
 
-logger: Logger = logging.getLogger(__name__)
+logger: Logger = get_logger(__name__)
 
 
 @dataclass
@@ -95,7 +96,9 @@ class StimulusGenerator:
     ):
         # Must provide configurations - no defaults
         if not spatial_config or not stimulus_params:
-            raise ValueError("StimulusGenerator requires spatial_config and stimulus_params from parameter manager")
+            raise ValueError(
+                "StimulusGenerator requires spatial_config and stimulus_params from parameter manager"
+            )
 
         self.spatial_config: SpatialConfiguration = spatial_config
         self.stimulus_params: StimulusParameters = stimulus_params
@@ -321,7 +324,6 @@ class StimulusGenerator:
             logger.error(f"Error generating frame at index {frame_index}: {e}")
             raise
 
-
     def _generate_checkerboard_pattern(
         self, w: int, h: int, frame_index: int
     ) -> np.ndarray:
@@ -454,23 +456,26 @@ def invalidate_stimulus_generator():
     """Invalidate the global stimulus generator to force recreation with updated parameters"""
     global _stimulus_generator
     _stimulus_generator = None
-    logger.info("Stimulus generator invalidated - will be recreated with updated parameters")
+    logger.info(
+        "Stimulus generator invalidated - will be recreated with updated parameters"
+    )
 
 
 def get_stimulus_generator() -> StimulusGenerator:
     """Get or create global stimulus generator instance using parameter manager"""
     global _stimulus_generator
     if _stimulus_generator is None:
-        from .parameter_manager import get_parameter_manager
+        from .service_locator import get_services
 
-        # Get current parameters from parameter manager
-        param_manager = get_parameter_manager()
+        param_manager = get_services().parameter_manager
         all_params = param_manager.load_parameters()
 
         # Validate monitor parameters before creating stimulus generator
-        if (all_params.monitor.monitor_width_px <= 0 or
-            all_params.monitor.monitor_height_px <= 0 or
-            all_params.monitor.monitor_fps <= 0):
+        if (
+            all_params.monitor.monitor_width_px <= 0
+            or all_params.monitor.monitor_height_px <= 0
+            or all_params.monitor.monitor_fps <= 0
+        ):
             # During startup, parameters may not be ready yet - return None gracefully
             logger.debug(
                 f"Stimulus generator not available - monitor parameters not yet initialized: "
@@ -487,7 +492,7 @@ def get_stimulus_generator() -> StimulusGenerator:
             screen_height_pixels=all_params.monitor.monitor_height_px,
             screen_width_cm=all_params.monitor.monitor_width_cm,
             screen_height_cm=all_params.monitor.monitor_height_cm,
-            fps=all_params.monitor.monitor_fps
+            fps=all_params.monitor.monitor_fps,
         )
 
         # Create stimulus parameters from parameter manager
@@ -497,12 +502,22 @@ def get_stimulus_generator() -> StimulusGenerator:
             checkerboard_size_degrees=all_params.stimulus.checker_size_deg,
             flicker_frequency_hz=all_params.stimulus.strobe_rate_hz,
             contrast=all_params.stimulus.contrast,
-            background_luminance=all_params.stimulus.background_luminance
+            background_luminance=all_params.stimulus.background_luminance,
         )
 
         _stimulus_generator = StimulusGenerator(spatial_config, stimulus_params)
         logger.info("Stimulus generator created successfully with valid parameters")
     return _stimulus_generator
+
+
+def provide_stimulus_generator() -> StimulusGenerator:
+    """Provide a generator instance for the service registry."""
+    generator = get_stimulus_generator()
+    if generator is None:
+        raise RuntimeError(
+            "Stimulus generator unavailable; monitor parameters not initialized"
+        )
+    return generator
 
 
 # IPC Handler Functions - Primary stimulus business logic
@@ -530,13 +545,13 @@ def handle_get_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
 def handle_update_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_stimulus_parameters IPC command"""
     try:
-        from .parameter_manager import get_parameter_manager
+        from .service_locator import get_services
 
         params = command.get("parameters", {})
 
         # Update parameter manager (single source of truth)
-        param_manager = get_parameter_manager()
-        param_manager.update_parameter_group('stimulus', params)
+        param_manager = get_services().parameter_manager
+        param_manager.update_parameter_group("stimulus", params)
 
         # Invalidate stimulus generator so it recreates with new parameters
         invalidate_stimulus_generator()
@@ -573,18 +588,24 @@ def handle_get_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
 def handle_update_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_spatial_configuration IPC command"""
     try:
-        from .parameter_manager import get_parameter_manager
+        from .service_locator import get_services
 
         config = command.get("spatial_config", command.get("configuration", {}))
 
         # Map to monitor parameter names
         monitor_updates = {
             "monitor_distance_cm": config.get("monitor_distance_cm"),
-            "monitor_lateral_angle_deg": config.get("monitor_lateral_angle_deg", config.get("monitor_angle_degrees")),
+            "monitor_lateral_angle_deg": config.get(
+                "monitor_lateral_angle_deg", config.get("monitor_angle_degrees")
+            ),
             "monitor_width_cm": config.get("monitor_width_cm"),
             "monitor_height_cm": config.get("monitor_height_cm"),
-            "monitor_width_px": config.get("monitor_width_px", config.get("screen_width_pixels")),
-            "monitor_height_px": config.get("monitor_height_px", config.get("screen_height_pixels")),
+            "monitor_width_px": config.get(
+                "monitor_width_px", config.get("screen_width_pixels")
+            ),
+            "monitor_height_px": config.get(
+                "monitor_height_px", config.get("screen_height_pixels")
+            ),
             "monitor_fps": config.get("monitor_fps", config.get("fps")),
         }
 
@@ -592,8 +613,8 @@ def handle_update_spatial_configuration(command: Dict[str, Any]) -> Dict[str, An
         monitor_updates = {k: v for k, v in monitor_updates.items() if v is not None}
 
         # Update parameter manager (single source of truth)
-        param_manager = get_parameter_manager()
-        param_manager.update_parameter_group('monitor', monitor_updates)
+        param_manager = get_services().parameter_manager
+        param_manager.update_parameter_group("monitor", monitor_updates)
 
         # Invalidate stimulus generator so it recreates with new parameters
         invalidate_stimulus_generator()
@@ -612,12 +633,16 @@ def handle_get_stimulus_info(command: Dict[str, Any]) -> Dict[str, Any]:
         direction = command.get("direction", "LR")
         num_cycles = command.get("num_cycles", 3)
 
-        logger.info(f"[STIMULUS-DEBUG] Calling get_dataset_info for direction={direction}, num_cycles={num_cycles}")
+        logger.info(
+            f"[STIMULUS-DEBUG] Calling get_dataset_info for direction={direction}, num_cycles={num_cycles}"
+        )
         dataset_info = generator.get_dataset_info(direction, num_cycles)
         logger.info(f"[STIMULUS-DEBUG] get_dataset_info returned: {dataset_info}")
 
         if "error" in dataset_info:
-            logger.error(f"[STIMULUS-DEBUG] Dataset info contains error: {dataset_info['error']}")
+            logger.error(
+                f"[STIMULUS-DEBUG] Dataset info contains error: {dataset_info['error']}"
+            )
             return {"success": False, "error": dataset_info["error"]}
 
         result = {"success": True, "type": "stimulus_info", **dataset_info}
@@ -625,7 +650,10 @@ def handle_get_stimulus_info(command: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
     except Exception as e:
-        logger.error(f"[STIMULUS-DEBUG] Exception in handle_get_stimulus_info: {e}", exc_info=True)
+        logger.error(
+            f"[STIMULUS-DEBUG] Exception in handle_get_stimulus_info: {e}",
+            exc_info=True,
+        )
         return {"success": False, "error": str(e)}
 
 
@@ -650,9 +678,9 @@ def handle_get_stimulus_frame(command: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # Add dataset info to metadata for frontend slider
-        metadata['total_frames'] = dataset_info.get('total_frames', 0)
-        metadata['start_angle'] = dataset_info.get('start_angle', 0.0)
-        metadata['end_angle'] = dataset_info.get('end_angle', 0.0)
+        metadata["total_frames"] = dataset_info.get("total_frames", 0)
+        metadata["start_angle"] = dataset_info.get("start_angle", 0.0)
+        metadata["end_angle"] = dataset_info.get("end_angle", 0.0)
 
         # Write frame to shared memory stream for frontend rendering
         # (Presentation window will be managed by Electron, not Python)
@@ -663,7 +691,7 @@ def handle_get_stimulus_frame(command: Dict[str, Any]) -> Dict[str, Any]:
             "success": True,
             "type": "stimulus_frame",
             "frame_id": frame_id,
-            "frame_info": metadata
+            "frame_info": metadata,
         }
 
     except Exception as e:
@@ -675,18 +703,20 @@ def handle_get_stimulus_frame_binary(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_frame_binary - removed, use shared memory streaming"""
     return {
         "success": False,
-        "error": "This command has been removed. Use shared memory streaming instead."
+        "error": "This command has been removed. Use shared memory streaming instead.",
     }
 
 
 # Status tracking
 _stimulus_status = {"is_presenting": False, "current_session": None}
 
+
 # Shared memory streaming integration
 def get_stimulus_shared_memory_stream():
     """Get shared memory stream for stimulus frames"""
-    from .shared_memory_stream import get_shared_memory_stream
-    return get_shared_memory_stream()
+    from .service_locator import get_services
+
+    return get_services().shared_memory.stream
 
 
 def handle_get_stimulus_status(command: Dict[str, Any]) -> Dict[str, Any]:
@@ -711,11 +741,17 @@ def handle_start_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
 
         # Get backend instance and start real-time streaming
         from .main import _backend_instance
-        if _backend_instance and _backend_instance.start_realtime_streaming(generator, fps):
+
+        if _backend_instance and _backend_instance.start_realtime_streaming(
+            generator, fps
+        ):
             logger.info(
                 f"Real-time stimulus streaming started: {session_name}, direction: {direction}, fps: {fps}"
             )
-            return {"success": True, "message": f"Real-time stimulus streaming started: {session_name}"}
+            return {
+                "success": True,
+                "message": f"Real-time stimulus streaming started: {session_name}",
+            }
         else:
             raise Exception("Failed to start real-time streaming")
 
@@ -731,6 +767,7 @@ def handle_stop_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # Get backend instance and stop real-time streaming
         from .main import _backend_instance
+
         if _backend_instance:
             _backend_instance.stop_realtime_streaming()
 

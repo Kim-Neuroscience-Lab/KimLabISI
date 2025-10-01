@@ -165,6 +165,8 @@ class MultiChannelIPCManager {
   private readonly HEALTH_CHECK_INTERVAL = 5000 // 5 seconds
   private readonly HEALTH_PORT = 5555   // HEALTH channel (PUB/SUB) - continuous health monitoring
   private readonly SYNC_PORT = 5558     // SYNC channel (PUB/SUB) - coordination messages after startup
+  private zeroMQInitialized = false
+  private handshakeInProgress = false
 
   async start(): Promise<void> {
     // Clean up any existing processes first
@@ -203,7 +205,9 @@ class MultiChannelIPCManager {
             try {
               // Try to parse as JSON first (startup status messages)
               const jsonMessage = JSON.parse(line.trim())
-              this.handleBackendMessage(jsonMessage)
+              this.handleBackendMessage(jsonMessage).catch((error) => {
+                console.error('Error handling backend message:', error)
+              })
 
               // Check for IPC initialization complete
               if (jsonMessage.type === 'startup_status' &&
@@ -266,7 +270,11 @@ class MultiChannelIPCManager {
     })
   }
 
-  private async initializeZeroMQConnections(): Promise<void> {
+  async initializeZeroMQConnections(): Promise<void> {
+    if (this.zeroMQInitialized) {
+      return
+    }
+
     try {
       // Initialize health channel for continuous monitoring (PUB/SUB pattern)
       this.healthSocket = new zmq.Subscriber()
@@ -285,8 +293,11 @@ class MultiChannelIPCManager {
       this.startHealthListener()
       this.startSyncListener()
 
+      this.zeroMQInitialized = true
+
     } catch (error) {
       console.error('Failed to initialize ZeroMQ connections:', error)
+      this.zeroMQInitialized = false
       throw error
     }
   }
@@ -317,7 +328,7 @@ class MultiChannelIPCManager {
     }
   }
 
-  private handleBackendMessage(message: any): void {
+  private async handleBackendMessage(message: any): Promise<void> {
     console.log('Received CONTROL channel message via stdout:', message)
 
     // Log system_fully_ready specifically for debugging
@@ -331,6 +342,17 @@ class MultiChannelIPCManager {
       console.log('Forwarded control-message to renderer:', message.type)
     } else {
       console.warn('Cannot forward message - mainWindow not available')
+    }
+
+    if (message.type === 'system_state' && message.state === 'waiting_frontend') {
+      await this.performFrontendHandshake()
+    }
+
+    if (
+      message.type === 'startup_coordination' &&
+      message.command === 'check_frontend_ready'
+    ) {
+      await this.performFrontendHandshake(message.ping_id)
     }
   }
 
@@ -460,22 +482,26 @@ class MultiChannelIPCManager {
     }
 
     this.isReady = false
+    this.zeroMQInitialized = false
+  }
+
+  async sendStartupCommand(message: any): Promise<void> {
+    if (!this.process) {
+      throw new Error('Backend process not available')
+    }
+    const payload = JSON.stringify(message) + '\n'
+    this.process.stdin?.write(payload)
   }
 
   async sendCommand(message: any): Promise<any> {
-    if (!this.isReady || !this.process) {
-      throw new Error('Backend not ready')
+    if (!this.process) {
+      throw new Error('Backend process not available')
     }
 
     try {
-      // Send command via CONTROL channel (stdin)
       const command = JSON.stringify(message) + '\n'
       this.process.stdin?.write(command)
-
-      // For immediate commands during startup, we don't wait for response
-      // Backend will send response via stdout which is handled in data event
       return { success: true }
-
     } catch (error) {
       console.error('Command failed:', error)
       throw error
@@ -484,6 +510,37 @@ class MultiChannelIPCManager {
 
   stop(): void {
     this.cleanup()
+  }
+
+  private async performFrontendHandshake(pingId?: string): Promise<void> {
+    if (this.handshakeInProgress) {
+      return
+    }
+
+    this.handshakeInProgress = true
+
+    try {
+      await this.initializeZeroMQConnections()
+
+      const readyPayload = pingId
+        ? { type: 'frontend_ready', ping_id: pingId }
+        : { type: 'frontend_ready' }
+
+      await this.sendStartupCommand(readyPayload)
+
+      if (pingId) {
+        await this.sendStartupCommand({
+          type: 'frontend_ready_response',
+          ping_id: pingId,
+          success: true
+        })
+      }
+    } catch (error) {
+      console.error('Frontend handshake failed:', error)
+      throw error
+    } finally {
+      this.handshakeInProgress = false
+    }
   }
 }
 
@@ -655,6 +712,11 @@ async function createWindow() {
 // IPC Handlers
 ipcMain.handle('send-to-python', async (_event, message) => {
   return await backendManager.sendCommand(message)
+})
+
+ipcMain.handle('send-startup-command', async (_event, message) => {
+  await backendManager.sendStartupCommand(message)
+  return { success: true }
 })
 
 ipcMain.handle('get-system-status', async () => {

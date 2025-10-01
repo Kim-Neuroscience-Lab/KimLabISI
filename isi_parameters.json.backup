@@ -288,14 +288,14 @@
       "animal_age": "P20",
       "animal_id": "M137",
       "created_at": "2025-09-28T15:22:27.071857",
-      "last_modified": "2025-09-29T16:23:24.439820",
+      "last_modified": "2025-09-30T23:58:17.588695",
       "session_name": "names n stuff"
     },
     "stimulus": {
       "background_luminance": 0,
       "bar_width_deg": 20,
       "checker_size_deg": 25,
-      "contrast": 1,
+      "contrast": 0.99,
       "drift_speed_deg_per_sec": 9,
       "strobe_rate_hz": 6
     }

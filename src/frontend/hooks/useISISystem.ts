@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface ISIMessage {
   type: string
@@ -15,7 +15,6 @@ interface ISIMessage {
  * - Frontend can send commands anytime; backend rejects if not ready
  */
 export const useISISystem = () => {
-  // Display state directly from backend - no interpretation
   const [systemState, setSystemState] = useState<string>('initializing')
   const [displayText, setDisplayText] = useState<string>('Initializing system...')
   const [isReady, setIsReady] = useState<boolean>(false)
@@ -23,8 +22,8 @@ export const useISISystem = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [lastMessage, setLastMessage] = useState<ISIMessage | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const handshakeInProgress = useRef(false)
 
-  // Initialize multi-channel IPC communication
   useEffect(() => {
     if (!window.electronAPI) {
       setConnectionError('Electron API not available')
@@ -33,54 +32,42 @@ export const useISISystem = () => {
     }
 
     let mounted = true
-    let zeromqInitialized = false
 
-    // Listen for CONTROL channel messages (startup coordination, commands)
-    const handleControlMessage = (message: ISIMessage) => {
-      if (!mounted) return
-      setLastMessage(message)
+    const performHandshake = async (pingId?: string) => {
+      try {
+        if (!window.electronAPI) return
 
-      // Handle unified system_state messages from backend
-      if (message.type === 'system_state') {
-        setSystemState(message.state)
-        setDisplayText(message.display_text || message.state)
-        setIsReady(message.is_ready || false)
-        setIsError(message.is_error || false)
-        if (message.error) {
-          setErrorMessage(message.error)
+        await window.electronAPI.initializeZeroMQ?.()
+
+        if (pingId) {
+          const readyPayload = { type: 'frontend_ready', ping_id: pingId }
+          await window.electronAPI.sendStartupCommand?.(readyPayload)
+          console.log('frontend_ready sent via startup bridge', readyPayload)
+
+          const responsePayload = {
+            type: 'frontend_ready_response',
+            ping_id: pingId,
+            success: true
+          }
+          await window.electronAPI.sendStartupCommand?.(responsePayload)
+          console.log('frontend_ready_response sent via startup bridge', responsePayload)
+        } else {
+          const readyPayload = { type: 'frontend_ready' }
+          await window.electronAPI.sendStartupCommand?.(readyPayload)
+          console.log('frontend_ready (no ping) sent via startup bridge', readyPayload)
         }
 
-        // When backend signals "waiting_frontend", initialize ZeroMQ and send ready signal
-        if (message.state === 'waiting_frontend' && !zeromqInitialized) {
-          zeromqInitialized = true
-          window.electronAPI.initializeZeroMQ?.().then(() => {
-            const handshakeCommand = { type: 'frontend_ready' }
-            window.electronAPI.sendToPython(handshakeCommand)
-              .catch((err: Error) => {
-                if (/Backend not ready/.test(err.message)) {
-                  // Backend hasn't completed initialization yet. We will wait for the next
-                  // system_state update (which will still be waiting_frontend) before retrying.
-                  console.warn('Backend not ready for frontend_ready handshake yet. Awaiting next state update...')
-                  zeromqInitialized = false
-                } else {
-                  console.error('Failed to send frontend_ready:', err)
-                }
-              })
-          }).catch((err: Error) => {
-            console.error('Failed to initialize ZeroMQ:', err)
-            setConnectionError('Failed to establish backend connection')
-            setIsError(true)
-          })
-        }
+        handshakeInProgress.current = false
+      } catch (err) {
+        console.error('Failed to complete frontend handshake:', err)
+        handshakeInProgress.current = false
       }
     }
 
-    // Listen for SYNC channel messages (system coordination after startup)
     const handleSyncMessage = (message: ISIMessage) => {
       if (!mounted) return
       setLastMessage(message)
 
-      // SYNC channel also receives system_state broadcasts after handshake
       if (message.type === 'system_state') {
         setSystemState(message.state)
         setDisplayText(message.display_text || message.state)
@@ -92,81 +79,79 @@ export const useISISystem = () => {
       }
     }
 
-    // Listen for HEALTH channel messages (continuous monitoring)
-    const handleHealthMessage = (message: ISIMessage) => {
+    const handleHealthMessage = (_message: ISIMessage) => {
       if (!mounted) return
-      // Health messages don't trigger state updates
     }
 
-    // Listen for backend errors
     const handleBackendError = (error: string) => {
       if (!mounted) return
       setConnectionError(error)
       setIsError(true)
     }
 
-    // Set up multi-channel listeners
+    const handleControlMessage = (message: ISIMessage) => {
+      if (!mounted) return
+
+      if (message.type === 'parameters_snapshot') {
+        setLastMessage(message)
+        return
+      }
+
+      if (message.type === 'parameter_info' && message.info?.parameter_config) {
+        setLastMessage((prev) => ({
+          ...(prev || {}),
+          type: 'parameters_snapshot',
+          parameter_config: message.info.parameter_config,
+          parameters: (prev as any)?.parameters,
+        }))
+        return
+      }
+
+      if (message.type === 'system_state') {
+        handleSyncMessage(message)
+      }
+    }
+
     window.electronAPI.onControlMessage?.(handleControlMessage)
     window.electronAPI.onSyncMessage?.(handleSyncMessage)
     window.electronAPI.onHealthMessage?.(handleHealthMessage)
     window.electronAPI.onBackendError(handleBackendError)
 
-    // Fallback: also listen to legacy python-message for backwards compatibility
-    window.electronAPI.onPythonMessage?.(handleControlMessage)
-
-    // Cleanup listeners on unmount
     return () => {
       mounted = false
-      window.electronAPI.removeAllPythonListeners?.()
+      window.electronAPI.onControlMessage?.(() => {})
     }
   }, [])
 
-  /**
-   * Send command to backend - NO BLOCKING LOGIC
-   *
-   * Frontend can send commands anytime. Backend validates readiness
-   * and returns proper error if system is not ready.
-   */
   const sendCommand = useCallback(async (command: ISIMessage) => {
     if (!window.electronAPI) {
       throw new Error('Electron API not available')
     }
 
-    try {
-      const result = await window.electronAPI.sendToPython(command)
-      if (!result.success) {
-        throw new Error(result.error || 'Command failed')
-      }
-      return result
-    } catch (error) {
-      throw error
+    const result = await window.electronAPI.sendToPython(command)
+    if (!result.success) {
+      throw new Error(result.error || 'Command failed')
     }
+    return result
   }, [])
 
-  // Emergency stop function
   const emergencyStop = useCallback(async () => {
     if (!window.electronAPI) {
       throw new Error('Electron API not available')
     }
 
-    try {
-      const result = await window.electronAPI.emergencyStop()
-      return result
-    } catch (error) {
-      throw error
-    }
+    return await window.electronAPI.emergencyStop()
   }, [])
 
   return {
-    // System state (directly from backend)
     systemState,
     displayText,
     isReady,
     isError,
     errorMessage,
     connectionError,
-    // Messages and commands
     lastMessage,
+    lastParametersSnapshot: lastMessage?.type === 'parameters_snapshot' ? lastMessage : null,
     sendCommand,
     emergencyStop
   }

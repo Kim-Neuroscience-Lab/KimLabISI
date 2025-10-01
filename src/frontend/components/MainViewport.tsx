@@ -4,7 +4,6 @@ import CameraViewport from './viewports/CameraViewport'
 import StartupViewport from './viewports/StartupViewport'
 import StimulusGenerationViewport from './viewports/StimulusGenerationViewport'
 import AnalysisViewport from './viewports/AnalysisViewport'
-import { useParameterManager } from '../hooks/useParameterManager'
 import useStimulusPresentation from '../hooks/useStimulusPresentation'
 
 interface SystemState {
@@ -20,7 +19,7 @@ interface SystemState {
 interface MainViewportProps {
   systemState: SystemState
   sendCommand?: (command: any) => Promise<any>
-  lastMessage?: any
+  parameterState: ReturnType<typeof useParameterManager>
   // New unified state from useISISystem
   systemStateStr?: string
   displayText?: string
@@ -41,7 +40,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
     }
   },
   sendCommand,
-  lastMessage,
+  parameterState,
   systemStateStr = 'initializing',
   displayText = 'Initializing...',
   isReady = false,
@@ -58,7 +57,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
     stimulusParams,
     monitorParams,
     acquisitionParams
-  } = useParameterManager(sendCommand, lastMessage)
+  } = parameterState
 
   // Use stimulus presentation hook for second window functionality
   const {
@@ -71,8 +70,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
   } = useStimulusPresentation({
     monitorParams,
     sendCommand,
-    systemState,
-    lastMessage
+    systemState
   })
 
   // Handle startup completion pause
@@ -95,7 +93,6 @@ const MainViewport: React.FC<MainViewportProps> = ({
       cameraParams={cameraParams}
       sendCommand={sendCommand}
       systemState={systemState}
-      lastMessage={lastMessage}
     />
   )
 
@@ -107,7 +104,6 @@ const MainViewport: React.FC<MainViewportProps> = ({
       acquisitionParams={acquisitionParams}
       sendCommand={sendCommand}
       systemState={systemState}
-      lastMessage={lastMessage}
     />
   )
 
@@ -116,7 +112,6 @@ const MainViewport: React.FC<MainViewportProps> = ({
       className="flex-1"
       systemState={systemState}
       sendCommand={sendCommand}
-      lastMessage={lastMessage}
     />
   )
 

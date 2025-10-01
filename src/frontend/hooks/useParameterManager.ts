@@ -62,52 +62,9 @@ export interface AllParameters {
   analysis?: AnalysisParameters
 }
 
-export function useParameterManager(sendCommand?: (command: any) => Promise<any>, lastMessage?: any) {
+export function useParameterManager(lastSnapshot: any, sendCommand?: (command: any) => Promise<any>) {
   const [parameters, setParameters] = useState<AllParameters>({})
   const [parameterConfig, setParameterConfig] = useState<any>({})
-  const [isLoading, setIsLoading] = useState(true)
-  const [lastError, setLastError] = useState<string | null>(null)
-
-  // Fetch all parameters from backend
-  const fetchAllParameters = useCallback(async () => {
-    if (!sendCommand) return
-
-    try {
-      setIsLoading(true)
-      setLastError(null)
-
-      const response = await sendCommand({ type: 'get_all_parameters' })
-
-      if (response?.success && response?.parameters) {
-        setParameters(response.parameters)
-      } else {
-        console.error('useParameterManager: Failed to fetch parameters:', response)
-        setLastError('Failed to fetch parameters from backend')
-      }
-    } catch (error) {
-      console.error('useParameterManager: Error fetching parameters:', error)
-      setLastError(`Error fetching parameters: ${error.message}`)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [sendCommand])
-
-  // Fetch parameter info including validation boundaries
-  const fetchParameterInfo = useCallback(async () => {
-    if (!sendCommand) return
-
-    try {
-      const response = await sendCommand({ type: 'get_parameter_info' })
-
-      if (response?.success && response?.info?.parameter_config) {
-        setParameterConfig(response.info.parameter_config)
-      }
-    } catch (error) {
-      console.error('useParameterManager: Error fetching parameter info:', error)
-    }
-  }, [sendCommand])
-
-  // Update specific parameter category
   const updateParameters = useCallback(async (category: keyof AllParameters, newParams: any) => {
     if (!sendCommand) return
 
@@ -118,41 +75,34 @@ export function useParameterManager(sendCommand?: (command: any) => Promise<any>
         parameters: newParams
       })
 
-      if (response?.success) {
-        // Update local state immediately
-        setParameters(prev => ({
-          ...prev,
-          [category]: newParams
-        }))
-        return true
-      } else {
-        setLastError(`Failed to update ${category} parameters`)
+      if (!response?.success) {
+        console.error(`useParameterManager: Failed to update ${category} parameters`, response)
         return false
       }
+
+      return true
     } catch (error) {
-      setLastError(`Error updating ${category} parameters: ${error.message}`)
+      console.error(`useParameterManager: Error updating ${category} parameters:`, error)
       return false
     }
   }, [sendCommand])
 
-  // Listen for parameter updates from backend startup coordinator
   useEffect(() => {
-    if (lastMessage?.type === 'parameters_updated') {
-      setParameters(lastMessage.parameters)
-      setIsLoading(false)
-      setLastError(null)
-
-      // Fetch parameter info after parameters are loaded
-      fetchParameterInfo()
+    if (!lastSnapshot || lastSnapshot.type !== 'parameters_snapshot') {
+      return
     }
-  }, [lastMessage, fetchParameterInfo])
+
+    if (lastSnapshot.parameters) {
+      setParameters(lastSnapshot.parameters)
+    }
+    if (lastSnapshot.parameter_config) {
+      setParameterConfig(lastSnapshot.parameter_config)
+    }
+  }, [lastSnapshot])
 
   return {
     parameters,
     parameterConfig,
-    isLoading,
-    lastError,
-    fetchAllParameters,
     updateParameters,
     // Convenience getters for specific parameter types
     sessionParams: parameters.session,

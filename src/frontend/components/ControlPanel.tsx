@@ -319,10 +319,10 @@ interface ControlPanelProps {
   isExperimentRunning: boolean
   systemStatus: SystemStatus
   onStopExperiment: () => void
-  sendCommand: (command: any) => Promise<any>
+  parameterState: ReturnType<typeof useParameterManager>
+  sendCommand?: (command: any) => Promise<any>
   onCollapseChange?: (isCollapsed: boolean) => void
   isReady: boolean
-  lastMessage?: any
 }
 
 interface CollapsibleSectionProps {
@@ -361,12 +361,11 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 const ControlPanel: React.FC<ControlPanelProps> = ({
   isConnected,
   systemStatus,
-  sendCommand,
   onCollapseChange,
   isReady,
-  lastMessage
+  parameterState,
+  sendCommand
 }) => {
-  // Use backend parameter manager instead of local state
   const {
     sessionParams,
     monitorParams,
@@ -377,116 +376,68 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     availableCameras,
     availableDisplays,
     parameterConfig,
-    updateParameters,
-    isLoading: parametersLoading
-  } = useParameterManager(sendCommand, lastMessage)
+    updateParameters
+  } = parameterState
 
-  const [cameraParametersAutoDetected, setCameraParametersAutoDetected] = useState(false)
-  const [displayParametersAutoDetected, setDisplayParametersAutoDetected] = useState(false)
-
-  // Handle parameter changes by updating backend directly
   const handleParameterChange = React.useCallback(async (section: string, params: Record<string, any>) => {
     try {
-      // Send all parameters to backend, including empty strings
-      // Let backend handle validation and empty string conversion
       await updateParameters(section as any, params)
     } catch (error) {
       console.error(`Failed to update ${section} parameters:`, error)
     }
   }, [updateParameters])
 
-  // Auto-select first camera if none selected and cameras are available
   React.useEffect(() => {
-    if (availableCameras.length > 0 && cameraParams && !cameraParams.selected_camera) {
+    if (!cameraParams || !availableCameras?.length) {
+      return
+    }
+
+    if (!cameraParams.selected_camera && availableCameras.length > 0) {
       handleParameterChange('camera', {
         ...cameraParams,
         selected_camera: availableCameras[0]
       })
     }
-  }, [availableCameras, cameraParams?.selected_camera, cameraParams, handleParameterChange])
+  }, [availableCameras, cameraParams, handleParameterChange])
 
-  // Auto-select first display if none selected and displays are available
   React.useEffect(() => {
-    if (availableDisplays.length > 0 && monitorParams && !monitorParams.selected_display) {
-      const firstDisplay = availableDisplays[0] // Simple string array now
+    if (!monitorParams || !availableDisplays?.length) {
+      return
+    }
 
-      // Update monitor parameters from selected display
+    if (!monitorParams.selected_display && availableDisplays.length > 0) {
       handleParameterChange('monitor', {
         ...monitorParams,
-        selected_display: firstDisplay
+        selected_display: availableDisplays[0]
       })
     }
-  }, [availableDisplays, monitorParams?.selected_display, monitorParams, handleParameterChange])
+  }, [availableDisplays, monitorParams, handleParameterChange])
 
-  // Listen for camera capabilities response from backend
   React.useEffect(() => {
-    if (lastMessage?.type === 'get_camera_capabilities' && lastMessage?.success && lastMessage?.capabilities) {
-      // Camera capabilities received from backend
-
-      const capabilities = lastMessage.capabilities
-      if (cameraParams) {
-        handleParameterChange('camera', {
-          ...cameraParams,
-          camera_fps: capabilities.frameRate || cameraParams.camera_fps,
-          camera_width_px: capabilities.width || cameraParams.camera_width_px,
-          camera_height_px: capabilities.height || cameraParams.camera_height_px
-        })
-      }
-
-      // Mark camera parameters as auto-detected, which will freeze/disable the fields
-      setCameraParametersAutoDetected(true)
-    } else if (lastMessage?.type === 'get_camera_capabilities' && !lastMessage?.success) {
-      console.error('Camera capabilities request failed:', lastMessage?.error)
+    if (!cameraParams?.selected_camera || !sendCommand || !isReady) {
+      return
     }
-  }, [lastMessage])
 
-  // Listen for display capabilities response from backend
+    sendCommand({
+      type: 'get_camera_capabilities',
+      camera_name: cameraParams.selected_camera
+    }).catch(error => {
+      console.error('Failed to send camera capabilities request:', error)
+    })
+  }, [cameraParams?.selected_camera, sendCommand, isReady, handleParameterChange])
+
   React.useEffect(() => {
-    if (lastMessage?.type === 'get_display_capabilities' && lastMessage?.success && lastMessage?.capabilities) {
-      // Display capabilities received from backend
-
-      const capabilities = lastMessage.capabilities
-      if (monitorParams) {
-        handleParameterChange('monitor', {
-          ...monitorParams,
-          monitor_fps: capabilities.refresh_rate || monitorParams.monitor_fps,
-          monitor_width_px: capabilities.width || monitorParams.monitor_width_px,
-          monitor_height_px: capabilities.height || monitorParams.monitor_height_px
-        })
-      }
-
-      // Mark display parameters as auto-detected, which will freeze/disable the fields
-      setDisplayParametersAutoDetected(true)
-    } else if (lastMessage?.type === 'get_display_capabilities' && !lastMessage?.success) {
-      console.error('Display capabilities request failed:', lastMessage?.error)
+    if (!monitorParams?.selected_display || !sendCommand || !isReady) {
+      return
     }
-  }, [lastMessage])
 
-  // Handle camera selection changes - reset auto-detection state and request capabilities
-  React.useEffect(() => {
-    if (cameraParams?.selected_camera && sendCommand && isReady) {
-      setCameraParametersAutoDetected(false) // Reset to allow manual editing before auto-detection
-      sendCommand({
-        type: 'get_camera_capabilities',
-        camera_name: cameraParams.selected_camera
-      }).catch(error => {
-        console.error('Failed to send camera capabilities request:', error)
-      })
-    }
-  }, [cameraParams?.selected_camera, sendCommand, isReady])
-
-  // Handle display selection changes - reset auto-detection state and request capabilities
-  React.useEffect(() => {
-    if (monitorParams?.selected_display && sendCommand && isReady) {
-      setDisplayParametersAutoDetected(false) // Reset to allow manual editing before auto-detection
-      sendCommand({
-        type: 'get_display_capabilities',
-        display_id: monitorParams.selected_display
-      }).catch(error => {
-        console.error('Failed to send display capabilities request:', error)
-      })
-    }
-  }, [monitorParams?.selected_display, sendCommand, isReady])
+    sendCommand({
+      type: 'get_display_capabilities',
+      display_id: monitorParams.selected_display
+    }).catch(error => {
+      console.error('Failed to send display capabilities request:', error)
+    })
+  }, [monitorParams?.selected_display, sendCommand, isReady, handleParameterChange])
 
   // Collapse state management
   const [isControlPanelCollapsed, setIsControlPanelCollapsed] = useState(true)
@@ -554,7 +505,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       title: 'Session',
       icon: FolderCog,
       configs: sessionParameterConfigs,
-      initialValues: sessionParams,
+      initialValues: sessionParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('session', params),
       validationBoundaries: parameterConfig?.session
     },
@@ -562,12 +513,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       key: 'monitor',
       title: 'Monitor',
       icon: MonitorCog,
-      configs: createMonitorParameterConfigs(displayParametersAutoDetected).map(config =>
+      configs: createMonitorParameterConfigs(false).map(config =>
         config.key === 'selected_display'
           ? { ...config, options: availableDisplays.map(display => ({ value: display, label: display })) }
           : config
       ),
-      initialValues: monitorParams,
+      initialValues: monitorParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('monitor', params),
       validationBoundaries: parameterConfig?.monitor
     },
@@ -576,7 +527,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       title: 'Stimulus',
       icon: Columns3Cog,
       configs: stimulusParameterConfigs,
-      initialValues: stimulusParams,
+      initialValues: stimulusParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('stimulus', params),
       validationBoundaries: parameterConfig?.stimulus
     },
@@ -584,12 +535,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       key: 'camera',
       title: 'Camera',
       icon: Video,
-      configs: createCameraParameterConfigs(cameraParametersAutoDetected).map(config =>
+      configs: createCameraParameterConfigs(false).map(config =>
         config.key === 'selected_camera'
           ? { ...config, options: availableCameras.map(cam => ({ value: cam, label: cam })) }
           : config
       ),
-      initialValues: cameraParams,
+      initialValues: cameraParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('camera', params),
       validationBoundaries: parameterConfig?.camera
     },
@@ -598,7 +549,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       title: 'Acquisition',
       icon: FileVideoCamera,
       configs: acquisitionParameterConfigs,
-      initialValues: acquisitionParams,
+      initialValues: acquisitionParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('acquisition', params),
       validationBoundaries: parameterConfig?.acquisition
     },
@@ -607,7 +558,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       title: 'Analysis',
       icon: BrainCog,
       configs: analysisParameterConfigs,
-      initialValues: analysisParams,
+      initialValues: analysisParams ?? {},
       onParametersChange: (params: Record<string, any>) => handleParameterChange('analysis', params),
       validationBoundaries: parameterConfig?.analysis
     }
@@ -618,8 +569,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     cameraParams,
     availableCameras,
     availableDisplays,
-    cameraParametersAutoDetected,
-    displayParametersAutoDetected,
+    // cameraParametersAutoDetected, // Removed auto-detection
+    // displayParametersAutoDetected, // Removed auto-detection
     acquisitionParams,
     analysisParams,
     parameterConfig,

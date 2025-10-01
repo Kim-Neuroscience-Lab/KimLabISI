@@ -3,6 +3,7 @@ import ControlPanel from './components/ControlPanel'
 import MainViewport from './components/MainViewport'
 import Console from './components/Console'
 import { useISISystem } from './hooks/useISISystem'
+import { useParameterManager } from './hooks/useParameterManager'
 
 function App() {
   const [isExperimentRunning, setIsExperimentRunning] = useState(false)
@@ -23,8 +24,11 @@ function App() {
     errorMessage,
     connectionError,
     lastMessage,
+    lastParametersSnapshot,
     sendCommand
   } = useISISystem()
+
+  const parameterState = useParameterManager(lastParametersSnapshot, sendCommand)
 
   // Use centralized hardware status management
   // Remove hardware status hook - backend will manage all health checking
@@ -110,10 +114,10 @@ function App() {
             isConnected={isReady}
             isExperimentRunning={isExperimentRunning}
             onStopExperiment={handleStopExperiment}
-            sendCommand={sendCommand}
             onCollapseChange={setIsControlPanelCollapsed}
             isReady={isReady}
-            lastMessage={lastMessage}
+            parameterState={parameterState}
+            sendCommand={sendCommand}
           />
         </div>
 
@@ -121,7 +125,7 @@ function App() {
         <div className="flex-1 flex flex-col">
           <MainViewport
             sendCommand={sendCommand}
-            lastMessage={lastMessage}
+            parameterState={parameterState}
             systemStateStr={systemState}
             displayText={displayText}
             isReady={isReady}
