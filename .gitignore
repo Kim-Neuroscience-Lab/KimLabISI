@@ -70,6 +70,8 @@ target/
 
 # Claude 
 .claude
+.claude/
+.
 
 # Coverage
 coverage_html

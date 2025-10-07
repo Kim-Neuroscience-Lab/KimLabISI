@@ -25,6 +25,11 @@ from .camera_manager import (
     handle_camera_stream_started,
     handle_camera_stream_stopped,
     handle_camera_capture,
+    handle_get_camera_histogram,
+    handle_get_correlation_data,
+    handle_start_camera_acquisition,
+    handle_stop_camera_acquisition,
+    handle_get_camera_frame,
 )
 from .stimulus_manager import (
     handle_get_stimulus_parameters,
@@ -37,11 +42,18 @@ from .stimulus_manager import (
     handle_generate_stimulus_preview,
     handle_get_stimulus_info,
     handle_get_stimulus_frame,
+    handle_display_timestamp,
 )
 from .display_manager import (
     handle_detect_displays,
     handle_get_display_capabilities,
     handle_select_display,
+)
+from .acquisition_manager import (
+    get_acquisition_manager,
+    handle_start_acquisition,
+    handle_stop_acquisition,
+    handle_get_acquisition_status,
 )
 
 if TYPE_CHECKING:
@@ -80,10 +92,13 @@ class ISIMacroscopeBackend:
             "camera_stream_started": handle_camera_stream_started,
             "camera_stream_stopped": handle_camera_stream_stopped,
             "camera_capture": handle_camera_capture,
+            "get_camera_histogram": handle_get_camera_histogram,
+            "get_correlation_data": handle_get_correlation_data,
+            "start_camera_acquisition": handle_start_camera_acquisition,
+            "stop_camera_acquisition": handle_stop_camera_acquisition,
+            "get_camera_frame": handle_get_camera_frame,
             "ping": self.handle_ping,
             "frontend_ready": self.handle_frontend_ready,
-            "frontend_ready_response": self.handle_frontend_ready_response,
-            "frontend_ready_ack": self.handle_frontend_ready_ack,
             "get_system_status": self.handle_get_system_status,
             "get_stimulus_parameters": handle_get_stimulus_parameters,
             "update_stimulus_parameters": handle_update_stimulus_parameters,
@@ -95,6 +110,7 @@ class ISIMacroscopeBackend:
             "generate_stimulus_preview": handle_generate_stimulus_preview,
             "get_stimulus_info": handle_get_stimulus_info,
             "get_stimulus_frame": handle_get_stimulus_frame,
+            "display_timestamp": handle_display_timestamp,
             "detect_displays": handle_detect_displays,
             "get_display_capabilities": handle_get_display_capabilities,
             "select_display": handle_select_display,
@@ -104,6 +120,9 @@ class ISIMacroscopeBackend:
             "reset_to_defaults": self.handle_reset_to_defaults,
             "get_parameter_info": self.handle_get_parameter_info,
             "get_system_health": self.handle_get_system_health,
+            "start_acquisition": handle_start_acquisition,
+            "stop_acquisition": handle_stop_acquisition,
+            "get_acquisition_status": handle_get_acquisition_status,
         }
 
         logger.info("ISI Backend initialized (dev_mode=%s)", development_mode)
@@ -128,8 +147,8 @@ class ISIMacroscopeBackend:
         """
         Handle frontend_ready command - frontend signals it has connected to ZeroMQ.
 
-        This is the handshake mechanism:
-        1. Backend initializes ZeroMQ and broadcasts WAITING_FRONTEND state
+        This is the simplified handshake mechanism:
+        1. Backend initializes ZeroMQ and sends "zeromq_ready" message
         2. Frontend connects to ZeroMQ channels
         3. Frontend sends this frontend_ready command via CONTROL channel (stdin)
         4. Backend receives this and sets frontend_ready flag in startup coordinator
@@ -141,6 +160,7 @@ class ISIMacroscopeBackend:
         startup_coordinator = get_services().startup_coordinator
         startup_coordinator.frontend_ready = True
 
+        # Support legacy ping_id for backwards compatibility
         ping_id = command.get("ping_id")
         if ping_id:
             self.startup_ping_responses[ping_id] = {
@@ -148,60 +168,11 @@ class ISIMacroscopeBackend:
                 "success": True,
             }
 
-        response = {
+        return {
             "success": True,
             "message": "Frontend ready acknowledged",
+            "type": "frontend_ready_response",
         }
-        if "type" not in response:
-            response["type"] = "frontend_ready_response"
-        return response
-
-    def handle_frontend_ready_response(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle frontend_ready_response command - backend acknowledges frontend_ready.
-
-        This is the response to the frontend_ready command.
-        """
-        ping_id = command.get("ping_id")
-        if not ping_id:
-            return {"success": False, "error": "ping_id is required"}
-        self.startup_ping_responses[ping_id] = {
-            "received": True,
-            "success": command.get("success", True),
-        }
-        return {"success": True, "message": "Frontend ready response recorded"}
-
-    def handle_frontend_ready_ack(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle frontend_ready_ack command - frontend acknowledges backend's frontend_ready.
-
-        This is the final acknowledgment from the frontend.
-        """
-        message_id = command.get("messageId")
-        if not message_id:
-            return {"success": False, "error": "messageId is required"}
-
-        if message_id in self.startup_ping_responses:
-            del self.startup_ping_responses[message_id]
-            logger.info(f"Received frontend_ready_ack for messageId: {message_id}")
-            response = {
-                "success": True,
-                "message": f"Acknowledged frontend_ready_ack for messageId: {message_id}",
-            }
-            if "type" not in response:
-                response["type"] = "frontend_ready_ack_response"
-            return response
-        else:
-            logger.warning(
-                f"Received frontend_ready_ack for unknown messageId: {message_id}"
-            )
-            response = {
-                "success": False,
-                "error": f"Unknown messageId for frontend_ready_ack: {message_id}",
-            }
-            if "type" not in response:
-                response["type"] = "frontend_ready_ack_response"
-            return response
 
     def handle_get_system_status(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Handle get_system_status request to confirm backend is ready."""
@@ -241,19 +212,40 @@ class ISIMacroscopeBackend:
 
     def start_realtime_streaming(self, stimulus_generator, fps: float = 60.0):
         """Start real-time frame streaming using shared memory"""
+        logger.debug(
+            f"start_realtime_streaming called: shared_memory_service={self.shared_memory_service is not None}, generator={stimulus_generator is not None}, fps={fps}"
+        )
+
         if self.shared_memory_service:
             try:
+                # Stop any existing producer first
+                if self.realtime_producer:
+                    logger.info(
+                        "Stopping existing realtime producer before starting new one"
+                    )
+                    self.shared_memory_service.stop_realtime_streaming()
+                    self.realtime_producer = None
+
+                logger.debug("Creating realtime producer...")
                 self.realtime_producer = (
                     self.shared_memory_service.start_realtime_streaming(
                         stimulus_generator, fps
                     )
                 )
-                logger.info("Real-time streaming started at %s FPS", fps)
+                logger.info(
+                    f"Real-time streaming started at {fps} FPS, producer={self.realtime_producer is not None}"
+                )
                 return True
             except Exception as exc:
-                logger.error("Failed to start real-time streaming: %s", exc)
+                logger.error(
+                    f"Failed to start real-time streaming: {exc}", exc_info=True
+                )
                 return False
-        return False
+        else:
+            logger.error(
+                "Cannot start real-time streaming: shared_memory_service is None"
+            )
+            return False
 
     def stop_realtime_streaming(self):
         """Stop real-time frame streaming"""
@@ -283,10 +275,11 @@ class ISIMacroscopeBackend:
 
         while self.running:
             try:
-                # Perform health check for ongoing monitoring only (no console output)
+                # Perform health check for ongoing monitoring (use cache to avoid redundant detection)
+                # Cache is 5 seconds (health_monitor default), same as our check interval
                 health_monitor = get_services().health_monitor
                 health_results = health_monitor.check_all_systems_health(
-                    use_cache=False
+                    use_cache=True  # Use cache to prevent redundant hardware detection
                 )
                 simple_status = {
                     name: result.status.value for name, result in health_results.items()
@@ -300,7 +293,7 @@ class ISIMacroscopeBackend:
                         "status": "ready",
                         "hardware_status": simple_status,
                         "overall_status": health_monitor.get_overall_health_status(
-                            use_cache=False
+                            use_cache=True  # Use cached overall status
                         ).value,
                         "experiment_running": False,
                     }
@@ -642,10 +635,8 @@ class ISIMacroscopeBackend:
                     "status": "ready",
                     "backend_running": self.running,
                     "development_mode": self.development_mode,
-                    "experiment_running": False,  # TODO: Track actual experiment state
-                    "hardware_status": health_summary.get(
-                        "systems", {}
-                    ),  # Frontend compatibility
+                    "experiment_running": False,
+                    "hardware_status": health_summary.get("systems", {}),
                     **health_summary,
                 }
             else:
@@ -669,6 +660,14 @@ class ISIMacroscopeBackend:
                     "experiment_running": health_monitor.check_system_health(
                         "realtime_streaming", use_cache
                     ).is_healthy,
+                    "details": {
+                        name: {
+                            "status": result.status.value,
+                            "message": result.message,
+                            "diagnostics": result.system_data,
+                        }
+                        for name, result in health_results.items()
+                    },
                 }
         except Exception as e:
             logger.error(f"Error getting system health: {e}")
@@ -690,6 +689,7 @@ def build_backend(app_config: AppConfig) -> ISIMacroscopeBackend:
     )
     startup_coordinator = StartupCoordinator()
     health_monitor = SystemHealthMonitor()
+    acquisition_manager = get_acquisition_manager()
 
     registry = ServiceRegistry(
         config=app_config,
@@ -699,11 +699,13 @@ def build_backend(app_config: AppConfig) -> ISIMacroscopeBackend:
         startup_coordinator=startup_coordinator,
         health_monitor=health_monitor,
         stimulus_generator_provider=lambda: provide_stimulus_generator(),
+        acquisition_manager=acquisition_manager,
     )
     set_registry(registry)
 
     backend = ISIMacroscopeBackend(development_mode=False)
     registry.backend = backend
+    registry.acquisition_manager = acquisition_manager
 
     global _backend_instance
     _backend_instance = backend

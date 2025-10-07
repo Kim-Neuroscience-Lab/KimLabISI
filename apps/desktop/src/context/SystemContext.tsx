@@ -1,0 +1,257 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import type { ISIMessage, ControlMessage, SyncMessage } from '../types/ipc-messages'
+import type { HealthMessage } from '../types/electron'
+import { hookLogger } from '../utils/logger'
+
+interface ParametersSnapshot {
+  timestamp: number
+  parameters: Record<string, unknown>
+  parameter_config: Record<string, unknown>
+}
+
+interface SystemContextValue {
+  systemState: string
+  displayText: string
+  isReady: boolean
+  isError: boolean
+  errorMessage: string | null
+  connectionError: string | null
+  parametersSnapshot: ParametersSnapshot | null
+  healthSnapshot: HealthMessage | null
+  lastControlMessage: ControlMessage | null
+  sendCommand: (command: ISIMessage) => Promise<{ success: boolean; error?: string }>
+  emergencyStop: () => Promise<{ success: boolean; error?: string }>
+}
+
+const SystemContext = createContext<SystemContextValue | undefined>(undefined)
+
+export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const [systemState, setSystemState] = useState<string>('initializing')
+  const [displayText, setDisplayText] = useState<string>('Initializing backend systems...')
+  const [isReady, setIsReady] = useState<boolean>(false)
+  const [isError, setIsError] = useState<boolean>(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+
+  const [parametersSnapshot, setParametersSnapshot] = useState<ParametersSnapshot | null>(null)
+  const [healthSnapshot, setHealthSnapshot] = useState<ISIMessage | null>(null)
+  const [lastControlMessage, setLastControlMessage] = useState<ISIMessage | null>(null)
+
+  const handshakeInProgress = useRef(false)
+  const lastHealthRequestAt = useRef<number>(0)
+
+  const sendCommand = useCallback(async (command: ISIMessage) => {
+    if (!window.electronAPI) {
+      throw new Error('Electron API not available')
+    }
+
+    if (!isReady) {
+      throw new Error('Backend not ready')
+    }
+
+    const result = await window.electronAPI.sendToPython(command)
+    if (!result.success) {
+      throw new Error(result.error || 'Command failed')
+    }
+    return result
+  }, [isReady])
+
+  const emergencyStop = useCallback(async () => {
+    if (!window.electronAPI) {
+      throw new Error('Electron API not available')
+    }
+
+    return window.electronAPI.emergencyStop()
+  }, [])
+
+  useEffect(() => {
+    if (!window.electronAPI) {
+      setConnectionError('Electron API not available')
+      setIsError(true)
+      return
+    }
+
+    let mounted = true
+
+    const performHandshake = async (pingId?: string) => {
+      try {
+        await window.electronAPI.initializeZeroMQ?.()
+
+        if (pingId) {
+          const readyPayload = { type: 'frontend_ready', ping_id: pingId }
+          await window.electronAPI.sendStartupCommand?.(readyPayload)
+
+          const responsePayload = {
+            type: 'frontend_ready_response',
+            ping_id: pingId,
+            success: true,
+          }
+          await window.electronAPI.sendStartupCommand?.(responsePayload)
+        } else {
+          const readyPayload = { type: 'frontend_ready' }
+          await window.electronAPI.sendStartupCommand?.(readyPayload)
+        }
+      } catch (error) {
+        hookLogger.error('Frontend handshake failed:', error)
+      } finally {
+        handshakeInProgress.current = false
+      }
+    }
+
+    const handleSystemState = (message: ISIMessage) => {
+      setSystemState(message.state)
+      setDisplayText(message.display_text || message.state)
+      setIsReady(Boolean(message.is_ready))
+      setIsError(Boolean(message.is_error))
+      if (message.error) {
+        setErrorMessage(message.error)
+      }
+    }
+
+    const handleSyncMessage = (message: ISIMessage) => {
+      if (!mounted) return
+
+      if (message.type === 'system_state') {
+        handleSystemState(message)
+        if (message.state === 'waiting_frontend' && !handshakeInProgress.current) {
+          handshakeInProgress.current = true
+          performHandshake()
+        }
+      }
+
+      if (message.type === 'parameters_snapshot') {
+        setParametersSnapshot({
+          timestamp: message.timestamp,
+          parameters: message.parameters || {},
+          parameter_config: message.parameter_config || {},
+        })
+      }
+
+      if (message.type === 'system_health' || message.type === 'system_health_detailed') {
+        if (message.hardware_status) {
+          setHealthSnapshot(message)
+        }
+        lastHealthRequestAt.current = Date.now()
+      }
+    }
+
+    const handleControlMessage = (message: ISIMessage) => {
+      if (!mounted) return
+
+      setLastControlMessage(message)
+
+      if (message.type === 'parameters_snapshot') {
+        setParametersSnapshot({
+          timestamp: message.timestamp,
+          parameters: message.parameters || {},
+          parameter_config: message.parameter_config || {},
+        })
+      }
+
+      if (message.type === 'parameter_info' && message.info?.parameter_config) {
+        setParametersSnapshot(prev => {
+          if (!prev) {
+            return {
+              timestamp: Date.now(),
+              parameters: {},
+              parameter_config: message.info.parameter_config,
+            }
+          }
+
+          return {
+            ...prev,
+            parameter_config: message.info.parameter_config,
+          }
+        })
+      }
+
+      if (message.type === 'system_state') {
+        handleSystemState(message)
+      }
+
+      if (message.type === 'startup_status' && message.health) {
+        setHealthSnapshot({
+          type: 'system_health',
+          hardware_status: message.health,
+          timestamp: Date.now(),
+        })
+        lastHealthRequestAt.current = Date.now()
+      }
+
+      if (message.type === 'startup_coordination' && message.command === 'check_frontend_ready') {
+        if (!handshakeInProgress.current) {
+          handshakeInProgress.current = true
+          performHandshake(message.ping_id)
+        }
+      }
+    }
+
+    const handleHealthMessage = (message: ISIMessage) => {
+      if (!mounted) return
+      if (message.hardware_status) {
+        setHealthSnapshot(message)
+        lastHealthRequestAt.current = Date.now()
+      }
+    }
+
+    const handleBackendError = (error: string | Error) => {
+      if (!mounted) return
+      const message = error instanceof Error ? error.message : error
+      hookLogger.error('Backend error received:', message)
+      setConnectionError(message)
+      setErrorMessage(message)
+      setIsError(true)
+    }
+
+    const unsubscribeSync = window.electronAPI.onSyncMessage?.(handleSyncMessage)
+    const unsubscribeControl = window.electronAPI.onControlMessage?.(handleControlMessage)
+    const unsubscribeHealth = window.electronAPI.onHealthMessage?.(handleHealthMessage)
+    const unsubscribeError = window.electronAPI.onBackendError(handleBackendError)
+
+    return () => {
+      mounted = false
+      unsubscribeSync?.()
+      unsubscribeControl?.()
+      unsubscribeHealth?.()
+      unsubscribeError?.()
+    }
+  }, [])
+
+  return (
+    <SystemContext.Provider
+      value={{
+        systemState,
+        displayText,
+        isReady,
+        isError,
+        errorMessage,
+        connectionError,
+        parametersSnapshot,
+        healthSnapshot,
+        lastControlMessage,
+        sendCommand,
+        emergencyStop,
+      }}
+    >
+      {children}
+    </SystemContext.Provider>
+  )
+}
+
+export const useSystemContext = (): SystemContextValue => {
+  const context = useContext(SystemContext)
+  if (!context) {
+    throw new Error('useSystemContext must be used within a SystemProvider')
+  }
+  return context
+}
+
+export const useParametersSnapshot = () => {
+  const { parametersSnapshot } = useSystemContext()
+  return parametersSnapshot
+}
+
+export const useHealthSnapshot = () => {
+  const { healthSnapshot } = useSystemContext()
+  return healthSnapshot
+}

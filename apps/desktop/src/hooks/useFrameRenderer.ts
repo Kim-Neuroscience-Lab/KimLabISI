@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react'
+import { hookLogger } from '../utils/logger'
 
 interface FrameData {
   frame_id: number
@@ -17,21 +18,41 @@ interface FrameData {
  */
 export function useFrameRenderer() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const frameCache = useRef<Map<number, ImageData>>(new Map())
 
   const renderFrame = useCallback((frameData: FrameData) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const { width_px, height_px, frame_data } = frameData
+    const { width_px, height_px, frame_data, frame_id } = frameData
 
     // Set canvas dimensions if they've changed
     if (canvas.width !== width_px || canvas.height !== height_px) {
       canvas.width = width_px
       canvas.height = height_px
+      frameCache.current.clear() // Clear cache on dimension change
     }
 
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: false })
     if (!ctx) return
+
+    // Check cache first
+    const cached = frameCache.current.get(frame_id)
+    if (cached) {
+      // Use requestAnimationFrame to capture exact vsync timestamp
+      requestAnimationFrame(() => {
+        const displayTimestampUs = Math.round(performance.now() * 1000) // Convert ms to microseconds
+        ctx.putImageData(cached, 0, 0)
+
+        // Send display timestamp to main process for correlation
+        window.electronAPI?.sendToPython({
+          type: 'display_timestamp',
+          frame_id: frame_id,
+          display_timestamp_us: displayTimestampUs
+        }).catch(err => hookLogger.error('Failed to send display timestamp:', err))
+      })
+      return
+    }
 
     // Convert frame data to Uint8Array
     let uint8Array: Uint8Array
@@ -49,42 +70,43 @@ export function useFrameRenderer() {
     } else if (Array.isArray(frame_data)) {
       uint8Array = Uint8Array.from(frame_data)
     } else {
-      console.error('Unsupported frame data type:', frame_data?.constructor?.name)
+      hookLogger.error('Unsupported frame data type:', frame_data?.constructor?.name)
       return
     }
+
     const totalPixels = width_px * height_px
     const channels = uint8Array.length / totalPixels
 
     // Create ImageData for canvas rendering
     const imageData = ctx.createImageData(width_px, height_px)
 
-    if (channels === 1) {
-      // Grayscale - expand to RGBA
-      for (let i = 0; i < totalPixels; i++) {
-        const val = uint8Array[i]
-        imageData.data[i * 4] = val     // R
-        imageData.data[i * 4 + 1] = val // G
-        imageData.data[i * 4 + 2] = val // B
-        imageData.data[i * 4 + 3] = 255 // A
-      }
-    } else if (channels === 3) {
-      // RGB - add alpha channel
-      for (let i = 0; i < totalPixels; i++) {
-        imageData.data[i * 4] = uint8Array[i * 3]         // R
-        imageData.data[i * 4 + 1] = uint8Array[i * 3 + 1] // G
-        imageData.data[i * 4 + 2] = uint8Array[i * 3 + 2] // B
-        imageData.data[i * 4 + 3] = 255                    // A
-      }
-    } else if (channels === 4) {
-      // Already RGBA - direct copy
+    if (channels === 4) {
+      // Backend sends RGBA directly - zero-copy direct transfer
       imageData.data.set(uint8Array)
     } else {
-      console.error(`Unsupported channel count: ${channels}`)
+      hookLogger.error(`Unexpected channel count: ${channels}. Backend should send RGBA (4 channels).`)
       return
     }
 
-    // Render to canvas
-    ctx.putImageData(imageData, 0, 0)
+    // Cache the converted image (limit cache size)
+    if (frameCache.current.size > 100) {
+      const firstKey = frameCache.current.keys().next().value
+      frameCache.current.delete(firstKey)
+    }
+    frameCache.current.set(frame_id, imageData)
+
+    // Use requestAnimationFrame to capture exact vsync timestamp when frame is displayed
+    requestAnimationFrame(() => {
+      const displayTimestampUs = Math.round(performance.now() * 1000) // Convert ms to microseconds
+      ctx.putImageData(imageData, 0, 0)
+
+      // Send display timestamp to main process for correlation
+      window.electronAPI?.sendToPython({
+        type: 'display_timestamp',
+        frame_id: frame_id,
+        display_timestamp_us: displayTimestampUs
+      }).catch(err => hookLogger.error('Failed to send display timestamp:', err))
+    })
   }, [])
 
   return { canvasRef, renderFrame }

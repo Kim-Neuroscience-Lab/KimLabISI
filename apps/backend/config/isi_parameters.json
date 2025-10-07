@@ -1,0 +1,360 @@
+{
+  "config": {
+    "acquisition": {
+      "baseline_sec": {
+        "max": 3600.0,
+        "min": 0.1,
+        "step": 0.1,
+        "type": "number",
+        "unit": "s"
+      },
+      "between_sec": {
+        "max": 3600.0,
+        "min": 0.1,
+        "step": 0.1,
+        "type": "number",
+        "unit": "s"
+      },
+      "cycles": {
+        "max": 1000,
+        "min": 1,
+        "step": 1,
+        "type": "number",
+        "unit": "cycles"
+      },
+      "directions": {
+        "multi_select": true,
+        "options": [
+          "LR",
+          "RL",
+          "TB",
+          "BT"
+        ],
+        "type": "array"
+      }
+    },
+    "analysis": {
+      "area_min_size_mm2": {
+        "max": 1000.0,
+        "min": 0.0001,
+        "step": 0.0001,
+        "type": "number",
+        "unit": "mm\u00b2"
+      },
+      "gradient_window_size": {
+        "max": 100,
+        "min": 1,
+        "step": 1,
+        "type": "number",
+        "unit": "px"
+      },
+      "magnitude_threshold": {
+        "max": 1.0,
+        "min": 0.0,
+        "step": 0.01,
+        "type": "range",
+        "unit": "%"
+      },
+      "phase_filter_sigma": {
+        "max": 20.0,
+        "min": 0.001,
+        "step": 0.001,
+        "type": "number",
+        "unit": "\u03c3"
+      },
+      "response_threshold_percent": {
+        "max": 100.0,
+        "min": 0.0,
+        "step": 1.0,
+        "type": "range",
+        "unit": "%"
+      },
+      "ring_size_mm": {
+        "max": 100.0,
+        "min": 0.001,
+        "step": 0.001,
+        "type": "number",
+        "unit": "mm"
+      },
+      "smoothing_sigma": {
+        "max": 20.0,
+        "min": 0.001,
+        "step": 0.001,
+        "type": "number",
+        "unit": "\u03c3"
+      },
+      "vfs_threshold_sd": {
+        "max": 20.0,
+        "min": 0.1,
+        "step": 0.1,
+        "type": "number",
+        "unit": "\u03c3"
+      }
+    },
+    "camera": {
+      "camera_fps": {
+        "max": 300,
+        "min": 1,
+        "step": 1,
+        "type": "number",
+        "unit": "fps"
+      },
+      "camera_height_px": {
+        "max": 10000,
+        "min": 64,
+        "step": 1,
+        "type": "number",
+        "unit": "px"
+      },
+      "camera_width_px": {
+        "max": 10000,
+        "min": 64,
+        "step": 1,
+        "type": "number",
+        "unit": "px"
+      },
+      "selected_camera": {
+        "options_from": "available_cameras",
+        "type": "select"
+      }
+    },
+    "monitor": {
+      "monitor_distance_cm": {
+        "max": 200.0,
+        "min": 1.0,
+        "step": 0.1,
+        "type": "number",
+        "unit": "cm"
+      },
+      "monitor_fps": {
+        "max": 300,
+        "min": 1,
+        "step": 1,
+        "type": "number",
+        "unit": "fps"
+      },
+      "monitor_height_cm": {
+        "max": 500.0,
+        "min": 1.0,
+        "step": 0.1,
+        "type": "number",
+        "unit": "cm"
+      },
+      "monitor_height_px": {
+        "max": 10000,
+        "min": 100,
+        "step": 1,
+        "type": "number",
+        "unit": "px"
+      },
+      "monitor_lateral_angle_deg": {
+        "max": 90.0,
+        "min": -90.0,
+        "step": 0.1,
+        "type": "number",
+        "unit": "\u00b0"
+      },
+      "monitor_tilt_angle_deg": {
+        "max": 90.0,
+        "min": -90.0,
+        "step": 0.1,
+        "type": "number",
+        "unit": "\u00b0"
+      },
+      "monitor_width_cm": {
+        "max": 500.0,
+        "min": 1.0,
+        "step": 0.1,
+        "type": "number",
+        "unit": "cm"
+      },
+      "monitor_width_px": {
+        "max": 10000,
+        "min": 100,
+        "step": 1,
+        "type": "number",
+        "unit": "px"
+      },
+      "selected_display": {
+        "options_from": "available_displays",
+        "type": "select"
+      }
+    },
+    "session": {
+      "animal_age": {
+        "placeholder": "Enter animal age",
+        "type": "text"
+      },
+      "animal_id": {
+        "placeholder": "Enter animal ID",
+        "type": "text"
+      },
+      "session_name": {
+        "placeholder": "Enter session name",
+        "type": "text"
+      }
+    },
+    "stimulus": {
+      "background_luminance": {
+        "max": 1.0,
+        "min": 0.0,
+        "step": 0.01,
+        "type": "range",
+        "unit": "%"
+      },
+      "bar_width_deg": {
+        "max": 180.0,
+        "min": 0.1,
+        "step": 0.1,
+        "type": "number",
+        "unit": "\u00b0"
+      },
+      "checker_size_deg": {
+        "max": 180.0,
+        "min": 0.1,
+        "step": 0.1,
+        "type": "number",
+        "unit": "\u00b0"
+      },
+      "contrast": {
+        "max": 1.0,
+        "min": 0.0,
+        "step": 0.01,
+        "type": "range",
+        "unit": "%"
+      },
+      "drift_speed_deg_per_sec": {
+        "max": 1000.0,
+        "min": 0.01,
+        "step": 0.01,
+        "type": "number",
+        "unit": "\u00b0/s"
+      },
+      "strobe_rate_hz": {
+        "max": 100.0,
+        "min": 0.01,
+        "step": 0.01,
+        "type": "number",
+        "unit": "Hz"
+      }
+    }
+  },
+  "current": {
+    "acquisition": {
+      "baseline_sec": 5,
+      "between_sec": 5,
+      "cycles": 1,
+      "directions": [
+        "LR",
+        "RL",
+        "TB",
+        "BT"
+      ]
+    },
+    "analysis": {
+      "area_min_size_mm2": 0.1,
+      "gradient_window_size": 3,
+      "magnitude_threshold": 0.1,
+      "phase_filter_sigma": 0.5,
+      "response_threshold_percent": 5.0,
+      "ring_size_mm": 1.0,
+      "smoothing_sigma": 1.0,
+      "vfs_threshold_sd": 2.0
+    },
+    "camera": {
+      "available_cameras": [
+        "FaceTime HD Camera"
+      ],
+      "camera_fps": 30,
+      "camera_height_px": 1080,
+      "camera_width_px": 1920,
+      "selected_camera": "FaceTime HD Camera"
+    },
+    "monitor": {
+      "available_displays": [
+        "display_1"
+      ],
+      "monitor_distance_cm": 10,
+      "monitor_fps": 120,
+      "monitor_height_cm": 26.4,
+      "monitor_height_px": 1117,
+      "monitor_lateral_angle_deg": 30,
+      "monitor_tilt_angle_deg": 20,
+      "monitor_width_cm": 48.1,
+      "monitor_width_px": 1728,
+      "selected_display": "display_1"
+    },
+    "session": {
+      "animal_age": "P20",
+      "animal_id": "M137",
+      "created_at": "2025-09-28T15:22:27.071857",
+      "last_modified": "2025-10-06T18:29:11.405938",
+      "session_name": "names n stuff"
+    },
+    "stimulus": {
+      "background_luminance": 0,
+      "bar_width_deg": 20,
+      "checker_size_deg": 25,
+      "contrast": 0.99,
+      "drift_speed_deg_per_sec": 9,
+      "strobe_rate_hz": 6
+    }
+  },
+  "default": {
+    "acquisition": {
+      "baseline_sec": 5.0,
+      "between_sec": 5.0,
+      "cycles": 10,
+      "directions": [
+        "LR",
+        "RL",
+        "TB",
+        "BT"
+      ]
+    },
+    "analysis": {
+      "area_min_size_mm2": 0.1,
+      "gradient_window_size": 3,
+      "magnitude_threshold": 0.1,
+      "phase_filter_sigma": 0.5,
+      "response_threshold_percent": 5.0,
+      "ring_size_mm": 1.0,
+      "smoothing_sigma": 1.0,
+      "vfs_threshold_sd": 2.0
+    },
+    "camera": {
+      "available_cameras": [],
+      "camera_fps": -1,
+      "camera_height_px": -1,
+      "camera_width_px": -1,
+      "selected_camera": ""
+    },
+    "monitor": {
+      "available_displays": [],
+      "monitor_distance_cm": 10.0,
+      "monitor_fps": -1,
+      "monitor_height_cm": 36.195,
+      "monitor_height_px": -1,
+      "monitor_lateral_angle_deg": 30.0,
+      "monitor_tilt_angle_deg": 20.0,
+      "monitor_width_cm": 60.96,
+      "monitor_width_px": -1,
+      "selected_display": ""
+    },
+    "session": {
+      "animal_age": "",
+      "animal_id": "",
+      "created_at": "",
+      "last_modified": "",
+      "session_name": ""
+    },
+    "stimulus": {
+      "background_luminance": 0.0,
+      "bar_width_deg": 20.0,
+      "checker_size_deg": 25.0,
+      "contrast": 1.0,
+      "drift_speed_deg_per_sec": 9.0,
+      "strobe_rate_hz": 6.0
+    }
+  }
+}
