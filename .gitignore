@@ -107,3 +107,9 @@ poetry.toml
 # Misc
 reports
 .backup
+
+# Data
+sample_data
+*.h5
+*.hdf5
+*.npy

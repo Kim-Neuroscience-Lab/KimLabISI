@@ -473,3 +473,87 @@ class AnalysisPipeline:
         phase_thresholded[magnitude_map < threshold] = np.nan
 
         return phase_thresholded
+
+    # ========== HIGH-LEVEL PIPELINE ORCHESTRATION ==========
+
+    def run_from_phase_maps(
+        self,
+        phase_data: Dict[str, np.ndarray],
+        magnitude_data: Dict[str, np.ndarray],
+        anatomical: Optional[np.ndarray] = None
+    ) -> Dict[str, np.ndarray]:
+        """Run analysis pipeline starting from phase/magnitude maps.
+
+        This allows processing data that has already undergone Fourier analysis
+        (e.g., pre-computed sample data or externally processed data).
+
+        Args:
+            phase_data: Dict with keys 'LR', 'RL', 'TB', 'BT' containing phase maps
+            magnitude_data: Dict with keys 'LR', 'RL', 'TB', 'BT' containing magnitude maps
+            anatomical: Optional anatomical reference image
+
+        Returns:
+            Dictionary containing:
+                - azimuth_map: Horizontal retinotopy
+                - elevation_map: Vertical retinotopy
+                - sign_map: Visual field sign
+                - boundary_map: Area boundaries
+                - anatomical: Anatomical reference (if provided)
+        """
+        logger.info("=" * 70)
+        logger.info("Running analysis from phase/magnitude maps...")
+        logger.info("=" * 70)
+
+        results = {}
+
+        # Step 1: Generate retinotopic maps
+        logger.info("\n[1/3] Generating retinotopic maps...")
+        azimuth_map = self.generate_azimuth_map(phase_data['LR'], phase_data['RL'])
+        elevation_map = self.generate_elevation_map(phase_data['TB'], phase_data['BT'])
+
+        results['azimuth_map'] = azimuth_map
+        results['elevation_map'] = elevation_map
+
+        logger.info(f"  Azimuth range: [{np.nanmin(azimuth_map):.1f}°, {np.nanmax(azimuth_map):.1f}°]")
+        logger.info(f"  Elevation range: [{np.nanmin(elevation_map):.1f}°, {np.nanmax(elevation_map):.1f}°]")
+
+        # Step 2: Compute visual field sign
+        logger.info("\n[2/3] Computing visual field sign...")
+        gradients = self.compute_spatial_gradients(azimuth_map, elevation_map)
+        sign_map = self.calculate_visual_field_sign(gradients)
+
+        # Apply magnitude threshold to sign map
+        avg_magnitude = (magnitude_data['LR'] + magnitude_data['RL'] +
+                        magnitude_data['TB'] + magnitude_data['BT']) / 4.0
+        magnitude_threshold = np.percentile(avg_magnitude, 25)  # Bottom 25%
+        sign_map[avg_magnitude < magnitude_threshold] = 0
+
+        results['sign_map'] = sign_map.astype(np.int8)
+
+        num_positive = np.sum(sign_map > 0)
+        num_negative = np.sum(sign_map < 0)
+        num_undefined = np.sum(sign_map == 0)
+        total = sign_map.size
+        logger.info(f"  Positive (non-mirror): {num_positive} ({100*num_positive/total:.1f}%)")
+        logger.info(f"  Negative (mirror): {num_negative} ({100*num_negative/total:.1f}%)")
+        logger.info(f"  Undefined: {num_undefined} ({100*num_undefined/total:.1f}%)")
+
+        # Step 3: Detect boundaries
+        logger.info("\n[3/3] Detecting area boundaries...")
+        boundary_map = self.detect_area_boundaries(sign_map)
+
+        num_boundary_pixels = np.sum(boundary_map > 0)
+        boundary_percentage = 100 * num_boundary_pixels / boundary_map.size
+        logger.info(f"  Boundary pixels: {num_boundary_pixels} ({boundary_percentage:.1f}%)")
+
+        results['boundary_map'] = boundary_map
+
+        # Add anatomical if provided
+        if anatomical is not None:
+            results['anatomical'] = anatomical
+
+        logger.info("\n" + "=" * 70)
+        logger.info("✅ Analysis pipeline complete!")
+        logger.info("=" * 70)
+
+        return results

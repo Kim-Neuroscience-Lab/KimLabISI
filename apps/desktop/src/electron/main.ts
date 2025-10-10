@@ -408,6 +408,9 @@ class MultiChannelIPCManager {
       mainLogger.info('🚀 ANALYSIS STARTED')
     } else if (message.type === 'analysis_complete') {
       mainLogger.info('✅ ANALYSIS COMPLETE')
+    } else if (message.type === 'system_health') {
+      // Silently forward system_health messages - don't log (sent every second)
+      // Logging is already handled in handleHealthUpdate()
     } else {
       mainLogger.debug('Received SYNC channel message:', message)
     }

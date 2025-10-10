@@ -313,7 +313,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   // Debug logging
   React.useEffect(() => {
-    console.log('🎛️ [ControlPanel] Parameter state updated:', {
+    componentLogger.debug('[ControlPanel] Parameter state updated:', {
       sessionParams,
       monitorParams,
       stimulusParams,
@@ -331,9 +331,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       componentLogger.debug(`Updated ${section} parameters:`, params)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      componentLogger.error(`Failed to update ${section} parameters:`, errorMessage, params)
-      // Show error to user
-      console.error(`❌ Parameter Update Failed (${section}):`, errorMessage)
+      componentLogger.error(`Failed to update ${section} parameters:`, { errorMessage, params })
     }
   }, [updateParameters])
 

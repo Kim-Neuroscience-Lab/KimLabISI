@@ -198,7 +198,7 @@ class AnalysisRenderer:
     def render_boundary_map(self, boundary_map: np.ndarray) -> np.ndarray:
         """Render boundary map to RGBA image.
 
-        Boundaries shown as white lines on transparent background.
+        Boundaries shown as black lines on transparent background.
 
         Args:
             boundary_map: Binary boundary map
@@ -209,13 +209,44 @@ class AnalysisRenderer:
         logger.info("Rendering boundary map...")
 
         height, width = boundary_map.shape
+
+        # Debug: Check boundary_map statistics
+        unique_values = np.unique(boundary_map)
+        logger.info(f"Boundary map shape: {boundary_map.shape}, dtype: {boundary_map.dtype}")
+        logger.info(f"Boundary map unique values: {unique_values}")
+        logger.info(f"Boundary map range: [{np.min(boundary_map)}, {np.max(boundary_map)}]")
+
+        # Threshold to binary if needed
+        # Note: boundary_map might be inverted (0 = boundary, nonzero = non-boundary)
+        # or it might be a labeled map where boundaries are between regions
+        binary_boundaries = (boundary_map > 0).astype(np.uint8)
+
+        num_nonzero_before = np.sum(binary_boundaries > 0)
+        logger.info(f"Non-zero pixels before thinning: {num_nonzero_before}/{height*width} ({100*num_nonzero_before/(height*width):.1f}%)")
+
+        # Apply morphological thinning to get single-pixel-wide boundaries
+        # Use gradient to extract edges
+        kernel = np.ones((3, 3), np.uint8)
+        thinned_boundaries = cv2.morphologyEx(binary_boundaries, cv2.MORPH_GRADIENT, kernel)
+
+        # Log how many pixels are boundaries (for debugging)
+        num_boundary_pixels = np.sum(thinned_boundaries > 0)
+        total_pixels = height * width
+        boundary_percentage = (num_boundary_pixels / total_pixels) * 100
+        logger.info(f"Boundary pixels after thinning: {num_boundary_pixels}/{total_pixels} ({boundary_percentage:.1f}%)")
+
+        # If most of the image is boundaries, the logic might be inverted
+        if boundary_percentage > 50:
+            logger.warning(f"More than 50% of pixels are boundaries - this seems wrong!")
+            logger.warning("Boundary map might be inverted or incorrectly formatted")
+
         rgba_image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Boundaries = White with full opacity
-        rgba_image[boundary_map > 0] = [255, 255, 255, 255]
+        # Boundaries = Black with full opacity
+        rgba_image[thinned_boundaries > 0] = [0, 0, 0, 255]
 
-        # Background = Transparent
-        rgba_image[boundary_map == 0] = [0, 0, 0, 0]
+        # Background = Transparent (alpha = 0)
+        # Note: Already initialized to zeros above
 
         return rgba_image
 

@@ -19,11 +19,6 @@ sys.path.insert(0, str(src_dir))
 
 import logging
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -167,6 +162,9 @@ def test_phase2():
 
 
 if __name__ == "__main__":
+    from logging_config import configure_logging
+    configure_logging(level=logging.DEBUG)  # Verbose for tests
+
     try:
         success = test_phase2()
         sys.exit(0 if success else 1)

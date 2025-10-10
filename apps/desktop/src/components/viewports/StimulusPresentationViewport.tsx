@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useFrameRenderer } from '../../hooks/useFrameRenderer'
+import { componentLogger } from '../../utils/logger'
 import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-messages'
 import type { SharedMemoryFrameData } from '../../types/electron'
 import type {
@@ -57,7 +58,7 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
         renderFrame(completeFrameData)
         setHasFrameData(true)
       } catch (error) {
-        console.error('Failed to read frame from shared memory:', error)
+        componentLogger.error('Failed to read frame from shared memory:', error)
       }
     }
 

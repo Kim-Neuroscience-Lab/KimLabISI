@@ -26,6 +26,7 @@ import { Bar, Line } from 'react-chartjs-2'
 import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-messages'
 import type { SystemState } from '../../types/shared'
 import type { CameraParameters, StimulusParameters, MonitorParameters, AcquisitionParameters } from '../../hooks/useParameterManager'
+import { componentLogger } from '../../utils/logger'
 
 
 const acquisitionModes = ['preview', 'record', 'playback'] as const
@@ -175,9 +176,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   // Start full acquisition (camera + histogram + correlation)
   const startAcquisition = async () => {
-    console.log('🎬 startAcquisition() called')
-    console.log('   sendCommand available?', !!sendCommand)
-    console.log('   isPreviewing?', isPreviewing)
+    componentLogger.debug('startAcquisition() called', { sendCommandAvailable: !!sendCommand, isPreviewing })
 
     // Record start time for elapsed time calculation
     setAcquisitionStartTime(Date.now())
@@ -187,71 +186,75 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     if (isPreviewing) {
       // Start orchestrated acquisition sequence
       if (!sendCommand) {
-        console.error('❌ sendCommand is undefined!')
+        componentLogger.error('sendCommand is undefined!')
         return
       }
 
       // Stop the preview stimulus so baseline starts clean
-      console.log('📤 Stopping preview stimulus before acquisition...')
+      componentLogger.debug('Stopping preview stimulus before acquisition...')
       try {
         await sendCommand({ type: 'stop_stimulus' })
       } catch (error) {
-        console.error('❌ Error stopping preview stimulus:', error)
+        componentLogger.error('Error stopping preview stimulus:', error)
       }
 
       // Stop any existing acquisition first (safety check)
-      console.log('📤 Stopping any existing acquisition...')
+      componentLogger.debug('Stopping any existing acquisition...')
       try {
         await sendCommand({ type: 'stop_acquisition' })
       } catch (error) {
         // Ignore error if no acquisition was running
-        console.log('   No existing acquisition to stop')
+        componentLogger.debug('No existing acquisition to stop')
       }
 
       // Switch modes: preview OFF, acquisition ON
       setIsPreviewing(false)
       setIsAcquiring(true)
 
-      console.log('📤 Sending start_acquisition command...')
+      componentLogger.debug('Sending start_acquisition command...')
       try {
         const result = await sendCommand({ type: 'start_acquisition' })
-        console.log('📥 Received response:', result)
+        componentLogger.debug('Received response:', result)
         if (result?.success) {
-          console.log('✅ Acquisition sequence started')
-          console.log(`   Directions: ${result.total_directions}, Cycles: ${result.total_cycles}`)
+          componentLogger.info('Acquisition sequence started', {
+            directions: result.total_directions,
+            cycles: result.total_cycles
+          })
         } else {
-          console.error('❌ Failed to start acquisition:', result?.error)
+          componentLogger.error('Failed to start acquisition:', result?.error)
         }
       } catch (error) {
-        console.error('❌ Error starting acquisition:', error)
+        componentLogger.error('Error starting acquisition:', error)
       }
 
       return
     }
 
     // Otherwise start from scratch
-    console.log('📤 Starting preview first...')
+    componentLogger.debug('Starting preview first...')
     await startPreview()
     setIsAcquiring(true)
 
     // Start orchestrated acquisition sequence
     if (!sendCommand) {
-      console.error('❌ sendCommand is undefined!')
+      componentLogger.error('sendCommand is undefined!')
       return
     }
 
-    console.log('📤 Sending start_acquisition command...')
+    componentLogger.debug('Sending start_acquisition command...')
     try {
       const result = await sendCommand({ type: 'start_acquisition' })
-      console.log('📥 Received response:', result)
+      componentLogger.debug('Received response:', result)
       if (result?.success) {
-        console.log('✅ Acquisition sequence started')
-        console.log(`   Directions: ${result.total_directions}, Cycles: ${result.total_cycles}`)
+        componentLogger.info('Acquisition sequence started', {
+          directions: result.total_directions,
+          cycles: result.total_cycles
+        })
       } else {
-        console.error('❌ Failed to start acquisition:', result?.error)
+        componentLogger.error('Failed to start acquisition:', result?.error)
       }
     } catch (error) {
-      console.error('❌ Error starting acquisition:', error)
+      componentLogger.error('Error starting acquisition:', error)
     }
   }
 
@@ -264,13 +267,13 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     try {
       const result = await sendCommand?.({ type: 'stop_acquisition' })
       if (result?.success) {
-        console.log('✅ Acquisition stopped')
+        componentLogger.info('Acquisition stopped')
       } else if (result?.error && !result.error.includes('not running')) {
-        console.error('❌ Failed to stop acquisition:', result?.error)
+        componentLogger.error('Failed to stop acquisition:', result?.error)
       }
     } catch (error: any) {
       if (!error.message?.includes('not running')) {
-        console.error('❌ Error stopping acquisition:', error)
+        componentLogger.error('Error stopping acquisition:', error)
       }
     }
 
@@ -279,11 +282,11 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     setIsPreviewing(true)
 
     // Restart preview stimulus
-    console.log('📤 Restarting preview stimulus...')
+    componentLogger.debug('Restarting preview stimulus...')
     try {
       await sendCommand?.({ type: 'start_stimulus' })
     } catch (error) {
-      console.error('❌ Error restarting preview stimulus:', error)
+      componentLogger.error('Error restarting preview stimulus:', error)
     }
   }
 
@@ -301,7 +304,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
       setAcquisitionStartTime(null)
       setAcquisitionStatus(null)
     } catch (error) {
-      console.error('Error stopping preview:', error)
+      componentLogger.error('Error stopping preview:', error)
     }
   }
 
@@ -313,51 +316,53 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         setAvailableSessions(result.sessions || [])
       }
     } catch (error) {
-      console.error('Error loading sessions:', error)
+      componentLogger.error('Error loading sessions:', error)
     }
   }
 
   // Load a specific session for playback
   const loadSession = async (sessionPath: string) => {
     try {
-      console.log('🎬 Loading session:', sessionPath)
+      componentLogger.debug('Loading session', { sessionPath })
       const result = await sendCommand?.({ type: 'load_session', session_path: sessionPath })
-      console.log('🎬 Load session result:', result)
+      componentLogger.debug('Load session result', result)
 
       if (result?.success) {
         setSelectedSession(sessionPath)
         // Load session data for first available direction
         const dataResult = await sendCommand?.({ type: 'get_session_data' })
-        console.log('🎬 Get session data result:', dataResult)
+        componentLogger.debug('Get session data result', dataResult)
 
         if (dataResult?.success && dataResult.directions?.length > 0) {
           // Load data for first direction
           const firstDirection = dataResult.directions[0]
-          console.log('🎬 Loading direction:', firstDirection)
+          componentLogger.debug('Loading direction', { firstDirection })
 
           const directionData = await sendCommand?.({
             type: 'get_session_data',
             direction: firstDirection
           })
-          console.log('🎬 Direction data result:', directionData)
-          console.log('🎬 Has camera frames:', !!directionData?.camera_data?.has_frames)
-          console.log('🎬 Frame count:', directionData?.camera_data?.frame_count)
+          componentLogger.debug('Direction data result', directionData)
+          componentLogger.debug('Camera frame info', {
+            hasFrames: !!directionData?.camera_data?.has_frames,
+            frameCount: directionData?.camera_data?.frame_count
+          })
 
           if (directionData?.success) {
             setLoadedSessionData(directionData)
             setPlaybackFrameIndex(0)
-            console.log('✅ Session loaded successfully')
+            componentLogger.info('Session loaded successfully')
           } else {
-            console.error('❌ Failed to load direction data')
+            componentLogger.error('Failed to load direction data')
           }
         } else {
-          console.error('❌ No directions available in session')
+          componentLogger.error('No directions available in session')
         }
       } else {
-        console.error('❌ Failed to load session:', result?.error)
+        componentLogger.error('Failed to load session', { error: result?.error })
       }
     } catch (error) {
-      console.error('❌ Error loading session:', error)
+      componentLogger.error('Error loading session', error)
     }
   }
 
@@ -394,7 +399,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   // Listen for camera frames from camera-specific shared memory channel
   useEffect(() => {
-    console.log('📷 [AcquisitionViewport] Camera frame listener effect:', {
+    componentLogger.debug('Camera frame listener effect', {
       isPreviewing,
       isAcquiring,
       shouldListen: isPreviewing || isAcquiring
@@ -403,7 +408,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
     const handleCameraFrame = async (metadata: any) => {
       try {
-        console.log('📷 [AcquisitionViewport] Received camera frame metadata:', metadata)
+        componentLogger.debug('Received camera frame metadata', metadata)
         // Read actual frame data from shared memory using offset, size, and path
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
@@ -414,7 +419,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         // Create ImageData from RGBA buffer
         const canvas = cameraCanvasRef.current
         if (!canvas) {
-          console.warn('📷 [AcquisitionViewport] Canvas ref not available')
+          componentLogger.warn('Canvas ref not available')
           return
         }
 
@@ -425,7 +430,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width
           canvas.height = height
-          console.log('📷 [AcquisitionViewport] Canvas resized to:', width, 'x', height)
+          componentLogger.debug('Canvas resized', { width, height })
         }
 
         const ctx = canvas.getContext('2d')
@@ -453,21 +458,21 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           camera_name: metadata.camera_name
         })
       } catch (error) {
-        console.error('📷 [AcquisitionViewport] Failed to read camera frame from shared memory:', error)
+        componentLogger.error('Failed to read camera frame from shared memory', error)
       }
     }
 
-    console.log('📷 [AcquisitionViewport] Setting up camera frame listener...')
+    componentLogger.debug('Setting up camera frame listener')
     let unsubscribe: (() => void) | undefined
     if (window.electronAPI?.onCameraFrame) {
       unsubscribe = window.electronAPI.onCameraFrame(handleCameraFrame)
-      console.log('📷 [AcquisitionViewport] Camera frame listener registered')
+      componentLogger.debug('Camera frame listener registered')
     } else {
-      console.warn('📷 [AcquisitionViewport] window.electronAPI.onCameraFrame not available!')
+      componentLogger.warn('window.electronAPI.onCameraFrame not available')
     }
 
     return () => {
-      console.log('📷 [AcquisitionViewport] Cleaning up camera frame listener')
+      componentLogger.debug('Cleaning up camera frame listener')
       unsubscribe?.()
     }
   }, [isPreviewing, isAcquiring])
@@ -524,7 +529,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           frame_index: metadata.frame_index
         })
       } catch (error) {
-        console.error('Failed to read stimulus frame from shared memory:', error)
+        componentLogger.error('Failed to read stimulus frame from shared memory', error)
       }
     }
 
@@ -558,11 +563,11 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   // Update correlation chart data (backend now provides Chart.js-ready format)
   const updateCorrelationChart = useCallback((data: any) => {
-    console.log('📈 Timing data received:', data)
+    componentLogger.debug('Timing data received', data)
 
     // Backend sends empty arrays if no valid data
     if (!data?.labels || data.labels.length === 0) {
-      console.warn('📈 No timing data available')
+      componentLogger.warn('No timing data available')
       setCorrelationChartData({
         labels: [],
         datasets: [{
@@ -580,7 +585,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
       return
     }
 
-    console.log('📈 Plotting', data.labels.length, 'timing points')
+    componentLogger.debug('Plotting timing points', { count: data.labels.length })
 
     setCorrelationChartData({
       labels: data.labels,
@@ -628,10 +633,10 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         if (result?.success && result.data) {
           updateHistogramChart(result.data)
         } else if (result?.error) {
-          console.warn('Histogram not available:', result.error)
+          componentLogger.warn('Histogram not available', { error: result.error })
         }
       } catch (error) {
-        console.error('Error polling histogram:', error)
+        componentLogger.error('Error polling histogram', error)
       }
     }, 100) // 10 Hz
 
@@ -642,26 +647,26 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
   useEffect(() => {
     if (!isAcquiring) return
 
-    console.log('📈 Starting correlation polling...')
+    componentLogger.debug('Starting correlation polling')
     const pollInterval = setInterval(async () => {
       try {
         const result = await sendCommand?.({ type: 'get_correlation_data' })
-        console.log('📈 Correlation poll result:', result)
+        componentLogger.debug('Correlation poll result', result)
 
         if (result?.success && result.data) {
           updateCorrelationChart(result.data)
         } else if (result?.error) {
-          console.warn('📈 Correlation not available:', result.error)
+          componentLogger.warn('Correlation not available', { error: result.error })
         } else {
-          console.warn('📈 Correlation result invalid:', result)
+          componentLogger.warn('Correlation result invalid', result)
         }
       } catch (error) {
-        console.error('📈 Error polling correlation:', error)
+        componentLogger.error('Error polling correlation', error)
       }
     }, 100) // 10 Hz
 
     return () => {
-      console.log('📈 Stopping correlation polling')
+      componentLogger.debug('Stopping correlation polling')
       clearInterval(pollInterval)
     }
   }, [isAcquiring, sendCommand, updateCorrelationChart])
@@ -672,7 +677,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
     const handleSyncMessage = async (message: any) => {
       if (message.type === 'acquisition_progress') {
-        console.log('🔄 Acquisition progress update:', message)
+        componentLogger.debug('Acquisition progress update', message)
         setAcquisitionStatus({
           is_running: message.is_running,
           phase: message.phase,
@@ -687,18 +692,18 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
         // Check if acquisition completed
         if (message.phase === 'complete') {
-          console.log('✅ Acquisition sequence completed!')
+          componentLogger.info('Acquisition sequence completed')
           // Backend has already stopped acquisition, just restart preview
           setIsAcquiring(false)
           setIsPreviewing(true)
           setAcquisitionStatus(null)
 
           // Restart preview stimulus (camera is still running)
-          console.log('📤 Restarting preview stimulus after acquisition...')
+          componentLogger.debug('Restarting preview stimulus after acquisition')
           try {
             await sendCommand?.({ type: 'start_stimulus' })
           } catch (error) {
-            console.error('❌ Error restarting preview stimulus:', error)
+            componentLogger.error('Error restarting preview stimulus', error)
           }
         }
       }
@@ -718,7 +723,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
   useEffect(() => {
     if (!isAcquiring) return
 
-    console.log('🔄 Starting acquisition status polling...')
+    componentLogger.debug('Starting acquisition status polling')
     const pollInterval = setInterval(async () => {
       try {
         const result = await sendCommand?.({ type: 'get_acquisition_status' })
@@ -729,12 +734,12 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           // Skip - completion is handled by sync message listener
         }
       } catch (error) {
-        console.error('🔄 Error polling acquisition status:', error)
+        componentLogger.error('Error polling acquisition status', error)
       }
     }, 500) // 2 Hz (slower since we have push messages)
 
     return () => {
-      console.log('🔄 Stopping acquisition status polling')
+      componentLogger.debug('Stopping acquisition status polling')
       clearInterval(pollInterval)
     }
   }, [isAcquiring, sendCommand])
@@ -762,10 +767,10 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         if (result?.success && result?.frame_data) {
           setCurrentPlaybackFrame(result)
         } else {
-          console.error('❌ Failed to load playback frame:', result?.error)
+          componentLogger.error('Failed to load playback frame', { error: result?.error })
         }
       } catch (error) {
-        console.error('❌ Error loading playback frame:', error)
+        componentLogger.error('Error loading playback frame', error)
       } finally {
         setIsLoadingFrame(false)
       }
@@ -841,14 +846,14 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
   // Stop camera when entering playback mode
   useEffect(() => {
     if (acquisitionMode === 'playback' && (isPreviewing || isAcquiring)) {
-      console.log('🎬 Entering playback mode - stopping live camera')
+      componentLogger.debug('Entering playback mode - stopping live camera')
       stopPreview()
     }
   }, [acquisitionMode, isPreviewing, isAcquiring])
 
   // Auto-start preview when camera is selected (not in playback mode)
   useEffect(() => {
-    console.log('📷 [AcquisitionViewport] Auto-start check:', {
+    componentLogger.debug('Auto-start check', {
       acquisitionMode,
       selectedCamera: cameraParams?.selected_camera,
       isConnected: systemState?.isConnected,
@@ -857,7 +862,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
       shouldStart: acquisitionMode !== 'playback' && cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring
     })
     if (acquisitionMode !== 'playback' && cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring) {
-      console.log('📷 [AcquisitionViewport] Auto-starting preview for camera:', cameraParams.selected_camera)
+      componentLogger.debug('Auto-starting preview for camera', { camera: cameraParams.selected_camera })
       startPreview()
     }
   }, [cameraParams?.selected_camera, systemState?.isConnected, isPreviewing, isAcquiring, acquisitionMode])
@@ -870,7 +875,11 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
       if (!stimulusParams || !monitorParams) return
 
       try {
-        console.log(`📐 Requesting stimulus frame: direction=${sharedDirection}, frame=${sharedFrameIndex}, mask=${sharedShowBarMask}`)
+        componentLogger.debug('Requesting stimulus frame', {
+          direction: sharedDirection,
+          frameIndex: sharedFrameIndex,
+          showBarMask: sharedShowBarMask
+        })
         await sendCommand?.({
           type: 'get_stimulus_frame',
           direction: sharedDirection,
@@ -878,7 +887,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           show_bar_mask: sharedShowBarMask
         })
       } catch (error) {
-        console.error('Error fetching stimulus frame:', error)
+        componentLogger.error('Error fetching stimulus frame', error)
       }
     }
 
@@ -949,7 +958,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           break
         }
         default: {
-          console.warn(`[AcquisitionViewport] Unknown control '${action}'`)
+          componentLogger.warn('Unknown control action', { action })
         }
       }
     },

@@ -19,11 +19,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -372,6 +367,9 @@ def print_code_statistics():
 
 def main():
     """Main entry point for master test runner."""
+    from logging_config import configure_logging
+    configure_logging(level=logging.DEBUG)  # Verbose for tests
+
     src_dir = Path(__file__).parent
 
     # Print code statistics first

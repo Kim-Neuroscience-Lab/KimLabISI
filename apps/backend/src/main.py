@@ -843,7 +843,7 @@ def _get_analysis_composite_image(renderer, cmd: Dict[str, Any]) -> Dict[str, An
         if not results_dir.exists():
             return {"success": False, "error": f"Analysis results not found: {results_dir}"}
 
-        # Load result arrays
+        # Load result arrays (explicitly initialize to None)
         anatomical = None
         signal_layer = None
         overlay_layer = None
@@ -887,19 +887,26 @@ def _get_analysis_composite_image(renderer, cmd: Dict[str, Any]) -> Dict[str, An
         if overlay_config.get("visible", True):
             overlay_type = overlay_config.get("type", "area_borders")
 
-            if overlay_type == "area_borders":
+            # Explicitly handle "none" type
+            if overlay_type == "none":
+                overlay_layer = None  # No overlay
+            elif overlay_type == "area_borders":
                 boundary_file = results_dir / "boundary_map.npy"
                 if boundary_file.exists():
                     boundary_data = np.load(str(boundary_file))
                     overlay_layer = renderer.render_boundary_map(boundary_data)
+            elif overlay_type == "area_patches":
+                # Future: implement area_patches rendering
+                logger.warning(f"Overlay type 'area_patches' not yet implemented")
+                overlay_layer = None
 
         # Composite layers
         if signal_layer is not None:
             height, width = signal_layer.shape[:2]
             composite = np.zeros((height, width, 3), dtype=np.float32)
 
-            # Start with anatomical layer if available and visible
-            if anatomical is not None:
+            # Start with anatomical layer if available AND VISIBLE
+            if anatomical is not None and layers.get("anatomical", {}).get("visible", True):
                 anatomical_alpha = layers.get("anatomical", {}).get("alpha", 0.5)
                 if anatomical.ndim == 2:
                     # Convert grayscale to RGB
@@ -910,12 +917,13 @@ def _get_analysis_composite_image(renderer, cmd: Dict[str, Any]) -> Dict[str, An
                 # Blend anatomical with black background
                 composite = anatomical_rgb * anatomical_alpha
 
-            # Blend signal layer on top
-            signal_alpha = layers.get("signal", {}).get("alpha", 0.8)
-            composite = composite * (1.0 - signal_alpha) + signal_layer.astype(np.float32) * signal_alpha
+            # Blend signal layer on top if VISIBLE
+            if layers.get("signal", {}).get("visible", True):
+                signal_alpha = layers.get("signal", {}).get("alpha", 0.8)
+                composite = composite * (1.0 - signal_alpha) + signal_layer.astype(np.float32) * signal_alpha
 
-            # Add overlay layer on top
-            if overlay_layer is not None and overlay_layer.shape[-1] == 4:
+            # Add overlay layer on top if VISIBLE
+            if overlay_layer is not None and overlay_layer.shape[-1] == 4 and layers.get("overlay", {}).get("visible", True):
                 overlay_alpha = layers.get("overlay", {}).get("alpha", 1.0)
                 alpha_channel = (overlay_layer[:, :, 3:4].astype(np.float32) / 255.0) * overlay_alpha
                 composite = (
@@ -1593,14 +1601,9 @@ class ISIMacroscopeBackend:
 
 def main():
     """Main entry point - composition root and event loop."""
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    # Setup logging using centralized configuration
+    from logging_config import configure_logging
+    configure_logging(level=logging.WARNING)  # Only show warnings and errors
 
     logger.info("=" * 80)
     logger.info("ISI Macroscope Control System - Refactored Backend")

@@ -25,11 +25,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import AppConfig
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -274,6 +269,9 @@ class ConfigMigrator:
 
 def main():
     """Main entry point for migration utility."""
+    from logging_config import configure_logging
+    configure_logging(level=logging.INFO)
+
     import argparse
 
     parser = argparse.ArgumentParser(

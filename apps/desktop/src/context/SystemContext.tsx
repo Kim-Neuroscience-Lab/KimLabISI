@@ -117,13 +117,13 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
     const handleSyncMessage = (message: ISIMessage) => {
       if (!mounted) return
 
-      console.log('📊 [SYNC] Received message type:', message.type)
+      hookLogger.debug('[SYNC] Received message type:', message.type)
 
       // Store all sync messages for components to access
       setLastSyncMessage(message)
 
       if (message.type === 'system_state') {
-        console.log('📊 [SYNC] System state:', message.state, 'is_ready:', message.is_ready)
+        hookLogger.debug('[SYNC] System state:', { state: message.state, is_ready: message.is_ready })
         handleSystemState(message)
         if (message.state === 'waiting_frontend' && !handshakeInProgress.current) {
           handshakeInProgress.current = true
@@ -133,21 +133,21 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
         // Check if this is a ready state via SYNC channel
         if (message.is_ready && message.state === 'ready') {
           readyStateReceived.current = true
-          console.log('📊 [SYNC] Received ready state, checking if parameters available...')
-          console.log('📊 [SYNC] Parameters received?', parametersReceived.current)
+          hookLogger.debug('[SYNC] Received ready state, checking if parameters available...')
+          hookLogger.debug('[SYNC] Parameters received?', parametersReceived.current)
 
           // Only enable UI if we've received parameters
           if (parametersReceived.current) {
-            console.log('📊 [SYNC] Both ready state and parameters received - enabling UI')
+            hookLogger.debug('[SYNC] Both ready state and parameters received - enabling UI')
             setIsReady(true)
           } else {
-            console.log('📊 [SYNC] Waiting for parameters before enabling UI...')
+            hookLogger.debug('[SYNC] Waiting for parameters before enabling UI...')
           }
         }
       }
 
       if (message.type === 'parameters_snapshot') {
-        console.log('📊 [SYNC] Received parameters_snapshot:', {
+        hookLogger.debug('[SYNC] Received parameters_snapshot:', {
           timestamp: message.timestamp,
           parameterKeys: Object.keys(message.parameters || {}),
           hasParameters: !!message.parameters,
@@ -159,14 +159,14 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
           parameter_config: message.parameter_config || {},
         })
         parametersReceived.current = true
-        console.log('📊 [SYNC] Set parametersReceived.current = true')
+        hookLogger.debug('[SYNC] Set parametersReceived.current = true')
 
         // If ready state was already received, now we can enable UI
         if (readyStateReceived.current) {
-          console.log('📊 [SYNC] Parameters received after ready state - enabling UI now')
+          hookLogger.debug('[SYNC] Parameters received after ready state - enabling UI now')
           setIsReady(true)
         } else {
-          console.log('📊 [SYNC] Parameters received, waiting for ready state...')
+          hookLogger.debug('[SYNC] Parameters received, waiting for ready state...')
         }
       }
 
@@ -184,7 +184,7 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
       setLastControlMessage(message)
 
       if (message.type === 'parameters_snapshot') {
-        console.log('📊 [CONTROL] Received parameters_snapshot:', {
+        hookLogger.debug('[CONTROL] Received parameters_snapshot:', {
           timestamp: message.timestamp,
           parameterKeys: Object.keys(message.parameters || {}),
           parameters: message.parameters

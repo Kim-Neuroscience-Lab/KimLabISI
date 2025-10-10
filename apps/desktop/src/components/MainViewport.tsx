@@ -80,10 +80,10 @@ const MainViewport: React.FC<MainViewportProps> = ({
     if (systemStateStr === 'system-ready' && !showStartupPause) {
       setShowStartupPause(true)
 
-      // Show completed startup stages for 1 second before transitioning
+      // Transition immediately - no artificial delay
       const pauseTimer = setTimeout(() => {
         setShowStartupPause(false)
-      }, 1000)
+      }, 0)
 
       return () => clearTimeout(pauseTimer)
     }

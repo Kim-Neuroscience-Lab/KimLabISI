@@ -21,7 +21,9 @@ class Logger {
 
   constructor(config: Partial<LoggerConfig> = {}) {
     this.config = {
-      level: config.level ?? (import.meta.env.DEV ? LogLevel.DEBUG : LogLevel.INFO),
+      // Default to INFO level to reduce console noise
+      // Change to LogLevel.DEBUG for verbose logging during development
+      level: config.level ?? LogLevel.INFO,
       prefix: config.prefix,
       timestamp: config.timestamp ?? true,
     }

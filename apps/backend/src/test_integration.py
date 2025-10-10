@@ -25,11 +25,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import AppConfig
 from main import create_services, create_handlers, ISIMacroscopeBackend
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -573,6 +568,9 @@ class TestIntegration:
 
 def main():
     """Main entry point for integration tests."""
+    from logging_config import configure_logging
+    configure_logging(level=logging.DEBUG)  # Verbose for tests
+
     test_suite = TestIntegration()
     success = test_suite.run_all_tests()
     sys.exit(0 if success else 1)

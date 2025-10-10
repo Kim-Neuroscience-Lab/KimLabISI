@@ -19,11 +19,6 @@ import logging
 from pathlib import Path
 from typing import List, Set, Dict, Tuple
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -538,6 +533,9 @@ class CodeQualityChecker:
 
 def main():
     """Main entry point for quality tests."""
+    from logging_config import configure_logging
+    configure_logging(level=logging.DEBUG)  # Verbose for tests
+
     src_dir = Path(__file__).parent
     checker = CodeQualityChecker(src_dir)
     success = checker.run_all_tests()

@@ -75,12 +75,38 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
   const [showSignal, setShowSignal] = useState(true)
   const [showOverlay, setShowOverlay] = useState(true)
 
-  const [signalType, setSignalType] = useState<SignalType>('azimuth')
+  const [signalType, setSignalType] = useState<SignalType>('sign')
   const [overlayType, setOverlayType] = useState<OverlayType>('area_borders')
 
   const [anatomicalAlpha, setAnatomicalAlpha] = useState(0.5)
   const [signalAlpha, setSignalAlpha] = useState(0.8)
   const [overlayAlpha, setOverlayAlpha] = useState(1.0)
+
+  // Store latest settings in a ref to avoid stale closures
+  const settingsRef = useRef({
+    showAnatomical,
+    anatomicalAlpha,
+    showSignal,
+    signalType,
+    signalAlpha,
+    showOverlay,
+    overlayType,
+    overlayAlpha
+  })
+
+  // Update ref on every render
+  useEffect(() => {
+    settingsRef.current = {
+      showAnatomical,
+      anatomicalAlpha,
+      showSignal,
+      signalType,
+      signalAlpha,
+      showOverlay,
+      overlayType,
+      overlayAlpha
+    }
+  })
 
   // Load available sessions
   useEffect(() => {
@@ -320,7 +346,10 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     const sessionPath = sessionPathOverride || currentSessionPath
     if (!sessionPath) return
 
-    componentLogger.info('Requesting composite image from backend...')
+    // Use ref to get LATEST values (no stale closures)
+    const settings = settingsRef.current
+
+    componentLogger.info('Requesting composite image from backend...', settings)
 
     try {
       const result = await sendCommand({
@@ -328,18 +357,18 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         session_path: sessionPath,
         layers: {
           anatomical: {
-            visible: showAnatomical,
-            alpha: anatomicalAlpha
+            visible: settings.showAnatomical,
+            alpha: settings.anatomicalAlpha
           },
           signal: {
-            visible: showSignal,
-            type: signalType,
-            alpha: signalAlpha
+            visible: settings.showSignal,
+            type: settings.signalType,
+            alpha: settings.signalAlpha
           },
           overlay: {
-            visible: showOverlay,
-            type: overlayType,
-            alpha: overlayAlpha
+            visible: settings.showOverlay,
+            type: settings.overlayType,
+            alpha: settings.overlayAlpha
           }
         }
       } as any) as GetAnalysisCompositeImageResponse
@@ -364,18 +393,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     } catch (error) {
       componentLogger.error('Error requesting composite image:', error)
     }
-  }, [
-    sendCommand,
-    currentSessionPath,
-    showAnatomical,
-    anatomicalAlpha,
-    showSignal,
-    signalType,
-    signalAlpha,
-    showOverlay,
-    overlayType,
-    overlayAlpha
-  ])
+  }, [sendCommand, currentSessionPath])
 
   // Request new image when settings change
   useEffect(() => {
@@ -478,7 +496,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         </div>
 
         {/* Right Panel: Session Selection + Layer Controls */}
-        <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto max-h-full">
+        <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto max-h-full pb-4">
           {/* Session Selection and Analysis Controls */}
           <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
             <h3 className="text-sm font-medium text-sci-secondary-200 mb-3">Analysis Session</h3>
@@ -540,9 +558,9 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                 {showAnatomical ? <Eye size={16} /> : <EyeOff size={16} />}
               </button>
             </div>
-            <div>
-              <label className="block text-xs text-sci-secondary-400 mb-1">
-                Opacity: {(anatomicalAlpha * 100).toFixed(0)}%
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-sci-secondary-400 whitespace-nowrap flex-shrink-0 w-16">
+                Opacity
               </label>
               <input
                 type="range"
@@ -550,9 +568,12 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                 max="100"
                 value={anatomicalAlpha * 100}
                 onChange={(e) => setAnatomicalAlpha(Number(e.target.value) / 100)}
-                className="w-full"
+                className="flex-1"
                 disabled={!showAnatomical}
               />
+              <span className="text-xs text-sci-secondary-400 flex-shrink-0 w-10 text-right">
+                {(anatomicalAlpha * 100).toFixed(0)}%
+              </span>
             </div>
           </div>
 
@@ -568,12 +589,12 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
               </button>
             </div>
             <div className="space-y-2">
-              <div>
-                <label className="block text-xs text-sci-secondary-400 mb-1">Type</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-sci-secondary-400 whitespace-nowrap flex-shrink-0 w-16">Type</label>
                 <select
                   value={signalType}
                   onChange={(e) => setSignalType(e.target.value as SignalType)}
-                  className="w-full px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
+                  className="flex-1 px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
                   disabled={!showSignal}
                 >
                   {/* Primary Layers */}
@@ -592,9 +613,9 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   )}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs text-sci-secondary-400 mb-1">
-                  Opacity: {(signalAlpha * 100).toFixed(0)}%
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-sci-secondary-400 whitespace-nowrap flex-shrink-0 w-16">
+                  Opacity
                 </label>
                 <input
                   type="range"
@@ -602,9 +623,12 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   max="100"
                   value={signalAlpha * 100}
                   onChange={(e) => setSignalAlpha(Number(e.target.value) / 100)}
-                  className="w-full"
+                  className="flex-1"
                   disabled={!showSignal}
                 />
+                <span className="text-xs text-sci-secondary-400 flex-shrink-0 w-10 text-right">
+                  {(signalAlpha * 100).toFixed(0)}%
+                </span>
               </div>
             </div>
           </div>
@@ -621,12 +645,12 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
               </button>
             </div>
             <div className="space-y-2">
-              <div>
-                <label className="block text-xs text-sci-secondary-400 mb-1">Type</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-sci-secondary-400 whitespace-nowrap flex-shrink-0 w-16">Type</label>
                 <select
                   value={overlayType}
                   onChange={(e) => setOverlayType(e.target.value as OverlayType)}
-                  className="w-full px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
+                  className="flex-1 px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
                   disabled={!showOverlay}
                 >
                   <option value="none">None</option>
@@ -634,9 +658,9 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   <option value="area_patches">Area Patches</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-xs text-sci-secondary-400 mb-1">
-                  Opacity: {(overlayAlpha * 100).toFixed(0)}%
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-sci-secondary-400 whitespace-nowrap flex-shrink-0 w-16">
+                  Opacity
                 </label>
                 <input
                   type="range"
@@ -644,9 +668,12 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   max="100"
                   value={overlayAlpha * 100}
                   onChange={(e) => setOverlayAlpha(Number(e.target.value) / 100)}
-                  className="w-full"
+                  className="flex-1"
                   disabled={!showOverlay}
                 />
+                <span className="text-xs text-sci-secondary-400 flex-shrink-0 w-10 text-right">
+                  {(overlayAlpha * 100).toFixed(0)}%
+                </span>
               </div>
             </div>
           </div>

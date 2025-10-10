@@ -1,0 +1,18 @@
+{
+  "session_name": "sample_session",
+  "timestamp": "2025-10-10T14:15:06.694440",
+  "source": "Converted from sample MATLAB data (R43)",
+  "shape": [
+    235,
+    222
+  ],
+  "directions": [
+    "LR",
+    "RL",
+    "TB",
+    "BT"
+  ],
+  "has_anatomical": true,
+  "data_type": "retinotopy",
+  "notes": "Sample retinotopic mapping data for testing analysis pipeline"
+}

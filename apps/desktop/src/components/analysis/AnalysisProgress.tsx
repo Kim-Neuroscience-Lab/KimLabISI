@@ -39,22 +39,17 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({
 
       <div className="space-y-2">
         {stages.map((stage) => (
-          <div key={stage.id}>
-            {/* Label and Percentage */}
-            <div className="flex items-center justify-between mb-1">
-              <span className={`text-xs ${
-                stage.status === 'completed' ? 'text-sci-secondary-300' :
-                stage.status === 'in_progress' ? 'text-sci-primary-300 font-medium' :
-                'text-sci-secondary-500'
-              }`}>
-                {stage.label}
-              </span>
-              <span className="text-xs text-sci-secondary-400">
-                {(stage.progress * 100).toFixed(0)}%
-              </span>
-            </div>
-            {/* Progress Bar - Always visible */}
-            <div className="w-full bg-sci-secondary-900 rounded-full h-2">
+          <div key={stage.id} className="flex items-center gap-2">
+            {/* Label on left */}
+            <span className={`text-xs whitespace-nowrap flex-shrink-0 w-36 ${
+              stage.status === 'completed' ? 'text-sci-secondary-300' :
+              stage.status === 'in_progress' ? 'text-sci-primary-300 font-medium' :
+              'text-sci-secondary-500'
+            }`}>
+              {stage.label}
+            </span>
+            {/* Progress Bar in middle - Always visible */}
+            <div className="flex-1 bg-sci-secondary-900 rounded-full h-2">
               <div
                 className={`h-2 rounded-full transition-all duration-300 ${
                   stage.status === 'completed' ? 'bg-green-600' :
@@ -64,6 +59,10 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({
                 style={{ width: `${stage.progress * 100}%` }}
               />
             </div>
+            {/* Percentage on right */}
+            <span className="text-xs text-sci-secondary-400 flex-shrink-0 w-10 text-right">
+              {(stage.progress * 100).toFixed(0)}%
+            </span>
           </div>
         ))}
       </div>
