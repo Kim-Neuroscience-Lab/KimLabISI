@@ -96,18 +96,71 @@ class AnalysisManager:
         self.error: Optional[str] = None
         self.results: Optional[AnalysisResults] = None
 
-        # Optional callback for layer-by-layer visualization
-        self.layer_callback: Optional[Callable[[str, np.ndarray], None]] = None
+        # Import renderer for layer visualization
+        from .renderer import AnalysisRenderer
+        self.renderer = AnalysisRenderer(config, shared_memory)
 
         logger.info("AnalysisManager initialized")
 
-    def set_layer_callback(self, callback: Callable[[str, np.ndarray], None]):
-        """Set callback for incremental layer visualization.
+    def _send_layer_ready(self, layer_name: str, layer_data: np.ndarray, session_path: str):
+        """Send intermediate layer visualization to frontend.
+
+        Renders the layer to PNG, encodes as base64, and sends via IPC.
 
         Args:
-            callback: Function(layer_name, layer_data) called when layers are ready
+            layer_name: Name of the layer (e.g., 'azimuth_map', 'sign_map')
+            layer_data: Layer data array
+            session_path: Session path for context
         """
-        self.layer_callback = callback
+        import base64
+
+        try:
+            logger.info(f"Rendering intermediate layer: {layer_name} {layer_data.shape}")
+
+            # Render based on layer type
+            if layer_name == 'azimuth_map':
+                rgb_image = self.renderer.render_retinotopic_map(layer_data, 'azimuth')
+            elif layer_name == 'elevation_map':
+                rgb_image = self.renderer.render_retinotopic_map(layer_data, 'elevation')
+            elif layer_name == 'sign_map':
+                rgb_image = self.renderer.render_sign_map(layer_data)
+            elif layer_name == 'boundary_map':
+                # Render boundary map (RGBA -> RGB on black background)
+                boundary_rgba = self.renderer.render_boundary_map(layer_data)
+                rgb_image = np.zeros((boundary_rgba.shape[0], boundary_rgba.shape[1], 3), dtype=np.uint8)
+                alpha = boundary_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                rgb_image = (boundary_rgba[:, :, :3].astype(np.float32) * alpha).astype(np.uint8)
+            else:
+                # Default: render as amplitude map
+                rgb_image = self.renderer.render_amplitude_map(layer_data)
+
+            # Encode as PNG
+            png_bytes = self.renderer.encode_as_png(rgb_image)
+            if not png_bytes:
+                logger.error(f"Failed to encode {layer_name} as PNG")
+                return
+
+            # Encode as base64 for JSON transmission
+            png_base64 = base64.b64encode(png_bytes).decode('utf-8')
+
+            logger.info(f"Rendered {layer_name} to PNG: {len(png_bytes)} bytes")
+
+            # Send layer_ready message
+            self._send_sync_message({
+                "type": "analysis_layer_ready",
+                "layer_name": layer_name,
+                "image_base64": png_base64,
+                "width": rgb_image.shape[1],
+                "height": rgb_image.shape[0],
+                "format": "png",
+                "session_path": session_path,
+                "timestamp": time.time(),
+            })
+
+            logger.info(f"Sent layer_ready message for {layer_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to send layer_ready for {layer_name}: {e}", exc_info=True)
 
     def start_analysis(self, session_path: str) -> Dict[str, Any]:
         """Start analysis on a recorded session.
@@ -271,8 +324,8 @@ class AnalysisManager:
                 azimuth_map = self.pipeline.generate_azimuth_map(
                     phase_maps['LR'], phase_maps['RL']
                 )
-                if self.layer_callback:
-                    self.layer_callback('azimuth_map', azimuth_map)
+                # Send intermediate result to frontend
+                self._send_layer_ready('azimuth_map', azimuth_map, session_path)
 
             # Generate elevation map (vertical)
             elevation_map = None
@@ -280,8 +333,8 @@ class AnalysisManager:
                 elevation_map = self.pipeline.generate_elevation_map(
                     phase_maps['TB'], phase_maps['BT']
                 )
-                if self.layer_callback:
-                    self.layer_callback('elevation_map', elevation_map)
+                # Send intermediate result to frontend
+                self._send_layer_ready('elevation_map', elevation_map, session_path)
 
             # Stage 4: Visual field sign analysis (85% -> 90%)
             if not self.is_running:
@@ -302,13 +355,13 @@ class AnalysisManager:
                 )
                 sign_map = self.pipeline.calculate_visual_field_sign(gradients)
 
-                if self.layer_callback:
-                    self.layer_callback('sign_map', sign_map)
+                # Send intermediate result to frontend
+                self._send_layer_ready('sign_map', sign_map, session_path)
 
                 boundary_map = self.pipeline.detect_area_boundaries(sign_map)
 
-                if self.layer_callback:
-                    self.layer_callback('boundary_map', boundary_map)
+                # Send intermediate result to frontend
+                self._send_layer_ready('boundary_map', boundary_map, session_path)
 
                 area_map = self.pipeline.segment_visual_areas(sign_map, boundary_map)
 
@@ -393,7 +446,24 @@ class AnalysisManager:
         # Load anatomical image if exists
         anatomical_path = session_path_obj / "anatomical.npy"
         if anatomical_path.exists():
-            session_data.anatomical = np.load(anatomical_path)
+            anatomical = np.load(anatomical_path)
+
+            # Crop anatomical to square centered on smallest dimension
+            if len(anatomical.shape) >= 2:
+                height, width = anatomical.shape[:2]
+                min_dim = min(height, width)
+
+                # Calculate centered crop coordinates
+                y_start = (height - min_dim) // 2
+                x_start = (width - min_dim) // 2
+                y_end = y_start + min_dim
+                x_end = x_start + min_dim
+
+                # Crop anatomical image
+                anatomical = anatomical[y_start:y_end, x_start:x_end]
+                logger.info(f"  Cropped anatomical to square: {anatomical.shape[0]}x{anatomical.shape[1]} (from {height}x{width})")
+
+            session_data.anatomical = anatomical
             logger.info(f"  Loaded anatomical image: {session_data.anatomical.shape}")
 
         # Load data for each direction
@@ -415,6 +485,21 @@ class AnalysisManager:
                         # BGR to grayscale: 0.114*B + 0.587*G + 0.299*R
                         frames = np.dot(frames[..., :3], [0.114, 0.587, 0.299])
                         frames = frames.astype(np.uint8)
+
+                    # Crop to square centered on smallest dimension
+                    if len(frames.shape) >= 3:
+                        num_frames, height, width = frames.shape[:3]
+                        min_dim = min(height, width)
+
+                        # Calculate centered crop coordinates
+                        y_start = (height - min_dim) // 2
+                        x_start = (width - min_dim) // 2
+                        y_end = y_start + min_dim
+                        x_end = x_start + min_dim
+
+                        # Crop all frames
+                        frames = frames[:, y_start:y_end, x_start:x_end]
+                        logger.info(f"    Cropped to square: {frames.shape[1]}x{frames.shape[2]} (from {height}x{width})")
 
                     direction_data.frames = frames
                     direction_data.timestamps = timestamps

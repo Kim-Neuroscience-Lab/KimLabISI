@@ -394,10 +394,16 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   // Listen for camera frames from camera-specific shared memory channel
   useEffect(() => {
+    console.log('📷 [AcquisitionViewport] Camera frame listener effect:', {
+      isPreviewing,
+      isAcquiring,
+      shouldListen: isPreviewing || isAcquiring
+    })
     if (!isPreviewing && !isAcquiring) return
 
     const handleCameraFrame = async (metadata: any) => {
       try {
+        console.log('📷 [AcquisitionViewport] Received camera frame metadata:', metadata)
         // Read actual frame data from shared memory using offset, size, and path
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
@@ -407,7 +413,10 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
         // Create ImageData from RGBA buffer
         const canvas = cameraCanvasRef.current
-        if (!canvas) return
+        if (!canvas) {
+          console.warn('📷 [AcquisitionViewport] Canvas ref not available')
+          return
+        }
 
         const width = metadata.width_px
         const height = metadata.height_px
@@ -416,6 +425,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width
           canvas.height = height
+          console.log('📷 [AcquisitionViewport] Canvas resized to:', width, 'x', height)
         }
 
         const ctx = canvas.getContext('2d')
@@ -443,16 +453,21 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           camera_name: metadata.camera_name
         })
       } catch (error) {
-        console.error('Failed to read camera frame from shared memory:', error)
+        console.error('📷 [AcquisitionViewport] Failed to read camera frame from shared memory:', error)
       }
     }
 
+    console.log('📷 [AcquisitionViewport] Setting up camera frame listener...')
     let unsubscribe: (() => void) | undefined
     if (window.electronAPI?.onCameraFrame) {
       unsubscribe = window.electronAPI.onCameraFrame(handleCameraFrame)
+      console.log('📷 [AcquisitionViewport] Camera frame listener registered')
+    } else {
+      console.warn('📷 [AcquisitionViewport] window.electronAPI.onCameraFrame not available!')
     }
 
     return () => {
+      console.log('📷 [AcquisitionViewport] Cleaning up camera frame listener')
       unsubscribe?.()
     }
   }, [isPreviewing, isAcquiring])
@@ -833,7 +848,16 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   // Auto-start preview when camera is selected (not in playback mode)
   useEffect(() => {
+    console.log('📷 [AcquisitionViewport] Auto-start check:', {
+      acquisitionMode,
+      selectedCamera: cameraParams?.selected_camera,
+      isConnected: systemState?.isConnected,
+      isPreviewing,
+      isAcquiring,
+      shouldStart: acquisitionMode !== 'playback' && cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring
+    })
     if (acquisitionMode !== 'playback' && cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring) {
+      console.log('📷 [AcquisitionViewport] Auto-starting preview for camera:', cameraParams.selected_camera)
       startPreview()
     }
   }, [cameraParams?.selected_camera, systemState?.isConnected, isPreviewing, isAcquiring, acquisitionMode])

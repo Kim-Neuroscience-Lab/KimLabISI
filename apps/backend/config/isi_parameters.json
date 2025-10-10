@@ -272,23 +272,23 @@
     },
     "monitor": {
       "available_displays": [
-        "display_1"
+        "macos_display_0_0"
       ],
       "monitor_distance_cm": 10,
-      "monitor_fps": 120,
+      "monitor_fps": 60,
       "monitor_height_cm": 26.4,
       "monitor_height_px": 1117,
       "monitor_lateral_angle_deg": 30,
       "monitor_tilt_angle_deg": 20,
       "monitor_width_cm": 48.1,
       "monitor_width_px": 1728,
-      "selected_display": "display_1"
+      "selected_display": "macos_display_0_0"
     },
     "session": {
       "animal_age": "P20",
       "animal_id": "M137",
       "created_at": "2025-09-28T15:22:27.071857",
-      "last_modified": "2025-10-09T11:39:43.117219",
+      "last_modified": "2025-10-10T12:44:49.957877",
       "session_name": "names n stuff"
     },
     "stimulus": {

@@ -41,6 +41,8 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
 
   const handshakeInProgress = useRef(false)
   const lastHealthRequestAt = useRef<number>(0)
+  const parametersReceived = useRef(false)
+  const readyStateReceived = useRef(false)
 
   const sendCommand = useCallback(async (command: ISIMessage) => {
     if (!window.electronAPI) {
@@ -103,33 +105,69 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
     const handleSystemState = (message: ISIMessage) => {
       setSystemState(message.state)
       setDisplayText(message.display_text || message.state)
-      setIsReady(Boolean(message.is_ready))
       setIsError(Boolean(message.is_error))
       if (message.error) {
         setErrorMessage(message.error)
       }
+
+      // DON'T set isReady yet - wait for parameters_snapshot
+      // (handled in parameter snapshot handler below)
     }
 
     const handleSyncMessage = (message: ISIMessage) => {
       if (!mounted) return
 
+      console.log('📊 [SYNC] Received message type:', message.type)
+
       // Store all sync messages for components to access
       setLastSyncMessage(message)
 
       if (message.type === 'system_state') {
+        console.log('📊 [SYNC] System state:', message.state, 'is_ready:', message.is_ready)
         handleSystemState(message)
         if (message.state === 'waiting_frontend' && !handshakeInProgress.current) {
           handshakeInProgress.current = true
           performHandshake()
         }
+
+        // Check if this is a ready state via SYNC channel
+        if (message.is_ready && message.state === 'ready') {
+          readyStateReceived.current = true
+          console.log('📊 [SYNC] Received ready state, checking if parameters available...')
+          console.log('📊 [SYNC] Parameters received?', parametersReceived.current)
+
+          // Only enable UI if we've received parameters
+          if (parametersReceived.current) {
+            console.log('📊 [SYNC] Both ready state and parameters received - enabling UI')
+            setIsReady(true)
+          } else {
+            console.log('📊 [SYNC] Waiting for parameters before enabling UI...')
+          }
+        }
       }
 
       if (message.type === 'parameters_snapshot') {
+        console.log('📊 [SYNC] Received parameters_snapshot:', {
+          timestamp: message.timestamp,
+          parameterKeys: Object.keys(message.parameters || {}),
+          hasParameters: !!message.parameters,
+          parameterCount: Object.keys(message.parameters || {}).length
+        })
         setParametersSnapshot({
           timestamp: message.timestamp,
           parameters: message.parameters || {},
           parameter_config: message.parameter_config || {},
         })
+        parametersReceived.current = true
+        console.log('📊 [SYNC] Set parametersReceived.current = true')
+
+        // If ready state was already received, now we can enable UI
+        if (readyStateReceived.current) {
+          console.log('📊 [SYNC] Parameters received after ready state - enabling UI now')
+          setIsReady(true)
+        } else {
+          console.log('📊 [SYNC] Parameters received, waiting for ready state...')
+        }
       }
 
       if (message.type === 'system_health' || message.type === 'system_health_detailed') {
@@ -146,6 +184,11 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
       setLastControlMessage(message)
 
       if (message.type === 'parameters_snapshot') {
+        console.log('📊 [CONTROL] Received parameters_snapshot:', {
+          timestamp: message.timestamp,
+          parameterKeys: Object.keys(message.parameters || {}),
+          parameters: message.parameters
+        })
         setParametersSnapshot({
           timestamp: message.timestamp,
           parameters: message.parameters || {},
@@ -170,9 +213,8 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
         })
       }
 
-      if (message.type === 'system_state') {
-        handleSystemState(message)
-      }
+      // NOTE: system_state messages are ONLY sent via SYNC channel
+      // Removed duplicate handling here to avoid race conditions
 
       if (message.type === 'startup_status' && message.health) {
         setHealthSnapshot({

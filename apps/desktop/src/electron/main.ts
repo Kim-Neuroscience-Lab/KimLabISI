@@ -278,7 +278,14 @@ class MultiChannelIPCManager {
         this.killExistingPythonProcesses()
 
         const { command: poetryCommand, args: poetryCommandArgs } = resolvePoetryExecutable()
-        const poetryArgs = [...poetryCommandArgs, 'run', 'python', '-u', '-m', 'isi_control.main']
+
+        // BACKEND REFACTOR: Dual-boot support for old vs new backend
+        // DEFAULT: New refactored backend (src.main) - Phase 1-8 complete
+        // USE_OLD_BACKEND=1 -> Switch back to legacy backend (isi_control.main) if needed
+        const backendModule = process.env.USE_OLD_BACKEND === '1' ? 'isi_control.main' : 'src.main'
+        mainLogger.info(`🚀 Backend module: ${backendModule} ${process.env.USE_OLD_BACKEND === '1' ? '(LEGACY - FALLBACK)' : '(REFACTORED)'}`)
+
+        const poetryArgs = [...poetryCommandArgs, 'run', 'python', '-u', '-m', backendModule]
         const spawnOptions: SpawnOptions = {
           stdio: ['pipe', 'pipe', 'pipe'],
           cwd: rootDir,
@@ -493,11 +500,12 @@ class MultiChannelIPCManager {
 
     // Backend explicitly tells frontend to connect to ZeroMQ
     if (message.type === 'zeromq_ready') {
-      mainLogger.info('Backend ZeroMQ ready - connecting to channels...')
+      mainLogger.info('Backend ZeroMQ ready - initializing subscriptions...')
       mainLogger.info(`Health port: ${message.health_port}, Sync port: ${message.sync_port}`)
-      await this.performFrontendHandshake()
+      await this.initializeZeroMQConnections()
+      mainLogger.info('ZeroMQ subscriptions established - waiting for backend waiting_frontend state...')
     }
-    // Note: Don't also respond to waiting_frontend state to avoid duplicate handshake
+    // Note: Frontend handshake will be triggered by waiting_frontend state (handled in SystemContext.tsx)
 
     if (
       message.type === 'startup_coordination' &&
@@ -776,24 +784,19 @@ async function createWindow() {
     mainWindow.webContents.openDevTools()
   }
 
-  // Handle renderer reload/refresh events
-  mainWindow.webContents.on('did-start-loading', () => {
-    // Only cleanup on refresh, not initial load
-    if (!isInitialLoad) {
-      backendManager.cleanup()
-    }
-  })
-
   // Test actively push message to the Electron-Renderer
   mainWindow.webContents.on('did-finish-load', async () => {
     mainWindow?.webContents.send('main-process-message', `Renderer loaded at ${new Date().toLocaleString()}`)
 
     // Only restart backend on refresh, not initial load
+    // Note: start() internally calls cleanup() first, so no need to cleanup separately
     if (!isInitialLoad) {
+      mainLogger.info('Reloading detected - restarting backend...')
       try {
         await backendManager.start()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
+        mainLogger.error('Backend restart failed:', message)
         mainWindow?.webContents.send('backend-error', message)
       }
     }

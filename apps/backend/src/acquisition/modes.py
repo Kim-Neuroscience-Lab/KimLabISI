@@ -259,8 +259,8 @@ class PlaybackModeController(AcquisitionModeController):
             self.state_coordinator.transition_to_playback()
 
         if not session_path:
-            # List available sessions
-            return self._list_available_sessions()
+            # List available sessions (use default base_dir)
+            return self._list_available_sessions(base_dir=None)
 
         # Validate session path
         if not os.path.exists(session_path):
@@ -319,13 +319,29 @@ class PlaybackModeController(AcquisitionModeController):
         logger.info("Playback mode deactivated")
         return {"success": True}
 
-    def _list_available_sessions(self) -> Dict[str, Any]:
+    def list_sessions(self, base_dir: Optional[str] = None) -> Dict[str, Any]:
+        """List all available recorded sessions.
+
+        Args:
+            base_dir: Optional base directory to search for sessions.
+                     If None, uses default data/sessions directory.
+
+        Returns:
+            Dictionary with success status and list of sessions
+        """
+        return self._list_available_sessions(base_dir)
+
+    def _list_available_sessions(self, base_dir: Optional[str] = None) -> Dict[str, Any]:
         """List all available recorded sessions."""
         import os
 
-        # Use absolute path to ensure we find sessions regardless of working directory
-        base_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sessions")
-        base_path = os.path.abspath(base_path)
+        # Use provided base_dir or default to data/sessions
+        if base_dir:
+            base_path = base_dir
+        else:
+            # Use absolute path to ensure we find sessions regardless of working directory
+            base_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sessions")
+            base_path = os.path.abspath(base_path)
 
         logger.info(f"Looking for sessions in: {base_path}")
 

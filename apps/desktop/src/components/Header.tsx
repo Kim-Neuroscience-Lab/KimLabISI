@@ -31,6 +31,7 @@ const Header: React.FC<HeaderProps> = ({
     display: hardwareStatus.display ?? 'offline',
     camera: hardwareStatus.camera ?? 'offline',
     realtime_streaming: hardwareStatus.realtime_streaming ?? 'offline',
+    analysis: hardwareStatus.analysis ?? 'offline',
   }
 
   const calculateOverallStatus = () => {
@@ -148,6 +149,12 @@ const Header: React.FC<HeaderProps> = ({
           title={`Stimulus: ${mergedHardwareStatus.realtime_streaming}`}
         >
           <Columns3 className={`w-4 h-4 ${resolveIconColor(mergedHardwareStatus.realtime_streaming)}`} />
+        </div>
+        <div
+          className="h-12 px-3 flex items-center justify-center"
+          title={`Analysis: ${mergedHardwareStatus.analysis}`}
+        >
+          <BrainCircuit className={`w-4 h-4 ${resolveIconColor(mergedHardwareStatus.analysis)}`} />
         </div>
 
         {isExperimentRunning && (

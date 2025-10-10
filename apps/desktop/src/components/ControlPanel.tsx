@@ -311,6 +311,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     updateParameters
   } = parameterState
 
+  // Debug logging
+  React.useEffect(() => {
+    console.log('🎛️ [ControlPanel] Parameter state updated:', {
+      sessionParams,
+      monitorParams,
+      stimulusParams,
+      cameraParams,
+      acquisitionParams,
+      analysisParams,
+      availableCameras,
+      availableDisplays
+    })
+  }, [sessionParams, monitorParams, stimulusParams, cameraParams, acquisitionParams, analysisParams, availableCameras, availableDisplays])
+
   const handleParameterChange = React.useCallback(async (section: string, params: Record<string, any>) => {
     try {
       await updateParameters(section as any, params)

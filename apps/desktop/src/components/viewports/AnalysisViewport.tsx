@@ -3,6 +3,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { componentLogger } from '../../utils/logger'
 import type { ISIMessage, ControlMessage, SyncMessage, ListSessionsResponse, GetAnalysisResultsResponse, GetAnalysisCompositeImageResponse } from '../../types/ipc-messages'
 import type { SystemState } from '../../types/shared'
+import AnalysisProgress, { type AnalysisStage } from '../analysis/AnalysisProgress'
 
 interface AnalysisViewportProps {
   className?: string
@@ -55,6 +56,17 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
   const [availableSessions, setAvailableSessions] = useState<any[]>([])
   const [currentSessionPath, setCurrentSessionPath] = useState<string | null>(null)
 
+  // Analysis progress stages with intermediate results
+  const [analysisStages, setAnalysisStages] = useState<AnalysisStage[]>([
+    { id: 'loading_data', label: 'Loading session data', progress: 0, status: 'pending' },
+    { id: 'processing', label: 'Processing directions', progress: 0, status: 'pending' },
+    { id: 'azimuth_map', label: 'Horizontal retinotopy', progress: 0, status: 'pending' },
+    { id: 'elevation_map', label: 'Vertical retinotopy', progress: 0, status: 'pending' },
+    { id: 'sign_map', label: 'Visual field sign', progress: 0, status: 'pending' },
+    { id: 'boundary_map', label: 'Area boundaries', progress: 0, status: 'pending' },
+    { id: 'saving', label: 'Saving results', progress: 0, status: 'pending' },
+  ])
+
   // Image display
   const [compositeImageUrl, setCompositeImageUrl] = useState<string | null>(null)
 
@@ -104,6 +116,9 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         setAnalysisStage('started')
         componentLogger.info('Analysis started')
 
+        // Reset all stages to pending
+        setAnalysisStages(stages => stages.map(s => ({ ...s, progress: 0, status: 'pending', thumbnail: undefined })))
+
         // Clear existing metadata and image for new analysis
         setAnalysisMetadata(null)
         if (compositeImageUrl) {
@@ -118,6 +133,40 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         setAnalysisProgress(progress)
         setAnalysisStage(stage)
         componentLogger.info(`Analysis progress: ${(progress * 100).toFixed(0)}%`)
+
+        // Update stages based on progress
+        setAnalysisStages(stages => {
+          const updated = [...stages]
+
+          // Map backend stage to frontend stage ID
+          let stageId = 'processing'
+          if (stage.includes('Loading') || stage.includes('loading')) {
+            stageId = 'loading_data'
+          } else if (stage.includes('Processing') || stage.includes('processing')) {
+            stageId = 'processing'
+          } else if (stage.includes('retinotopic')) {
+            stageId = 'azimuth_map'  // Will be updated when layers arrive
+          } else if (stage.includes('sign')) {
+            stageId = 'sign_map'
+          } else if (stage.includes('Saving') || stage.includes('saving')) {
+            stageId = 'saving'
+          }
+
+          // Mark previous stages as completed
+          let foundCurrent = false
+          for (const s of updated) {
+            if (s.id === stageId) {
+              s.status = 'in_progress'
+              s.progress = progress
+              foundCurrent = true
+            } else if (!foundCurrent && s.status !== 'completed') {
+              s.status = 'completed'
+              s.progress = 1.0
+            }
+          }
+
+          return updated
+        })
       }
 
       if (lastMessage.type === 'analysis_layer_ready') {
@@ -134,6 +183,22 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
           // Convert base64 PNG to blob URL
           const blob = base64ToBlob(imageBase64, 'image/png')
           const url = URL.createObjectURL(blob)
+
+          // Create data URL for thumbnail
+          const thumbnailDataUrl = `data:image/png;base64,${imageBase64}`
+
+          // Update the corresponding stage with thumbnail and mark as completed
+          setAnalysisStages(stages => {
+            const updated = [...stages]
+            const stage = updated.find(s => s.id === layerName)
+            if (stage) {
+              stage.thumbnail = thumbnailDataUrl
+              stage.status = 'completed'
+              stage.progress = 1.0
+              componentLogger.info(`Added thumbnail for stage: ${layerName}`)
+            }
+            return updated
+          })
 
           // Revoke old URL to prevent memory leak
           if (compositeImageUrl) {
@@ -179,6 +244,13 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         setAnalysisProgress(1.0)
         setAnalysisStage('complete')
         componentLogger.info('Analysis complete:', lastMessage)
+
+        // Mark all stages as completed
+        setAnalysisStages(stages => stages.map(s => ({
+          ...s,
+          status: s.status === 'in_progress' || s.status === 'pending' ? 'completed' : s.status,
+          progress: 1.0
+        })))
 
         // Load results metadata
         if ((lastMessage as any).output_path && !cancelled) {
@@ -278,11 +350,13 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         const url = URL.createObjectURL(blob)
 
         // Revoke old URL to prevent memory leak
-        if (compositeImageUrl) {
-          URL.revokeObjectURL(compositeImageUrl)
-        }
+        setCompositeImageUrl(prevUrl => {
+          if (prevUrl) {
+            URL.revokeObjectURL(prevUrl)
+          }
+          return url
+        })
 
-        setCompositeImageUrl(url)
         componentLogger.info(`Composite image loaded: ${result.width}x${result.height}`)
       } else {
         componentLogger.error('Failed to get composite image:', result.error)
@@ -300,13 +374,13 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     signalAlpha,
     showOverlay,
     overlayType,
-    overlayAlpha,
-    compositeImageUrl
+    overlayAlpha
   ])
 
   // Request new image when settings change
   useEffect(() => {
     if (analysisMetadata && !isAnalysisRunning) {
+      componentLogger.info('Settings changed, requesting composite image...')
       requestCompositeImage()
     }
   }, [
@@ -319,7 +393,8 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     overlayType,
     overlayAlpha,
     analysisMetadata,
-    isAnalysisRunning
+    isAnalysisRunning,
+    requestCompositeImage
   ])
 
   // Cleanup blob URLs on unmount
@@ -360,88 +435,102 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     }
   }
 
+  // Handle thumbnail click - display in main viewer
+  const handleThumbnailClick = (stageId: string, thumbnail: string) => {
+    // Convert data URL back to blob URL for display
+    fetch(thumbnail)
+      .then(res => res.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob)
+
+        // Revoke old URL
+        if (compositeImageUrl) {
+          URL.revokeObjectURL(compositeImageUrl)
+        }
+
+        setCompositeImageUrl(url)
+        componentLogger.info(`Displaying thumbnail from stage: ${stageId}`)
+      })
+      .catch(error => {
+        componentLogger.error('Error displaying thumbnail:', error)
+      })
+  }
+
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Top Controls Bar */}
-      <div className="flex gap-4 mb-4 p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
-        {/* Session Selection */}
-        <div className="flex-1">
-          <label className="block text-xs text-sci-secondary-400 mb-1">Session</label>
-          <select
-            value={selectedSession || ''}
-            onChange={(e) => setSelectedSession(e.target.value)}
-            className="w-full px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
-            disabled={isAnalysisRunning}
-          >
-            <option value="">Select session...</option>
-            {availableSessions.map((session) => (
-              <option key={session.session_path} value={session.session_path}>
-                {session.session_name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Start/Stop Analysis */}
-        <div className="flex items-end">
-          {!isAnalysisRunning ? (
-            <button
-              onClick={startAnalysis}
-              disabled={!selectedSession}
-              className="px-4 py-1 bg-sci-primary-600 text-white text-sm rounded hover:bg-sci-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Analyze
-            </button>
-          ) : (
-            <button
-              onClick={stopAnalysis}
-              className="px-4 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-            >
-              Stop
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Progress Bar */}
-      {isAnalysisRunning && (
-        <div className="mb-4 p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
-          <div className="flex justify-between text-xs text-sci-secondary-400 mb-2">
-            <span>{analysisStage}</span>
-            <span>{(analysisProgress * 100).toFixed(0)}%</span>
-          </div>
-          <div className="w-full bg-sci-secondary-900 rounded-full h-2">
-            <div
-              className="bg-sci-primary-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${analysisProgress * 100}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex gap-4">
-        {/* Visualization Area - Now uses <img> instead of <canvas> */}
-        <div className="flex-1 relative bg-black rounded-lg border border-sci-secondary-600 overflow-hidden flex items-center justify-center">
+      {/* Main Content Area: Square visualization on left, controls on right */}
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* Visualization Area - Square and left-justified, fixed height */}
+        <div className="flex-shrink-0 bg-black rounded-lg border border-sci-secondary-600 overflow-hidden flex items-center justify-center" style={{ aspectRatio: '1', height: '100%' }}>
           {compositeImageUrl ? (
             <img
               ref={imageRef}
               src={compositeImageUrl}
               alt="Analysis Composite"
-              className="max-w-full max-h-full object-contain"
+              className="w-full h-full object-contain"
               style={{ imageRendering: 'pixelated' }}
             />
           ) : (
-            <div className="text-sci-secondary-500 text-sm">
+            <div className="text-sci-secondary-500 text-sm text-center px-4">
               {isAnalysisRunning ? 'Analysis in progress...' : 'No analysis results to display'}
             </div>
           )}
         </div>
 
-        {/* Layer Controls Panel */}
-        <div className="w-64 space-y-4">
+        {/* Right Panel: Session Selection + Layer Controls */}
+        <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto max-h-full">
+          {/* Session Selection and Analysis Controls */}
+          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
+            <h3 className="text-sm font-medium text-sci-secondary-200 mb-3">Analysis Session</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-sci-secondary-400 mb-1">Session</label>
+                <select
+                  value={selectedSession || ''}
+                  onChange={(e) => setSelectedSession(e.target.value)}
+                  className="w-full px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
+                  disabled={isAnalysisRunning}
+                >
+                  <option value="">Select session...</option>
+                  {availableSessions.map((session) => (
+                    <option key={session.session_path} value={session.session_path}>
+                      {session.session_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                {!isAnalysisRunning ? (
+                  <button
+                    onClick={startAnalysis}
+                    disabled={!selectedSession}
+                    className="w-full px-4 py-2 bg-sci-primary-600 text-white text-sm rounded hover:bg-sci-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Analyze
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopAnalysis}
+                    className="w-full px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+                  >
+                    Stop Analysis
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Analysis Progress - Persistent section with stage tracking */}
+          <div className="flex-shrink-0">
+            <AnalysisProgress
+              stages={analysisStages}
+              isRunning={isAnalysisRunning}
+              onThumbnailClick={handleThumbnailClick}
+            />
+          </div>
+
           {/* Anatomical Layer */}
-          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
+          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-sci-secondary-200">Anatomical</span>
               <button
@@ -468,7 +557,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
           </div>
 
           {/* Signal Layer */}
-          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
+          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-sci-secondary-200">Signal</span>
               <button
@@ -521,7 +610,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
           </div>
 
           {/* Overlay Layer */}
-          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
+          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-sci-secondary-200">Overlay</span>
               <button
@@ -564,13 +653,15 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
 
           {/* Results Info */}
           {analysisMetadata && (
-            <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600">
+            <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
               <h3 className="text-sm font-medium text-sci-secondary-200 mb-2">Results</h3>
               <div className="space-y-1 text-xs text-sci-secondary-400">
-                <div>Visual Areas: {analysisMetadata.num_areas}</div>
-                <div>Resolution: {analysisMetadata.shape[1]} x {analysisMetadata.shape[0]}</div>
-                <div>Primary Layers: {analysisMetadata.primary_layers.length}</div>
-                <div>Advanced Layers: {analysisMetadata.advanced_layers.length}</div>
+                <div>Visual Areas: {analysisMetadata.num_areas || 0}</div>
+                {analysisMetadata.shape && analysisMetadata.shape.length === 2 && (
+                  <div>Resolution: {analysisMetadata.shape[1]} x {analysisMetadata.shape[0]}</div>
+                )}
+                <div>Primary Layers: {analysisMetadata.primary_layers?.length || 0}</div>
+                <div>Advanced Layers: {analysisMetadata.advanced_layers?.length || 0}</div>
               </div>
             </div>
           )}
