@@ -30,16 +30,22 @@ class SessionData:
         self.metadata: Dict[str, Any] = {}
         self.anatomical: Optional[np.ndarray] = None
         self.directions: Dict[str, DirectionData] = {}
+        self.has_camera_data: bool = False  # True if raw camera frames, False if pre-computed phase maps
 
 
 class DirectionData:
     """Container for single direction acquisition data."""
 
     def __init__(self):
+        # Raw acquisition data
         self.frames: Optional[np.ndarray] = None
         self.timestamps: Optional[np.ndarray] = None
         self.stimulus_angles: Optional[np.ndarray] = None
         self.events: Optional[List[Dict[str, Any]]] = None
+
+        # Pre-computed phase/magnitude data (alternative to raw frames)
+        self.phase_map: Optional[np.ndarray] = None
+        self.magnitude_map: Optional[np.ndarray] = None
 
 
 class AnalysisResults:
@@ -185,16 +191,30 @@ class AnalysisManager:
         if not metadata_file.exists():
             return self._format_error(f"Session missing metadata.json")
 
-        # Check for data files
-        has_data = False
+        # Check for data files - accept EITHER camera frames OR phase/magnitude maps
+        has_camera_data = False
+        has_phase_maps = False
+
+        # Check for raw camera frames
         for direction in self.acquisition_config.directions:
             camera_file = session_path_obj / f"{direction}_camera.h5"
             if camera_file.exists():
-                has_data = True
+                has_camera_data = True
                 break
 
-        if not has_data:
-            return self._format_error("Session contains no camera data files")
+        # Check for pre-computed phase/magnitude maps (e.g., from MATLAB)
+        for direction in self.acquisition_config.directions:
+            phase_file = session_path_obj / f"phase_{direction}.npy"
+            magnitude_file = session_path_obj / f"magnitude_{direction}.npy"
+            if phase_file.exists() and magnitude_file.exists():
+                has_phase_maps = True
+                break
+
+        if not has_camera_data and not has_phase_maps:
+            return self._format_error(
+                "Session contains neither camera data files (.h5) nor phase/magnitude maps (.npy). "
+                "Analysis requires either raw camera frames or pre-computed phase maps."
+            )
 
         # Initialize state
         self.current_session_path = session_path
@@ -293,22 +313,36 @@ class AnalysisManager:
                 self.current_stage = f"processing_{direction}"
                 self._send_progress(progress, f"Processing {direction} direction")
 
-                # Process this direction
-                frames = session_data.directions[direction].frames
-                angles = session_data.directions[direction].stimulus_angles
+                # Check if we have pre-computed phase/magnitude maps or need to compute from frames
+                if session_data.has_camera_data:
+                    # Full pipeline: compute FFT from raw camera frames
+                    frames = session_data.directions[direction].frames
+                    angles = session_data.directions[direction].stimulus_angles
 
-                if frames is None or angles is None:
-                    logger.warning(f"Skipping {direction}: missing data")
-                    continue
+                    if frames is None or angles is None:
+                        logger.warning(f"Skipping {direction}: missing data")
+                        continue
 
-                # Compute FFT phase maps
-                stimulus_freq = self.acquisition_config.cycles / len(frames)
-                phase_map, magnitude_map = self.pipeline.compute_fft_phase_maps(
-                    frames, stimulus_freq
-                )
+                    # Compute FFT phase maps
+                    stimulus_freq = self.acquisition_config.cycles / len(frames)
+                    phase_map, magnitude_map = self.pipeline.compute_fft_phase_maps(
+                        frames, stimulus_freq
+                    )
 
-                phase_maps[direction] = phase_map
-                magnitude_maps[direction] = magnitude_map
+                    phase_maps[direction] = phase_map
+                    magnitude_maps[direction] = magnitude_map
+                else:
+                    # Partial pipeline: use pre-loaded phase/magnitude maps
+                    phase_map = session_data.directions[direction].phase_map
+                    magnitude_map = session_data.directions[direction].magnitude_map
+
+                    if phase_map is None or magnitude_map is None:
+                        logger.warning(f"Skipping {direction}: missing phase/magnitude data")
+                        continue
+
+                    logger.info(f"Using pre-computed phase/magnitude maps for {direction}")
+                    phase_maps[direction] = phase_map
+                    magnitude_maps[direction] = magnitude_map
 
             # Stage 3: Generate retinotopic maps (70% -> 85%)
             if not self.is_running:
@@ -427,6 +461,10 @@ class AnalysisManager:
     def _load_acquisition_data(self, session_path: str) -> SessionData:
         """Load all data from acquisition session.
 
+        Supports two modes:
+        1. Full pipeline: Load raw camera frames (.h5) for complete analysis
+        2. Partial pipeline: Load pre-computed phase/magnitude maps (.npy) from intermediate processing
+
         Args:
             session_path: Path to session directory
 
@@ -442,6 +480,25 @@ class AnalysisManager:
         metadata_path = session_path_obj / "metadata.json"
         with open(metadata_path, 'r') as f:
             session_data.metadata = json.load(f)
+
+        # Detect which type of data we have
+        has_camera_files = any(
+            (session_path_obj / f"{dir}_camera.h5").exists()
+            for dir in self.acquisition_config.directions
+        )
+        has_phase_files = any(
+            (session_path_obj / f"phase_{dir}.npy").exists()
+            for dir in self.acquisition_config.directions
+        )
+
+        if has_camera_files:
+            logger.info("Loading raw camera data for full pipeline analysis")
+            session_data.has_camera_data = True
+        elif has_phase_files:
+            logger.info("Loading pre-computed phase/magnitude maps for partial pipeline analysis")
+            session_data.has_camera_data = False
+        else:
+            raise ValueError("No valid data files found (neither camera frames nor phase maps)")
 
         # Load anatomical image if exists
         anatomical_path = session_path_obj / "anatomical.npy"
@@ -504,6 +561,18 @@ class AnalysisManager:
                     direction_data.frames = frames
                     direction_data.timestamps = timestamps
                     logger.info(f"    Camera: {frames.shape} dtype={frames.dtype}")
+            else:
+                # If no camera data, load pre-computed phase/magnitude maps
+                phase_file = session_path_obj / f"phase_{direction}.npy"
+                magnitude_file = session_path_obj / f"magnitude_{direction}.npy"
+
+                if phase_file.exists() and magnitude_file.exists():
+                    phase_map = np.load(str(phase_file))
+                    magnitude_map = np.load(str(magnitude_file))
+
+                    direction_data.phase_map = phase_map
+                    direction_data.magnitude_map = magnitude_map
+                    logger.info(f"    Phase/Magnitude: {phase_map.shape} dtype={phase_map.dtype}")
 
             # Load stimulus events
             events_path = session_path_obj / f"{direction}_events.json"

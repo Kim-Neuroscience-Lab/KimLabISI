@@ -56,6 +56,10 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
   const [availableSessions, setAvailableSessions] = useState<any[]>([])
   const [currentSessionPath, setCurrentSessionPath] = useState<string | null>(null)
 
+  // Command submission state (prevents double-clicks, shows loading)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submissionError, setSubmissionError] = useState<string | null>(null)
+
   // Analysis progress stages with intermediate results
   const [analysisStages, setAnalysisStages] = useState<AnalysisStage[]>([
     { id: 'loading_data', label: 'Loading session data', progress: 0, status: 'pending' },
@@ -141,6 +145,10 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         setAnalysisProgress(0)
         setAnalysisStage('started')
         componentLogger.info('Analysis started')
+
+        // Clear any submission errors (analysis successfully started)
+        setSubmissionError(null)
+        setIsSubmitting(false)
 
         // Reset all stages to pending
         setAnalysisStages(stages => stages.map(s => ({ ...s, progress: 0, status: 'pending', thumbnail: undefined })))
@@ -424,9 +432,29 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     }
   }, [compositeImageUrl])
 
-  // Start analysis on selected session
+  // Start analysis on selected session with proper error handling and user feedback
   const startAnalysis = async () => {
-    if (!sendCommand || !selectedSession) return
+    if (!sendCommand || !selectedSession || isSubmitting) {
+      componentLogger.warn('Cannot start analysis', {
+        hasSendCommand: !!sendCommand,
+        hasSession: !!selectedSession,
+        isSubmitting
+      })
+      return
+    }
+
+    // Clear any previous errors
+    setSubmissionError(null)
+    setIsSubmitting(true)
+
+    // Determine if this is a re-analysis of the same session
+    const isReanalysis = currentSessionPath === selectedSession && analysisMetadata !== null
+
+    componentLogger.info(
+      isReanalysis
+        ? `[USER ACTION] Re-analyzing session: ${selectedSession}`
+        : `[USER ACTION] Starting new analysis: ${selectedSession}`
+    )
 
     try {
       const result = await sendCommand({
@@ -435,10 +463,32 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
       } as any)
 
       if (!result.success) {
-        componentLogger.error('Failed to start analysis:', result.error)
+        const errorMsg = result.error || 'Unknown error occurred'
+        componentLogger.error('Failed to start analysis:', errorMsg)
+        setSubmissionError(errorMsg)
+
+        // Keep submitting state for a brief moment to show error, then reset
+        setTimeout(() => {
+          setIsSubmitting(false)
+        }, 1000)
+      } else {
+        componentLogger.info('Analysis command sent successfully')
+
+        // Reset submitting state after a brief delay to prevent rapid re-clicks
+        // The analysis will update isAnalysisRunning via message listener
+        setTimeout(() => {
+          setIsSubmitting(false)
+        }, 500)
       }
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
       componentLogger.error('Error starting analysis:', error)
+      setSubmissionError(`Failed to send command: ${errorMsg}`)
+
+      // Reset after showing error
+      setTimeout(() => {
+        setIsSubmitting(false)
+      }, 1000)
     }
   }
 
@@ -517,15 +567,49 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   ))}
                 </select>
               </div>
-              <div>
+
+              {/* Error feedback */}
+              {submissionError && !isAnalysisRunning && (
+                <div className="px-3 py-2 bg-red-900/30 border border-red-600/50 rounded text-xs text-red-300">
+                  <div className="font-medium mb-1">Analysis Failed</div>
+                  <div>{submissionError}</div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="space-y-2">
                 {!isAnalysisRunning ? (
-                  <button
-                    onClick={startAnalysis}
-                    disabled={!selectedSession}
-                    className="w-full px-4 py-2 bg-sci-primary-600 text-white text-sm rounded hover:bg-sci-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Analyze
-                  </button>
+                  <>
+                    {/* Primary Analyze button */}
+                    <button
+                      onClick={startAnalysis}
+                      disabled={!selectedSession || isSubmitting}
+                      className="w-full px-4 py-2 bg-sci-primary-600 text-white text-sm rounded hover:bg-sci-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                          <span>Starting...</span>
+                        </>
+                      ) : (
+                        'Analyze'
+                      )}
+                    </button>
+
+                    {/* Re-Analyze button (only shown when viewing results of selected session) */}
+                    {selectedSession &&
+                     currentSessionPath === selectedSession &&
+                     analysisMetadata !== null &&
+                     !isSubmitting && (
+                      <button
+                        onClick={startAnalysis}
+                        className="w-full px-3 py-1.5 bg-sci-secondary-600 text-white text-xs rounded hover:bg-sci-secondary-700 transition-colors border border-sci-secondary-500"
+                        title="Run analysis again on the same session"
+                      >
+                        Re-Analyze Current Session
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <button
                     onClick={stopAnalysis}
