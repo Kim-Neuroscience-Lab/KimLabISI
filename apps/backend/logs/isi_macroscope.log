@@ -692,3 +692,232 @@ NameError: name 'Any' is not defined
 2025-10-09 20:46:03,082 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
 2025-10-09 20:46:03,082 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
 2025-10-09 20:46:03,083 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:08,083 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:08,084 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:08,084 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:08,084 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:08,084 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:13,089 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:13,089 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:13,089 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:13,089 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:13,089 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:18,094 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:18,095 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:18,095 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:18,095 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:18,095 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:23,098 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:23,098 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:23,098 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:23,098 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:23,098 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:28,099 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:28,100 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:28,100 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:28,100 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:28,100 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:33,105 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:33,106 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:33,106 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:33,106 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:33,106 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:38,110 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:38,111 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:38,111 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:38,111 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:38,111 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:43,117 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:43,117 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:43,118 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:43,118 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:43,118 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:48,124 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:48,124 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:48,125 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:48,125 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:48,125 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:53,128 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:53,128 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:53,128 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:53,128 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:53,129 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:46:58,131 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:46:58,131 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:46:58,132 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:46:58,132 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:46:58,132 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:03,136 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:03,139 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:03,139 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:03,139 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:03,139 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:08,143 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:08,143 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:08,143 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:08,143 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:08,143 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:13,145 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:13,145 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:13,145 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:13,145 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:13,145 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:18,149 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:18,149 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:18,149 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:18,149 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:18,149 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:23,154 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:23,155 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:23,155 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:23,155 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:23,155 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:28,160 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:28,161 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:28,161 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:28,161 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:28,161 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:33,167 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:33,167 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:33,167 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:33,167 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:33,167 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:38,173 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:38,173 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:38,173 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:38,173 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:38,173 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:43,178 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:43,178 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:43,179 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:43,179 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:43,179 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:48,184 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:48,184 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:48,184 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:48,184 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:48,184 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:53,190 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:53,190 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:53,190 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:53,190 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:53,190 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:47:58,196 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:47:58,196 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:47:58,196 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:47:58,196 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:47:58,196 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:03,201 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:03,202 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:03,202 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:03,202 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:03,202 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:08,205 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:08,205 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:08,205 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:08,206 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:08,206 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:13,211 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:13,211 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:13,211 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:13,211 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:13,211 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:18,216 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:18,216 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:18,216 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:18,216 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:18,216 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:23,218 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:23,218 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:23,218 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:23,218 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:23,218 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:28,220 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:28,221 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:28,221 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:28,221 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:28,221 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:33,224 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:33,224 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:33,224 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:33,224 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:33,224 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:38,230 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:38,230 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:38,230 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:38,230 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:38,230 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:43,236 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:43,236 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:43,236 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:43,236 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:43,236 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:48,240 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:48,240 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:48,240 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:48,240 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:48,241 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:53,246 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:53,246 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:53,246 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:53,246 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:53,246 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:48:58,252 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:48:58,252 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:48:58,252 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:48:58,252 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:48:58,252 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:03,258 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:03,258 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:03,258 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:03,258 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:03,258 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:08,262 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:08,262 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:08,262 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:08,262 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:08,262 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:13,265 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:13,265 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:13,265 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:13,265 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:13,265 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:18,267 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:18,267 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:18,267 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:18,267 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:18,267 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:23,269 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:23,270 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:23,270 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:23,270 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:23,270 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:28,276 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:28,276 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:28,276 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:28,276 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:28,276 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:33,278 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:33,278 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:33,278 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:33,278 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:33,278 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:38,283 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:38,284 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:38,284 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:38,284 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:38,284 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:43,289 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:43,290 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:43,290 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:43,290 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:43,290 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:48,295 isi_control.health_monitor INFO Camera health check: Starting camera detection...
+2025-10-09 20:49:48,295 isi_control.health_monitor INFO Camera health check: Found 1 total camera(s)
+2025-10-09 20:49:48,295 isi_control.health_monitor INFO Camera health check: 1 camera(s) available
+2025-10-09 20:49:48,295 isi_control.health_monitor INFO Camera health check: Available cameras: FaceTime HD Camera
+2025-10-09 20:49:48,295 isi_control.health_monitor INFO Camera health check: ✓ ONLINE
+2025-10-09 20:49:49,468 __main__ INFO Received signal 15 - shutting down...
+2025-10-09 20:49:49,488 __main__ INFO Shutting down ISI Backend...
+2025-10-09 20:49:49,578 isi_control.shared_memory_stream INFO SharedMemoryFrameStream cleaned up (stimulus and camera buffers)
+2025-10-09 20:49:51,583 __main__ INFO Backend shutdown complete

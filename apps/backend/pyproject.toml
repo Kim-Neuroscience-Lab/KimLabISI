@@ -8,6 +8,12 @@ packages = [
     { include = "isi_control", from = "src" }
 ]
 
+[tool.poetry.scripts]
+# New refactored entry point (Phase 1-8 complete)
+isi-macroscope = "src.main:main"
+# Legacy entry point (kept for backward compatibility)
+isi-macroscope-old = "isi_control.main:main"
+
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
 numpy = "^1.24.0"

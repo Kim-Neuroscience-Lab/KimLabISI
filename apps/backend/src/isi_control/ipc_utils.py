@@ -26,6 +26,7 @@ def ipc_handler(command_type: str):
     - Response formatting
     - Type field injection
     - Exception catching
+    - Auto-registration support via _ipc_command_type attribute
 
     Usage:
         @ipc_handler("detect_cameras")
@@ -38,6 +39,7 @@ def ipc_handler(command_type: str):
     - Catch and format exceptions
     - Log errors
     - Ensure consistent response structure
+    - Set _ipc_command_type attribute for auto-registration
     """
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
@@ -65,6 +67,8 @@ def ipc_handler(command_type: str):
                     "error": str(e),
                 }
 
+        # CRITICAL FIX: Store command_type as attribute for auto-registration
+        wrapper._ipc_command_type = command_type
         return wrapper
     return decorator
 
