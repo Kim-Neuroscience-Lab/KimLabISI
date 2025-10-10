@@ -10,16 +10,15 @@ This module provides a centralized, coordinated approach to system startup that 
 """
 
 import asyncio
-import logging
 import time
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 
 from .service_locator import get_services
-from .stimulus_manager import render_initial_stimulus_frame
+from .logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SystemState(Enum):
@@ -292,7 +291,7 @@ class StartupCoordinator:
 
                 # Start health monitoring on the multi-channel system
                 ipc.start_health_monitoring(
-                    callback=backend_instance._handle_health_update, interval_sec=0.1
+                    callback=None, interval_sec=0.1
                 )
 
             logger.info("✓ Multi-channel IPC system initialized successfully")
@@ -359,7 +358,7 @@ class StartupCoordinator:
 
         try:
             from .camera_manager import handle_detect_cameras, camera_manager
-            from .display_manager import handle_detect_displays, display_manager
+            from .display_manager import handle_detect_displays
 
             detected_hardware = {}
 
@@ -560,14 +559,3 @@ class StartupCoordinator:
                 else {}
             ),
         }
-
-# Global startup coordinator instance
-_startup_coordinator: Optional[StartupCoordinator] = None
-
-
-def get_startup_coordinator() -> StartupCoordinator:
-    """Get the global startup coordinator instance."""
-    global _startup_coordinator
-    if _startup_coordinator is None:
-        _startup_coordinator = StartupCoordinator()
-    return _startup_coordinator

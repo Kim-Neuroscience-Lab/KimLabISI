@@ -144,7 +144,7 @@ class MultiChannelIPC:
 
     def start_health_monitoring(
         self,
-        callback: Callable[[HealthStatus], None],
+        callback: Optional[Callable[[HealthStatus], None]] = None,
         interval_sec: float = 0.1,
     ) -> None:
         """Start health publish loop with optional local callback."""

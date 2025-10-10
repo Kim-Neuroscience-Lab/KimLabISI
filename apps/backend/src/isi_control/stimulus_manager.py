@@ -5,16 +5,14 @@ Uses GPU acceleration (MPS on Mac, CUDA on Windows/Linux) when available
 """
 
 import numpy as np
-import io
 import time
-import threading
-from PIL import Image
 from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
-import logging
 from logging import Logger
 from .logging_utils import get_logger
 from .service_locator import get_services
+from .ipc_utils import ipc_handler
+from .shared_memory_stream import get_realtime_producer
 
 # GPU acceleration
 import torch
@@ -514,11 +512,16 @@ def invalidate_stimulus_generator():
     )
 
 
-def get_stimulus_generator() -> StimulusGenerator:
-    """Get or create global stimulus generator instance using parameter manager"""
+def get_stimulus_generator(param_manager=None) -> StimulusGenerator:
+    """Get or create global stimulus generator instance using parameter manager
+
+    Args:
+        param_manager: Optional parameter manager. If None, pulls from service registry.
+    """
     global _stimulus_generator
     if _stimulus_generator is None:
-        param_manager = get_services().parameter_manager
+        if param_manager is None:
+            param_manager = get_services().parameter_manager
         all_params = param_manager.load_parameters()
 
         # Validate monitor parameters before creating stimulus generator
@@ -561,9 +564,13 @@ def get_stimulus_generator() -> StimulusGenerator:
     return _stimulus_generator
 
 
-def provide_stimulus_generator() -> StimulusGenerator:
-    """Provide a generator instance for the service registry."""
-    generator = get_stimulus_generator()
+def provide_stimulus_generator(param_manager=None) -> StimulusGenerator:
+    """Provide a generator instance for the service registry.
+
+    Args:
+        param_manager: Optional parameter manager. If None, pulls from service registry.
+    """
+    generator = get_stimulus_generator(param_manager=param_manager)
     if generator is None:
         raise RuntimeError(
             "Stimulus generator unavailable; monitor parameters not initialized"
@@ -572,195 +579,174 @@ def provide_stimulus_generator() -> StimulusGenerator:
 
 
 # IPC Handler Functions - Primary stimulus business logic
+@ipc_handler("get_stimulus_parameters")
 def handle_get_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_parameters IPC command"""
-    try:
-        generator = get_stimulus_generator()
+    generator = get_stimulus_generator()
 
-        # Return current stimulus parameters
-        params = {
-            "bar_width_deg": generator.stimulus_params.bar_width_degrees,
-            "drift_speed_deg_per_sec": generator.stimulus_params.drift_speed_degrees_per_sec,
-            "checker_size_deg": generator.stimulus_params.checkerboard_size_degrees,
-            "strobe_rate_hz": generator.stimulus_params.flicker_frequency_hz,
-            "contrast": generator.stimulus_params.contrast,
-            "background_luminance": generator.stimulus_params.background_luminance,
-        }
+    # Return current stimulus parameters
+    params = {
+        "bar_width_deg": generator.stimulus_params.bar_width_degrees,
+        "drift_speed_deg_per_sec": generator.stimulus_params.drift_speed_degrees_per_sec,
+        "checker_size_deg": generator.stimulus_params.checkerboard_size_degrees,
+        "strobe_rate_hz": generator.stimulus_params.flicker_frequency_hz,
+        "contrast": generator.stimulus_params.contrast,
+        "background_luminance": generator.stimulus_params.background_luminance,
+    }
 
-        return {"success": True, "parameters": params}
-    except Exception as e:
-        logger.error(f"Error getting stimulus parameters: {e}")
-        return {"success": False, "error": str(e)}
+    return {"parameters": params}
 
 
+@ipc_handler("update_stimulus_parameters")
 def handle_update_stimulus_parameters(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_stimulus_parameters IPC command"""
-    try:
-        param_manager = get_services().parameter_manager
+    param_manager = get_services().parameter_manager
 
-        params = command.get("parameters", {})
+    params = command.get("parameters", {})
 
-        # Update parameter manager (single source of truth)
-        param_manager.update_parameter_group("stimulus", params)
+    # Update parameter manager (single source of truth)
+    param_manager.update_parameter_group("stimulus", params)
 
-        # Invalidate stimulus generator so it recreates with new parameters
-        invalidate_stimulus_generator()
+    # Invalidate stimulus generator so it recreates with new parameters
+    invalidate_stimulus_generator()
 
-        return {"success": True, "message": "Stimulus parameters updated"}
-    except Exception as e:
-        logger.error(f"Error updating stimulus parameters: {e}")
-        return {"success": False, "error": str(e)}
+    return {"message": "Stimulus parameters updated"}
 
 
+@ipc_handler("get_spatial_configuration")
 def handle_get_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_spatial_configuration IPC command"""
-    try:
-        generator = get_stimulus_generator()
+    generator = get_stimulus_generator()
 
-        config = {
-            "monitor_distance_cm": generator.spatial_config.monitor_distance_cm,
-            "monitor_angle_degrees": generator.spatial_config.monitor_angle_degrees,
-            "screen_width_pixels": generator.spatial_config.screen_width_pixels,
-            "screen_height_pixels": generator.spatial_config.screen_height_pixels,
-            "screen_width_cm": generator.spatial_config.screen_width_cm,
-            "screen_height_cm": generator.spatial_config.screen_height_cm,
-            "fps": generator.spatial_config.fps,
-            "field_of_view_horizontal": generator.spatial_config.field_of_view_horizontal,
-            "field_of_view_vertical": generator.spatial_config.field_of_view_vertical,
-        }
+    config = {
+        "monitor_distance_cm": generator.spatial_config.monitor_distance_cm,
+        "monitor_angle_degrees": generator.spatial_config.monitor_angle_degrees,
+        "screen_width_pixels": generator.spatial_config.screen_width_pixels,
+        "screen_height_pixels": generator.spatial_config.screen_height_pixels,
+        "screen_width_cm": generator.spatial_config.screen_width_cm,
+        "screen_height_cm": generator.spatial_config.screen_height_cm,
+        "fps": generator.spatial_config.fps,
+        "field_of_view_horizontal": generator.spatial_config.field_of_view_horizontal,
+        "field_of_view_vertical": generator.spatial_config.field_of_view_vertical,
+    }
 
-        return {"success": True, "configuration": config}
-    except Exception as e:
-        logger.error(f"Error getting spatial configuration: {e}")
-        return {"success": False, "error": str(e)}
+    return {"configuration": config}
 
 
+@ipc_handler("update_spatial_configuration")
 def handle_update_spatial_configuration(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle update_spatial_configuration IPC command"""
-    try:
-        param_manager = get_services().parameter_manager
+    param_manager = get_services().parameter_manager
 
-        config = command.get("spatial_config", command.get("configuration", {}))
+    config = command.get("spatial_config", command.get("configuration", {}))
 
-        # Map to monitor parameter names
-        monitor_updates = {
-            "monitor_distance_cm": config.get("monitor_distance_cm"),
-            "monitor_lateral_angle_deg": config.get(
-                "monitor_lateral_angle_deg", config.get("monitor_angle_degrees")
-            ),
-            "monitor_width_cm": config.get("monitor_width_cm"),
-            "monitor_height_cm": config.get("monitor_height_cm"),
-            "monitor_width_px": config.get(
-                "monitor_width_px", config.get("screen_width_pixels")
-            ),
-            "monitor_height_px": config.get(
-                "monitor_height_px", config.get("screen_height_pixels")
-            ),
-            "monitor_fps": config.get("monitor_fps", config.get("fps")),
-        }
+    # Map to monitor parameter names
+    monitor_updates = {
+        "monitor_distance_cm": config.get("monitor_distance_cm"),
+        "monitor_lateral_angle_deg": config.get(
+            "monitor_lateral_angle_deg", config.get("monitor_angle_degrees")
+        ),
+        "monitor_width_cm": config.get("monitor_width_cm"),
+        "monitor_height_cm": config.get("monitor_height_cm"),
+        "monitor_width_px": config.get(
+            "monitor_width_px", config.get("screen_width_pixels")
+        ),
+        "monitor_height_px": config.get(
+            "monitor_height_px", config.get("screen_height_pixels")
+        ),
+        "monitor_fps": config.get("monitor_fps", config.get("fps")),
+    }
 
-        # Remove None values
-        monitor_updates = {k: v for k, v in monitor_updates.items() if v is not None}
+    # Remove None values
+    monitor_updates = {k: v for k, v in monitor_updates.items() if v is not None}
 
-        # Update parameter manager (single source of truth)
-        param_manager.update_parameter_group("monitor", monitor_updates)
+    # Update parameter manager (single source of truth)
+    param_manager.update_parameter_group("monitor", monitor_updates)
 
-        # Invalidate stimulus generator so it recreates with new parameters
-        invalidate_stimulus_generator()
+    # Invalidate stimulus generator so it recreates with new parameters
+    invalidate_stimulus_generator()
 
-        return {"success": True, "message": "Spatial configuration updated"}
-    except Exception as e:
-        logger.error(f"Error updating spatial configuration: {e}")
-        return {"success": False, "error": str(e)}
+    return {"message": "Spatial configuration updated"}
 
 
+@ipc_handler("get_stimulus_info")
 def handle_get_stimulus_info(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_info IPC command - returns dataset information"""
-    try:
-        logger.debug("handle_get_stimulus_info called")
-        generator = get_stimulus_generator()
-        direction = command.get("direction", "LR")
-        num_cycles = command.get("num_cycles", 3)
+    logger.debug("handle_get_stimulus_info called")
+    generator = get_stimulus_generator()
+    direction = command.get("direction", "LR")
+    num_cycles = command.get("num_cycles", 3)
 
-        logger.debug(
-            "Calling get_dataset_info for direction=%s, num_cycles=%s",
-            direction,
-            num_cycles,
-        )
-        dataset_info = generator.get_dataset_info(direction, num_cycles)
-        logger.debug("get_dataset_info returned: %s", dataset_info)
+    logger.debug(
+        "Calling get_dataset_info for direction=%s, num_cycles=%s",
+        direction,
+        num_cycles,
+    )
+    dataset_info = generator.get_dataset_info(direction, num_cycles)
+    logger.debug("get_dataset_info returned: %s", dataset_info)
 
-        if "error" in dataset_info:
-            logger.error("Dataset info contains error: %s", dataset_info["error"])
-            return {"success": False, "error": dataset_info["error"]}
+    if "error" in dataset_info:
+        logger.error("Dataset info contains error: %s", dataset_info["error"])
+        return {"success": False, "error": dataset_info["error"]}
 
-        result = {"success": True, "type": "stimulus_info", **dataset_info}
-        logger.debug("Returning result: %s", result)
-        return result
-
-    except Exception as e:
-        logger.error("Exception in handle_get_stimulus_info: %s", e, exc_info=True)
-        return {"success": False, "error": str(e)}
+    result = {**dataset_info}
+    logger.debug("Returning result: %s", result)
+    return result
 
 
+@ipc_handler("get_stimulus_frame")
 def handle_get_stimulus_frame(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_frame IPC command - generates frame on-demand using vectorized operations"""
-    try:
-        generator = get_stimulus_generator()
-        direction = command.get("direction", "LR")
-        frame_index = command.get("frame_index", 0)
-        show_bar_mask = command.get("show_bar_mask", True)
-        total_frames = command.get("total_frames")
+    generator = get_stimulus_generator()
+    direction = command.get("direction", "LR")
+    frame_index = command.get("frame_index", 0)
+    show_bar_mask = command.get("show_bar_mask", True)
+    total_frames = command.get("total_frames")
 
-        # Get dataset info for this direction
-        dataset_info = generator.get_dataset_info(direction, total_frames)
-        total_frames = dataset_info.get("total_frames", 0)
+    # Get dataset info for this direction
+    dataset_info = generator.get_dataset_info(direction, total_frames)
+    total_frames = dataset_info.get("total_frames", 0)
 
-        # Clamp frame index to valid range
-        frame_index = max(0, min(frame_index, total_frames - 1))
+    # Clamp frame index to valid range
+    frame_index = max(0, min(frame_index, total_frames - 1))
 
-        # Generate frame on-demand using vectorized operations (fast!)
-        frame, metadata = generator.generate_frame_at_index(
-            direction=direction,
-            frame_index=frame_index,
-            show_bar_mask=show_bar_mask,
-            total_frames=total_frames,
-        )
+    # Generate frame on-demand using vectorized operations (fast!)
+    frame, metadata = generator.generate_frame_at_index(
+        direction=direction,
+        frame_index=frame_index,
+        show_bar_mask=show_bar_mask,
+        total_frames=total_frames,
+    )
 
-        # Build metadata
-        angle = generator.calculate_frame_angle(direction, frame_index, total_frames)
-        metadata = {
-            "frame_index": frame_index,
-            "direction": direction,
-            "angle_degrees": angle,
-            "width_px": generator.spatial_config.screen_width_pixels,
-            "height_px": generator.spatial_config.screen_height_pixels,
-            "total_frames": total_frames,
-            "start_angle": dataset_info.get("start_angle", 0.0),
-            "end_angle": dataset_info.get("end_angle", 0.0),
-        }
+    # Build metadata
+    angle = generator.calculate_frame_angle(direction, frame_index, total_frames)
+    metadata = {
+        "frame_index": frame_index,
+        "direction": direction,
+        "angle_degrees": angle,
+        "width_px": generator.spatial_config.screen_width_pixels,
+        "height_px": generator.spatial_config.screen_height_pixels,
+        "total_frames": total_frames,
+        "start_angle": dataset_info.get("start_angle", 0.0),
+        "end_angle": dataset_info.get("end_angle", 0.0),
+    }
 
-        # Write frame to shared memory stream for frontend rendering
-        stream = get_stimulus_shared_memory_stream()
-        frame_id = stream.write_frame(frame, metadata)
+    # Write frame to shared memory stream for frontend rendering
+    stream = get_stimulus_shared_memory_stream()
+    frame_id = stream.write_frame(frame, metadata)
 
-        return {
-            "success": True,
-            "type": "stimulus_frame",
-            "frame_id": frame_id,
-            "frame_info": metadata,
-        }
+    # Get the full frame metadata including shm_path
+    frame_metadata = stream.get_frame_info(frame_id)
+    if frame_metadata:
+        # Convert to dict with shm_path included
+        frame_info_with_path = frame_metadata.to_dict(f"/tmp/{stream.stream_name}_stimulus_shm")
+    else:
+        # Fallback to original metadata if frame info not found
+        frame_info_with_path = metadata
 
-    except Exception as e:
-        logger.error(f"Error generating stimulus frame: {e}")
-        return {"success": False, "error": str(e)}
-
-
-def handle_get_stimulus_frame_binary(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle get_stimulus_frame_binary - removed, use shared memory streaming"""
     return {
-        "success": False,
-        "error": "This command has been removed. Use shared memory streaming instead.",
+        "frame_id": frame_id,
+        "frame_info": frame_info_with_path,
     }
 
 
@@ -774,9 +760,10 @@ def get_stimulus_shared_memory_stream():
     return get_services().shared_memory.stream
 
 
+@ipc_handler("get_stimulus_status")
 def handle_get_stimulus_status(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_stimulus_status IPC command"""
-    return {"success": True, "status": _stimulus_status.copy()}
+    return {"status": _stimulus_status.copy()}
 
 
 def render_initial_stimulus_frame() -> None:
@@ -814,17 +801,23 @@ def render_initial_stimulus_frame() -> None:
         logger.warning(f"Unable to render initial stimulus frame: {exc}")
 
 
+@ipc_handler("start_stimulus")
 def handle_start_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle start_stimulus IPC command - starts real-time shared memory streaming"""
-    try:
-        session_name = command.get("session_name", f"session_{int(time.time())}")
-        direction = command.get("direction", "LR")
-        show_bar_mask = command.get("show_bar_mask", False)
-        fps = command.get("fps", 60.0)
+    session_name = command.get("session_name", f"session_{int(time.time())}")
+    direction = command.get("direction", "LR")
+    show_bar_mask = command.get("show_bar_mask", False)
+    fps = command.get("fps", 60.0)
 
+    try:
         # Update status
         _stimulus_status["is_presenting"] = True
         _stimulus_status["current_session"] = session_name
+
+        # Update state coordinator
+        services = get_services()
+        if hasattr(services, 'acquisition_state') and services.acquisition_state:
+            services.acquisition_state.set_stimulus_active(True)
 
         # Get stimulus generator and start real-time streaming
         generator = get_stimulus_generator()
@@ -835,130 +828,146 @@ def handle_start_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
             )
 
         services = get_services()
-        backend_instance = getattr(services, "backend", None)
+        shared_memory = services.shared_memory
 
-        if backend_instance is None:
+        # Start real-time streaming
+        producer = shared_memory.start_realtime_streaming(generator, fps)
+
+        # Set the direction for the realtime producer
+        if producer:
+            producer.set_stimulus_params(direction)
+            logger.info(
+                f"Real-time stimulus streaming started: {session_name}, direction: {direction}, fps: {fps}"
+            )
+        else:
             raise Exception(
-                "Backend instance not available; startup may not be complete"
+                "Realtime producer not available after starting streaming"
             )
 
-        if backend_instance.start_realtime_streaming(generator, fps):
-            # Set the direction for the realtime producer
-            if backend_instance.realtime_producer:
-                backend_instance.realtime_producer.set_stimulus_params(direction)
-                logger.info(
-                    f"Real-time stimulus streaming started: {session_name}, direction: {direction}, fps: {fps}"
-                )
-            else:
-                raise Exception(
-                    "Realtime producer not available after starting streaming"
-                )
-
-            return {
-                "success": True,
-                "message": f"Real-time stimulus streaming started: {session_name}",
-            }
-        else:
-            raise Exception("Failed to start real-time streaming")
+        return {"message": f"Real-time stimulus streaming started: {session_name}"}
 
     except Exception as e:
         logger.error(f"Error starting stimulus: {e}")
         _stimulus_status["is_presenting"] = False
         _stimulus_status["current_session"] = None
-        return {"success": False, "error": str(e)}
+        raise  # Re-raise to let decorator handle error response
 
 
+@ipc_handler("stop_stimulus")
 def handle_stop_stimulus(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle stop_stimulus IPC command - stops real-time shared memory streaming"""
-    try:
-        # Get backend instance and stop real-time streaming
-        from .main import _backend_instance
+    # Stop real-time streaming via shared memory service
+    services = get_services()
+    services.shared_memory.stop_realtime_streaming()
 
-        if _backend_instance:
-            _backend_instance.stop_realtime_streaming()
+    # Clear stimulus frames and timestamp
+    services.shared_memory.clear_stimulus_frames()
+    services.shared_memory.clear_stimulus_timestamp()
 
-        # Update status
-        session_name = _stimulus_status["current_session"]
-        _stimulus_status["is_presenting"] = False
-        _stimulus_status["current_session"] = None
+    # Update status
+    session_name = _stimulus_status["current_session"]
+    _stimulus_status["is_presenting"] = False
+    _stimulus_status["current_session"] = None
 
-        logger.info(f"Real-time stimulus streaming stopped: {session_name}")
+    # Update state coordinator
+    if hasattr(services, 'acquisition_state') and services.acquisition_state:
+        services.acquisition_state.set_stimulus_active(False)
 
-        return {"success": True, "message": "Real-time stimulus streaming stopped"}
-    except Exception as e:
-        logger.error(f"Error stopping stimulus: {e}")
-        return {"success": False, "error": str(e)}
+    logger.info(f"Real-time stimulus streaming stopped: {session_name}")
+
+    return {"message": "Real-time stimulus streaming stopped"}
 
 
+@ipc_handler("generate_stimulus_preview")
 def handle_generate_stimulus_preview(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle generate_stimulus_preview IPC command"""
-    try:
-        generator = get_stimulus_generator()
-        direction = command.get("direction", "LR")
+    generator = get_stimulus_generator()
+    direction = command.get("direction", "LR")
 
-        # Get dataset info as preview information
-        dataset_info = generator.get_dataset_info(direction, 3)
+    # Get dataset info as preview information
+    dataset_info = generator.get_dataset_info(direction, 3)
 
-        if "error" in dataset_info:
-            return {"success": False, "error": dataset_info["error"]}
+    if "error" in dataset_info:
+        return {"success": False, "error": dataset_info["error"]}
 
-        # Format preview response
-        preview_info = {
-            "direction": direction,
-            "bar_width_deg": generator.stimulus_params.bar_width_degrees,
-            "sweep_range_deg": dataset_info["sweep_degrees"],
-            "cycle_duration_sec": dataset_info["duration_sec"],
-            "frames_per_cycle": dataset_info["total_frames"] // 3,  # For 3 cycles
-            "total_frames": dataset_info["total_frames"],
-            "estimated_duration_sec": dataset_info["duration_sec"],
-            "field_of_view_deg": {
-                "horizontal": generator.spatial_config.field_of_view_horizontal,
-                "vertical": generator.spatial_config.field_of_view_vertical,
-            },
-            "resolution": {
-                "width_px": generator.spatial_config.screen_width_pixels,
-                "height_px": generator.spatial_config.screen_height_pixels,
-            },
-            "timing": {
-                "fps": generator.spatial_config.fps,
-                "frame_duration_ms": 1000.0 / generator.spatial_config.fps,
-                "strobe_period_ms": (
-                    1000.0 / generator.stimulus_params.flicker_frequency_hz
-                    if generator.stimulus_params.flicker_frequency_hz > 0
-                    else None
-                ),
-            },
+    # Format preview response
+    preview_info = {
+        "direction": direction,
+        "bar_width_deg": generator.stimulus_params.bar_width_degrees,
+        "sweep_range_deg": dataset_info["sweep_degrees"],
+        "cycle_duration_sec": dataset_info["duration_sec"],
+        "frames_per_cycle": dataset_info["total_frames"] // 3,  # For 3 cycles
+        "total_frames": dataset_info["total_frames"],
+        "estimated_duration_sec": dataset_info["duration_sec"],
+        "field_of_view_deg": {
+            "horizontal": generator.spatial_config.field_of_view_horizontal,
+            "vertical": generator.spatial_config.field_of_view_vertical,
+        },
+        "resolution": {
+            "width_px": generator.spatial_config.screen_width_pixels,
+            "height_px": generator.spatial_config.screen_height_pixels,
+        },
+        "timing": {
+            "fps": generator.spatial_config.fps,
+            "frame_duration_ms": 1000.0 / generator.spatial_config.fps,
+            "strobe_period_ms": (
+                1000.0 / generator.stimulus_params.flicker_frequency_hz
+                if generator.stimulus_params.flicker_frequency_hz > 0
+                else None
+            ),
+        },
+    }
+
+    return {"preview": preview_info}
+
+
+@ipc_handler("display_timestamp")
+def handle_display_timestamp(command: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle display_timestamp from frontend - exact vsync timestamp when frame was displayed.
+
+    CRITICAL: This timestamp MUST come from hardware vsync (e.g., requestAnimationFrame timestamp).
+    Software timestamps are NOT acceptable for scientific accuracy.
+
+    Args:
+        command: Must contain frame_id and display_timestamp_us
+
+    Returns:
+        Success/error response
+    """
+    frame_id = command.get("frame_id")
+    display_timestamp_us = command.get("display_timestamp_us")
+
+    if frame_id is None or display_timestamp_us is None:
+        logger.error(
+            "CRITICAL: Frontend did not provide display timestamp. "
+            "display_timestamp_us is REQUIRED for scientific accuracy. "
+            "Frontend must send hardware vsync timestamps for every rendered frame."
+        )
+        return {
+            "success": False,
+            "error": "Missing frame_id or display_timestamp_us - REQUIRED for scientific accuracy",
         }
 
-        return {"success": True, "type": "stimulus_preview", "preview": preview_info}
-    except Exception as e:
-        logger.error(f"Error generating stimulus preview: {e}")
-        return {"success": False, "error": str(e)}
+    # Validate timestamp is reasonable (not zero, not in the past by too much, not in future)
+    current_time_us = int(time.time() * 1_000_000)
+    time_diff_us = abs(current_time_us - display_timestamp_us)
 
+    # Timestamp should be within last 100ms (allowing for some processing delay)
+    if time_diff_us > 100_000:  # 100ms
+        logger.warning(
+            f"Display timestamp seems incorrect: {time_diff_us / 1000:.1f}ms difference from current time. "
+            f"Verify frontend is sending hardware vsync timestamps, not software timestamps."
+        )
 
-def handle_display_timestamp(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle display_timestamp from frontend - exact vsync timestamp when frame was displayed"""
-    try:
-        frame_id = command.get("frame_id")
-        display_timestamp_us = command.get("display_timestamp_us")
+    # Store the display timestamp in shared memory service for correlation
+    services = get_services()
+    if services.shared_memory:
+        services.shared_memory.set_stimulus_timestamp(
+            display_timestamp_us, frame_id
+        )
+        logger.debug(
+            f"Recorded display timestamp: frame_id={frame_id}, timestamp={display_timestamp_us}μs"
+        )
 
-        if frame_id is None or display_timestamp_us is None:
-            return {
-                "success": False,
-                "error": "Missing frame_id or display_timestamp_us",
-            }
-
-        # Store the display timestamp in shared memory service for correlation
-        services = get_services()
-        if services.shared_memory:
-            services.shared_memory.set_stimulus_timestamp(
-                display_timestamp_us, frame_id
-            )
-            logger.debug(
-                f"Recorded display timestamp: frame_id={frame_id}, timestamp={display_timestamp_us}μs"
-            )
-
-        return {"success": True}
-    except Exception as e:
-        logger.error(f"Error handling display timestamp: {e}")
-        return {"success": False, "error": str(e)}
+    return {"success": True}

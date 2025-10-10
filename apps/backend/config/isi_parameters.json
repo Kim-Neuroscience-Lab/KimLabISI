@@ -288,7 +288,7 @@
       "animal_age": "P20",
       "animal_id": "M137",
       "created_at": "2025-09-28T15:22:27.071857",
-      "last_modified": "2025-10-06T18:29:11.405938",
+      "last_modified": "2025-10-09T11:39:43.117219",
       "session_name": "names n stuff"
     },
     "stimulus": {
@@ -296,7 +296,7 @@
       "bar_width_deg": 20,
       "checker_size_deg": 25,
       "contrast": 0.99,
-      "drift_speed_deg_per_sec": 9,
+      "drift_speed_deg_per_sec": 100,
       "strobe_rate_hz": 6
     }
   },

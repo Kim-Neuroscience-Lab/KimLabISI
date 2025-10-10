@@ -13,14 +13,15 @@ Features:
 """
 
 import json
-import logging
 import threading
-from dataclasses import dataclass, field, asdict, fields
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Type, Union
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+from .logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 # Parameter Type Definitions
@@ -154,9 +155,6 @@ class ParameterManager:
         # Load existing parameters
         self._load_configuration()
 
-        # Clear hardware-specific fields to ensure fresh detection
-        self._clear_hardware_specific_fields()
-
         logger.info(
             f"ParameterManager initialized with config file: {self.config_file}"
         )
@@ -216,7 +214,6 @@ class ParameterManager:
             }
 
             # Write to temporary file first for atomic save
-            import tempfile
 
             temp_file = self.config_file.with_suffix(".json.tmp")
 
@@ -454,6 +451,39 @@ class ParameterManager:
 
         return True
 
+    def _validate_and_add_parameter(
+        self,
+        params_obj: Any,
+        param_name: str,
+        target_dict: Dict[str, Any],
+        target_key: Optional[str] = None,
+        group_name: str = "monitor",
+        min_value: Optional[float] = None,
+    ) -> None:
+        """Validate and add parameter to target dictionary if valid.
+
+        Args:
+            params_obj: Object containing the parameter (e.g., monitor_params)
+            param_name: Name of parameter attribute to check
+            target_dict: Dictionary to add validated parameter to
+            target_key: Key to use in target dict (defaults to param_name)
+            group_name: Parameter group for validation
+            min_value: Optional minimum value check (e.g., > 0)
+        """
+        value = getattr(params_obj, param_name)
+
+        if value is None:
+            return
+
+        if min_value is not None and value <= min_value:
+            return
+
+        if not self._validate_parameter_safety(group_name, param_name, value):
+            return
+
+        key = target_key or param_name
+        target_dict[key] = value
+
     def _update_stimulus_if_needed(self, group_name: str, updates: Dict[str, Any]):
         """Update stimulus generator if monitor or stimulus parameters changed"""
         try:
@@ -463,81 +493,46 @@ class ParameterManager:
                 monitor_params = self._current_params.monitor
 
                 # Only add parameters that are within safe bounds and not None/invalid
-                if (
-                    monitor_params.monitor_distance_cm is not None
-                    and monitor_params.monitor_distance_cm > 0
-                    and self._validate_parameter_safety(
-                        "monitor",
-                        "monitor_distance_cm",
-                        monitor_params.monitor_distance_cm,
-                    )
-                ):
-                    spatial_config["monitor_distance_cm"] = (
-                        monitor_params.monitor_distance_cm
-                    )
-
-                if (
-                    monitor_params.monitor_lateral_angle_deg is not None
-                    and self._validate_parameter_safety(
-                        "monitor",
-                        "monitor_lateral_angle_deg",
-                        monitor_params.monitor_lateral_angle_deg,
-                    )
-                ):
-                    spatial_config["monitor_angle_degrees"] = (
-                        monitor_params.monitor_lateral_angle_deg
-                    )
-
-                if (
-                    monitor_params.monitor_width_px is not None
-                    and monitor_params.monitor_width_px > 0
-                    and self._validate_parameter_safety(
-                        "monitor", "monitor_width_px", monitor_params.monitor_width_px
-                    )
-                ):
-                    spatial_config["screen_width_pixels"] = (
-                        monitor_params.monitor_width_px
-                    )
-
-                if (
-                    monitor_params.monitor_height_px is not None
-                    and monitor_params.monitor_height_px > 0
-                    and self._validate_parameter_safety(
-                        "monitor", "monitor_height_px", monitor_params.monitor_height_px
-                    )
-                ):
-                    spatial_config["screen_height_pixels"] = (
-                        monitor_params.monitor_height_px
-                    )
-
-                if (
-                    monitor_params.monitor_width_cm is not None
-                    and monitor_params.monitor_width_cm > 0
-                    and self._validate_parameter_safety(
-                        "monitor", "monitor_width_cm", monitor_params.monitor_width_cm
-                    )
-                ):
-                    spatial_config["screen_width_cm"] = monitor_params.monitor_width_cm
-
-                if (
-                    monitor_params.monitor_height_cm is not None
-                    and monitor_params.monitor_height_cm > 0
-                    and self._validate_parameter_safety(
-                        "monitor", "monitor_height_cm", monitor_params.monitor_height_cm
-                    )
-                ):
-                    spatial_config["screen_height_cm"] = (
-                        monitor_params.monitor_height_cm
-                    )
-
-                if (
-                    monitor_params.monitor_fps is not None
-                    and monitor_params.monitor_fps > 0
-                    and self._validate_parameter_safety(
-                        "monitor", "monitor_fps", monitor_params.monitor_fps
-                    )
-                ):
-                    spatial_config["fps"] = monitor_params.monitor_fps
+                self._validate_and_add_parameter(
+                    monitor_params, "monitor_distance_cm", spatial_config, min_value=0
+                )
+                self._validate_and_add_parameter(
+                    monitor_params,
+                    "monitor_lateral_angle_deg",
+                    spatial_config,
+                    "monitor_angle_degrees",
+                )
+                self._validate_and_add_parameter(
+                    monitor_params,
+                    "monitor_width_px",
+                    spatial_config,
+                    "screen_width_pixels",
+                    min_value=0,
+                )
+                self._validate_and_add_parameter(
+                    monitor_params,
+                    "monitor_height_px",
+                    spatial_config,
+                    "screen_height_pixels",
+                    min_value=0,
+                )
+                self._validate_and_add_parameter(
+                    monitor_params,
+                    "monitor_width_cm",
+                    spatial_config,
+                    "screen_width_cm",
+                    min_value=0,
+                )
+                self._validate_and_add_parameter(
+                    monitor_params,
+                    "monitor_height_cm",
+                    spatial_config,
+                    "screen_height_cm",
+                    min_value=0,
+                )
+                self._validate_and_add_parameter(
+                    monitor_params, "monitor_fps", spatial_config, "fps", min_value=0
+                )
 
                 if spatial_config:
                     from .stimulus_manager import handle_update_spatial_configuration
@@ -557,36 +552,33 @@ class ParameterManager:
                 stimulus_params = self._current_params.stimulus
 
                 # Only add parameters that are within safe bounds
-                if self._validate_parameter_safety(
-                    "stimulus", "bar_width_deg", stimulus_params.bar_width_deg
-                ):
-                    stimulus_config["bar_width_deg"] = stimulus_params.bar_width_deg
-
-                if self._validate_parameter_safety(
-                    "stimulus",
+                self._validate_and_add_parameter(
+                    stimulus_params,
+                    "bar_width_deg",
+                    stimulus_config,
+                    group_name="stimulus",
+                )
+                self._validate_and_add_parameter(
+                    stimulus_params,
                     "drift_speed_deg_per_sec",
-                    stimulus_params.drift_speed_deg_per_sec,
-                ):
-                    stimulus_config["drift_speed_deg_per_sec"] = (
-                        stimulus_params.drift_speed_deg_per_sec
-                    )
-
-                if self._validate_parameter_safety(
-                    "stimulus", "checker_size_deg", stimulus_params.checker_size_deg
-                ):
-                    stimulus_config["checker_size_deg"] = (
-                        stimulus_params.checker_size_deg
-                    )
-
-                if self._validate_parameter_safety(
-                    "stimulus", "strobe_rate_hz", stimulus_params.strobe_rate_hz
-                ):
-                    stimulus_config["strobe_rate_hz"] = stimulus_params.strobe_rate_hz
-
-                if self._validate_parameter_safety(
-                    "stimulus", "contrast", stimulus_params.contrast
-                ):
-                    stimulus_config["contrast"] = stimulus_params.contrast
+                    stimulus_config,
+                    group_name="stimulus",
+                )
+                self._validate_and_add_parameter(
+                    stimulus_params,
+                    "checker_size_deg",
+                    stimulus_config,
+                    group_name="stimulus",
+                )
+                self._validate_and_add_parameter(
+                    stimulus_params,
+                    "strobe_rate_hz",
+                    stimulus_config,
+                    group_name="stimulus",
+                )
+                self._validate_and_add_parameter(
+                    stimulus_params, "contrast", stimulus_config, group_name="stimulus"
+                )
 
                 if stimulus_config:
                     from .stimulus_manager import handle_update_stimulus_parameters
@@ -703,19 +695,3 @@ class ParameterManager:
             info["parameter_groups"][group_name] = group_info
 
         return info
-
-
-# Global parameter manager instance
-_parameter_manager: Optional[ParameterManager] = None
-
-
-def get_parameter_manager() -> ParameterManager:
-    raise RuntimeError(
-        "ParameterManager is provided via ServiceRegistry; do not call get_parameter_manager()"
-    )
-
-
-def reset_parameter_manager():
-    raise RuntimeError(
-        "reset_parameter_manager is unsupported in production; use service injection during tests"
-    )

@@ -7,7 +7,8 @@ export const IPC_CONFIG = {
   // Multi-channel IPC ports
   HEALTH_PORT: 5555,
   SYNC_PORT: 5558,
-  SHARED_MEMORY_PORT: 5557,
+  SHARED_MEMORY_PORT: 5557,        // Stimulus frames
+  CAMERA_METADATA_PORT: 5559,      // Camera frames (separate channel)
 
   // Timeouts (milliseconds)
   STARTUP_TIMEOUT: 15000, // 15 seconds
@@ -20,8 +21,8 @@ export const IPC_CONFIG = {
 
 export const UI_CONFIG = {
   // Window dimensions (percentages of screen size)
-  WINDOW_WIDTH_PERCENT: 0.85,
-  WINDOW_HEIGHT_PERCENT: 0.9,
+  WINDOW_WIDTH_PERCENT: 1.0,  // Full screen width
+  WINDOW_HEIGHT_PERCENT: 1.0,  // Full screen height
 
   // Minimum window dimensions (percentages)
   MIN_WIDTH_PERCENT: 0.6,
@@ -46,7 +47,6 @@ export const LOGGING_CONFIG = {
 export const PATHS = {
   // Backend paths
   BACKEND_MAIN_MODULE: 'isi_control.main',
-  SHARED_MEMORY_PATH: '/tmp/stimulus_stream_shm',
 
   // Candidate backend root directories
   BACKEND_ROOT_CANDIDATES: [
@@ -61,7 +61,7 @@ export const PATHS = {
 
 export const ELECTRON_CONFIG = {
   // Dev tools
-  OPEN_DEV_TOOLS_IN_DEVELOPMENT: true,
+  OPEN_DEV_TOOLS_IN_DEVELOPMENT: false,  // Start with dev console closed
 
   // Security
   NODE_INTEGRATION: false,

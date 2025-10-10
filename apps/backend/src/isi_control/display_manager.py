@@ -5,22 +5,21 @@ Focused module for display detection and selection for stimulus presentation.
 Uses shared hardware utilities to minimize duplication.
 """
 
-import logging
 import platform
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any
+from dataclasses import dataclass
 
 from .hardware_utils import (
     HardwareDevice,
     HardwareDetector,
     parse_system_profiler_displays,
     estimate_device_capabilities,
-    create_ipc_handler,
 )
 from .service_locator import get_services
+from .logging_utils import get_logger
+from .ipc_utils import ipc_handler
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -276,69 +275,50 @@ display_manager = DisplayManager()
 
 
 # IPC Handler Functions
+@ipc_handler("detect_displays")
 def handle_detect_displays(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle detect_displays IPC command"""
-    try:
-        force_refresh = bool(command.get("force", False))
-        displays = display_manager.detect_displays(force=force_refresh)
-        return {
-            "success": True,
-            "type": "detect_displays",
-            "displays": [d.to_dict() for d in displays],
-            "selected_display": display_manager.selected_display,
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_detect_displays: {e}")
-        return {"success": False, "type": "detect_displays", "error": str(e)}
+    force_refresh = bool(command.get("force", False))
+    displays = display_manager.detect_displays(force=force_refresh)
+    return {
+        "displays": [d.to_dict() for d in displays],
+        "selected_display": display_manager.selected_display,
+    }
 
 
+@ipc_handler("get_display_capabilities")
 def handle_get_display_capabilities(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_display_capabilities IPC command"""
-    try:
-        display_id = command.get("display_id")
-        if not display_id:
-            return {
-                "success": False,
-                "type": "get_display_capabilities",
-                "error": "display_id is required",
-            }
+    display_id = command.get("display_id")
+    if not display_id:
+        return {
+            "success": False,
+            "error": "display_id is required",
+        }
 
-        capabilities = display_manager.get_display_capabilities(display_id)
-        if capabilities:
-            return {
-                "success": True,
-                "type": "get_display_capabilities",
-                "capabilities": capabilities,
-            }
-        else:
-            return {
-                "success": False,
-                "type": "get_display_capabilities",
-                "error": f"Display not found: {display_id}",
-            }
-    except Exception as e:
-        logger.error(f"Error in handle_get_display_capabilities: {e}")
-        return {"success": False, "type": "get_display_capabilities", "error": str(e)}
+    capabilities = display_manager.get_display_capabilities(display_id)
+    if capabilities:
+        return {"capabilities": capabilities}
+    else:
+        return {
+            "success": False,
+            "error": f"Display not found: {display_id}",
+        }
 
 
+@ipc_handler("select_display")
 def handle_select_display(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle select_display IPC command"""
-    try:
-        display_id = command.get("display_id")
-        if not display_id:
-            return {
-                "success": False,
-                "type": "select_display",
-                "error": "display_id is required",
-            }
-
-        success = display_manager.select_display(display_id)
+    display_id = command.get("display_id")
+    if not display_id:
         return {
-            "success": success,
-            "type": "select_display",
-            "selected_display": display_manager.selected_display if success else None,
-            "error": None if success else f"Failed to select display: {display_id}",
+            "success": False,
+            "error": "display_id is required",
         }
-    except Exception as e:
-        logger.error(f"Error in handle_select_display: {e}")
-        return {"success": False, "type": "select_display", "error": str(e)}
+
+    success = display_manager.select_display(display_id)
+    return {
+        "success": success,
+        "selected_display": display_manager.selected_display if success else None,
+        "error": None if success else f"Failed to select display: {display_id}",
+    }

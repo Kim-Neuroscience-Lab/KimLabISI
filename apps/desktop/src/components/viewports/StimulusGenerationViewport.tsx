@@ -3,12 +3,12 @@ import { useFrameRenderer } from '../../hooks/useFrameRenderer'
 import { componentLogger } from '../../utils/logger'
 import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-messages'
 import type { SharedMemoryFrameData } from '../../types/electron'
-import type { SystemState } from '../../types/shared'
 import type {
+  SystemState,
   MonitorParameters,
   StimulusParameters,
   AcquisitionParameters
-} from '../../hooks/useParameterManager'
+} from '../../types/shared'
 
 interface StimulusGenerationViewportProps {
   className?: string
@@ -83,7 +83,8 @@ const StimulusGenerationViewport: React.FC<StimulusGenerationViewportProps> = ({
       try {
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
-          metadata.data_size_bytes
+          metadata.data_size_bytes,
+          metadata.shm_path
         )
 
         // Combine metadata with frame data for rendering

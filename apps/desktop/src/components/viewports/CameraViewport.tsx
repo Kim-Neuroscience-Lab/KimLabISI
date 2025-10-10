@@ -1,8 +1,18 @@
+/**
+ * CameraViewport - DEBUG/TEST Component
+ *
+ * This viewport uses browser WebRTC camera (navigator.mediaDevices) for manual testing
+ * and debugging. It is NOT part of the production acquisition pipeline.
+ *
+ * The timing correlation logic here is intentionally frontend-only for development purposes.
+ * Production acquisition uses AcquisitionViewport which interfaces with the backend
+ * Python camera system.
+ */
+
 import React, { useRef, useEffect, useState } from 'react'
 import { componentLogger } from '../../utils/logger'
 import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-messages'
-import type { SystemState } from '../../types/shared'
-import type { CameraParameters } from '../../hooks/useParameterManager'
+import type { SystemState, CameraParameters } from '../../types/shared'
 
 interface TimingCorrelation {
   cameraTimestamp: number
@@ -398,34 +408,34 @@ const CameraViewport: React.FC<CameraViewportProps> = ({
             ))}
           </div>
 
-          {/* Correlation Statistics */}
-          {timingCorrelations.length > 0 && (
-            <div className="text-xs">
-              <div className="text-sci-secondary-400 mb-1">
-                Recent Correlations: {timingCorrelations.length}
+          {/* Correlation Statistics - Debug only, intentionally frontend-calculated */}
+          {timingCorrelations.length > 0 && (() => {
+            const matched = timingCorrelations.filter(c => c.correlationStatus === 'matched').length
+            const timeout = timingCorrelations.filter(c => c.correlationStatus === 'timeout').length
+            const matchRate = ((matched / timingCorrelations.length) * 100).toFixed(0)
+
+            return (
+              <div className="text-xs">
+                <div className="text-sci-secondary-400 mb-1">
+                  Recent Correlations: {timingCorrelations.length}
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span className="text-sci-success-400">{matched}</span>
+                    <span className="text-sci-secondary-500 ml-1">matched</span>
+                  </div>
+                  <div>
+                    <span className="text-sci-error-400">{timeout}</span>
+                    <span className="text-sci-secondary-500 ml-1">timeout</span>
+                  </div>
+                  <div>
+                    <span className="text-sci-secondary-300">{matchRate}%</span>
+                    <span className="text-sci-secondary-500 ml-1">rate</span>
+                  </div>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <span className="text-sci-success-400">
-                    {timingCorrelations.filter(c => c.correlationStatus === 'matched').length}
-                  </span>
-                  <span className="text-sci-secondary-500 ml-1">matched</span>
-                </div>
-                <div>
-                  <span className="text-sci-error-400">
-                    {timingCorrelations.filter(c => c.correlationStatus === 'timeout').length}
-                  </span>
-                  <span className="text-sci-secondary-500 ml-1">timeout</span>
-                </div>
-                <div>
-                  <span className="text-sci-secondary-300">
-                    {((timingCorrelations.filter(c => c.correlationStatus === 'matched').length / timingCorrelations.length) * 100).toFixed(0)}%
-                  </span>
-                  <span className="text-sci-secondary-500 ml-1">rate</span>
-                </div>
-              </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       )}
     </div>

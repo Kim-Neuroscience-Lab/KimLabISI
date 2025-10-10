@@ -2,12 +2,12 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useFrameRenderer } from '../../hooks/useFrameRenderer'
 import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-messages'
 import type { SharedMemoryFrameData } from '../../types/electron'
-import type { SystemState } from '../../types/shared'
 import type {
+  SystemState,
   MonitorParameters,
   StimulusParameters,
   AcquisitionParameters
-} from '../../hooks/useParameterManager'
+} from '../../types/shared'
 
 interface StimulusPresentationViewportProps {
   className?: string
@@ -44,7 +44,8 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
         // Read actual frame data from shared memory using offset and size
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
-          metadata.data_size_bytes
+          metadata.data_size_bytes,
+          metadata.shm_path
         )
 
         // Combine metadata with frame data for rendering

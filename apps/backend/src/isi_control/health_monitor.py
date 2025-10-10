@@ -13,17 +13,17 @@ Design Principles:
 5. Performance Optimized - Cached results with configurable refresh intervals
 """
 
-import logging
 import time
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Protocol
+from typing import Dict, Optional, Any, Protocol
 from enum import Enum
 
 from .service_locator import get_services
+from .logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class HealthStatus(Enum):
@@ -106,21 +106,28 @@ class CameraHealthChecker(BaseHealthChecker):
         try:
             # Use cached results if hardware was recently detected during startup
             startup_coordinator = get_services().startup_coordinator
-            cache_valid_duration = 30.0  # Use cached results for 30 seconds after startup detection
+            cache_valid_duration = (
+                30.0  # Use cached results for 30 seconds after startup detection
+            )
 
             if (
                 startup_coordinator.hardware_detected
-                and (time.time() - startup_coordinator.hardware_detection_timestamp) < cache_valid_duration
+                and (time.time() - startup_coordinator.hardware_detection_timestamp)
+                < cache_valid_duration
                 and camera_manager.detected_cameras
             ):
                 # Use cached camera detection results
                 cameras = camera_manager.detected_cameras
-                logger.info(f"Camera health check: Using cached detection ({len(cameras)} camera(s))")
+                logger.info(
+                    f"Camera health check: Using cached detection ({len(cameras)} camera(s))"
+                )
             else:
                 # Perform fresh detection
                 logger.info("Camera health check: Starting camera detection...")
                 cameras = camera_manager.detect_cameras()
-                logger.info(f"Camera health check: Found {len(cameras)} total camera(s)")
+                logger.info(
+                    f"Camera health check: Found {len(cameras)} total camera(s)"
+                )
 
             available_cameras = [cam for cam in cameras if cam.is_available]
             logger.info(
@@ -141,6 +148,9 @@ class CameraHealthChecker(BaseHealthChecker):
                         "total_cameras": len(cameras),
                         "available_cameras": len(available_cameras),
                         "camera_names": camera_names,
+                        "default_selected_camera": (
+                            camera_names[0] if camera_names else None
+                        ),
                     },
                 )
             elif len(cameras) > 0:
@@ -176,11 +186,14 @@ class DisplayHealthChecker(BaseHealthChecker):
 
         # Use cached results if hardware was recently detected during startup
         startup_coordinator = get_services().startup_coordinator
-        cache_valid_duration = 30.0  # Use cached results for 30 seconds after startup detection
+        cache_valid_duration = (
+            30.0  # Use cached results for 30 seconds after startup detection
+        )
 
         if (
             startup_coordinator.hardware_detected
-            and (time.time() - startup_coordinator.hardware_detection_timestamp) < cache_valid_duration
+            and (time.time() - startup_coordinator.hardware_detection_timestamp)
+            < cache_valid_duration
             and display_manager.displays
         ):
             # Use cached display detection results
@@ -193,12 +206,17 @@ class DisplayHealthChecker(BaseHealthChecker):
             # Handle both dict and object types for display info
             primary_displays = []
             display_info = []
+            first_display_id: Optional[str] = None
 
             for d in displays:
                 if hasattr(d, "is_primary"):
                     # Object type (DisplayInfo)
                     if d.is_primary:
                         primary_displays.append(d)
+                    if first_display_id is None:
+                        first_display_id = getattr(d, "identifier", None) or getattr(
+                            d, "name", None
+                        )
                     display_info.append(
                         {
                             "name": getattr(d, "name", "Unknown"),
@@ -211,6 +229,8 @@ class DisplayHealthChecker(BaseHealthChecker):
                     # Dict type
                     if d.get("is_primary", False):
                         primary_displays.append(d)
+                    if first_display_id is None:
+                        first_display_id = d.get("identifier") or d.get("name")
                     display_info.append(d)
                 else:
                     # Fallback for other types
@@ -224,6 +244,7 @@ class DisplayHealthChecker(BaseHealthChecker):
                     "total_displays": len(displays),
                     "primary_displays": len(primary_displays),
                     "display_info": display_info,
+                    "default_selected_display": first_display_id,
                 },
             )
         else:
@@ -725,19 +746,3 @@ class SystemHealthMonitor:
         with self._lock:
             self._health_cache.clear()
             logger.info("Health check cache cleared")
-
-
-# Global health monitor instance
-_health_monitor: Optional[SystemHealthMonitor] = None
-
-
-def get_health_monitor() -> SystemHealthMonitor:
-    raise RuntimeError(
-        "SystemHealthMonitor is provided via ServiceRegistry; do not call get_health_monitor() directly"
-    )
-
-
-def reset_health_monitor():
-    raise RuntimeError(
-        "reset_health_monitor is unsupported; use dependency injection in tests"
-    )

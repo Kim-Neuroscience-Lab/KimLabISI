@@ -19,6 +19,7 @@ interface SystemContextValue {
   parametersSnapshot: ParametersSnapshot | null
   healthSnapshot: HealthMessage | null
   lastControlMessage: ControlMessage | null
+  lastSyncMessage: SyncMessage | null
   sendCommand: (command: ISIMessage) => Promise<{ success: boolean; error?: string }>
   emergencyStop: () => Promise<{ success: boolean; error?: string }>
 }
@@ -36,6 +37,7 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
   const [parametersSnapshot, setParametersSnapshot] = useState<ParametersSnapshot | null>(null)
   const [healthSnapshot, setHealthSnapshot] = useState<ISIMessage | null>(null)
   const [lastControlMessage, setLastControlMessage] = useState<ISIMessage | null>(null)
+  const [lastSyncMessage, setLastSyncMessage] = useState<ISIMessage | null>(null)
 
   const handshakeInProgress = useRef(false)
   const lastHealthRequestAt = useRef<number>(0)
@@ -110,6 +112,9 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
 
     const handleSyncMessage = (message: ISIMessage) => {
       if (!mounted) return
+
+      // Store all sync messages for components to access
+      setLastSyncMessage(message)
 
       if (message.type === 'system_state') {
         handleSystemState(message)
@@ -229,6 +234,7 @@ export const SystemProvider: React.FC<React.PropsWithChildren> = ({ children }) 
         parametersSnapshot,
         healthSnapshot,
         lastControlMessage,
+        lastSyncMessage,
         sendCommand,
         emergencyStop,
       }}

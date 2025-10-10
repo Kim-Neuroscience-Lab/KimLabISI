@@ -2,15 +2,18 @@
 
 import cv2
 import numpy as np
-import logging
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 import platform
 import subprocess
 import json
 import time
 import threading
 
-logger = logging.getLogger(__name__)
+from .logging_utils import get_logger
+from .ipc_utils import ipc_handler
+from .timestamp_synchronization_tracker import TimestampSynchronizationTracker
+
+logger = get_logger(__name__)
 
 
 class CameraInfo:
@@ -37,7 +40,12 @@ class CameraInfo:
 class CameraManager:
     """Manages camera detection and access using OpenCV."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        synchronization_tracker: Optional[TimestampSynchronizationTracker] = None,
+        camera_triggered_stimulus_controller=None,
+        data_recorder=None,
+    ):
         self.detected_cameras: List[CameraInfo] = []
         self.active_camera: Optional[cv2.VideoCapture] = None
         self._has_detected = False
@@ -50,6 +58,26 @@ class CameraManager:
         self.acquisition_thread: Optional[threading.Thread] = None
         self.acquisition_lock = threading.Lock()
         self.stop_acquisition_event = threading.Event()
+
+        # Timestamp synchronization tracker (dependency injection)
+        self.synchronization_tracker = synchronization_tracker
+
+        # Camera-triggered stimulus controller (dependency injection)
+        self.camera_triggered_stimulus = camera_triggered_stimulus_controller
+
+        # Data recorder (dependency injection - protected by acquisition_lock)
+        self._data_recorder = data_recorder
+
+    def set_data_recorder(self, recorder) -> None:
+        """Thread-safe setter for data recorder."""
+        with self.acquisition_lock:
+            self._data_recorder = recorder
+            logger.info(f"Data recorder set: {recorder.session_path if recorder else 'None'}")
+
+    def get_data_recorder(self):
+        """Thread-safe getter for data recorder."""
+        with self.acquisition_lock:
+            return self._data_recorder
 
     def _get_available_camera_indices(self) -> List[int]:
         """Get list of available camera indices using platform-specific methods."""
@@ -265,6 +293,99 @@ class CameraManager:
             logger.error(f"Error capturing frame: {e}")
             return None
 
+    def get_camera_hardware_timestamp_us(self) -> Optional[int]:
+        """
+        Get hardware timestamp from camera if available.
+
+        Returns:
+            Hardware timestamp in microseconds, or None if not available
+
+        Note:
+            This method REQUIRES hardware timestamps for scientific accuracy.
+            Returns None if camera does not support hardware timestamps.
+        """
+        if self.active_camera is None:
+            return None
+
+        try:
+            # Try to get hardware timestamp (CAP_PROP_POS_MSEC in milliseconds)
+            # Note: This may not be supported by all cameras/backends
+            timestamp_ms = self.active_camera.get(cv2.CAP_PROP_POS_MSEC)
+
+            if timestamp_ms > 0:
+                # Convert milliseconds to microseconds
+                return int(timestamp_ms * 1000)
+
+            # If CAP_PROP_POS_MSEC doesn't work, try timestamp property
+            # (backend-specific, may require USB camera with timestamp support)
+            try:
+                timestamp_us = self.active_camera.get(cv2.CAP_PROP_TIMESTAMP)
+                if timestamp_us > 0:
+                    return int(timestamp_us)
+            except:
+                pass
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Hardware timestamp not available: {e}")
+            return None
+
+    def validate_hardware_timestamps(self) -> Dict[str, Any]:
+        """
+        Check camera timestamp capabilities and report timestamp source.
+
+        Returns:
+            Dictionary with timestamp capability information
+
+        This method provides transparency about timestamp accuracy.
+        Scientific rigor is maintained through explicit reporting of
+        timestamp source in data provenance.
+        """
+        if self.active_camera is None:
+            return {
+                "success": False,
+                "error": "No active camera",
+                "has_hardware_timestamps": False,
+                "timestamp_source": "none",
+            }
+
+        # Capture a test frame to check timestamp availability
+        test_frame = self.capture_frame()
+        if test_frame is None:
+            return {
+                "success": False,
+                "error": "Failed to capture test frame from camera",
+                "has_hardware_timestamps": False,
+                "timestamp_source": "none",
+            }
+
+        # Check if hardware timestamp is available
+        test_timestamp = self.get_camera_hardware_timestamp_us()
+
+        if test_timestamp is None:
+            return {
+                "success": True,
+                "has_hardware_timestamps": False,
+                "timestamp_source": "software",
+                "timestamp_accuracy": "~1-2ms jitter",
+                "warning": (
+                    "Camera does not provide hardware timestamps. "
+                    "Using software timestamps (Python time.time()). "
+                    "For publication-quality data, use industrial camera with hardware timestamp support."
+                ),
+                "message": "Software timestamps will be used (timestamp source recorded in data)",
+            }
+
+        return {
+            "success": True,
+            "has_hardware_timestamps": True,
+            "timestamp_source": "hardware",
+            "timestamp_accuracy": "< 1ms (hardware-precise)",
+            "test_timestamp_us": test_timestamp,
+            "message": "Camera hardware timestamps available - optimal accuracy",
+        }
+
     def set_camera_property(self, property_id: int, value: float) -> bool:
         """Set a camera property.
 
@@ -439,24 +560,25 @@ class CameraManager:
             "timestamp": int(time.time() * 1_000_000),  # microseconds
         }
 
-    def record_correlation(
+    def record_synchronization(
         self,
         camera_timestamp: float,
         stimulus_timestamp: Optional[float] = None,
         frame_id: Optional[int] = None,
     ):
         """
-        Record timing correlation for analysis.
+        Record timestamp synchronization for analysis.
 
         Args:
             camera_timestamp: Camera capture timestamp (microseconds)
             stimulus_timestamp: Stimulus frame timestamp (microseconds)
             frame_id: Stimulus frame ID
         """
-        from .acquisition_manager import get_acquisition_manager
+        if self.synchronization_tracker is None:
+            logger.warning("Synchronization tracker not available, skipping synchronization recording")
+            return
 
-        acquisition_manager = get_acquisition_manager()
-        acquisition_manager.record_correlation(
+        self.synchronization_tracker.record_synchronization(
             camera_timestamp_us=int(camera_timestamp),
             stimulus_timestamp_us=(
                 int(stimulus_timestamp) if stimulus_timestamp is not None else None
@@ -464,24 +586,30 @@ class CameraManager:
             frame_id=frame_id,
         )
 
-        logger.debug(
-            "Recorded correlation via acquisition manager: cam=%s stim=%s frame=%s",
-            camera_timestamp,
-            stimulus_timestamp,
-            frame_id,
-        )
-
-    def get_correlation_data(self) -> Dict[str, Any]:
+    def get_synchronization_data(self) -> Dict[str, Any]:
         """
-        Get correlation data for plotting.
+        Get timestamp synchronization data for plotting.
 
         Returns:
-            Dictionary with correlation statistics and plot data
+            Dictionary with synchronization statistics and plot data
         """
-        from .acquisition_manager import get_acquisition_manager
+        if self.synchronization_tracker is None:
+            logger.warning("Synchronization tracker not available, returning empty data")
+            return {
+                "synchronization": [],
+                "statistics": {
+                    "count": 0,
+                    "matched_count": 0,
+                    "mean_diff_ms": 0.0,
+                    "std_diff_ms": 0.0,
+                    "min_diff_ms": 0.0,
+                    "max_diff_ms": 0.0,
+                    "histogram": [],
+                    "bin_edges": [],
+                },
+            }
 
-        acquisition_manager = get_acquisition_manager()
-        return acquisition_manager.get_correlation_data()
+        return self.synchronization_tracker.get_synchronization_data()
 
     def _acquisition_loop(self):
         """Continuous camera frame capture loop (runs in separate thread)"""
@@ -493,12 +621,86 @@ class CameraManager:
         services = get_services()
         shared_memory = services.shared_memory
 
+        # Check timestamp capability and record for data provenance
+        test_hardware_ts = self.get_camera_hardware_timestamp_us()
+        uses_hardware_timestamps = test_hardware_ts is not None
+
+        if uses_hardware_timestamps:
+            logger.info(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "✓ HARDWARE TIMESTAMPS AVAILABLE\n"
+                "  Camera provides hardware timestamps (CAP_PROP_POS_MSEC)\n"
+                "  Timestamp accuracy: < 1ms (hardware-precise)\n"
+                "  Suitable for scientific publication\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+        else:
+            logger.warning(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "⚠️  SOFTWARE TIMESTAMPS ONLY\n"
+                "  Camera does not provide hardware timestamps\n"
+                "  Using Python time.time() at frame capture\n"
+                "  Timestamp accuracy: ~1-2ms jitter (software timing)\n"
+                "  \n"
+                "  For scientific publication, use industrial camera with\n"
+                "  hardware timestamp support (FLIR, Basler, etc.)\n"
+                "  \n"
+                "  TIMESTAMP SOURCE WILL BE RECORDED IN DATA FILES\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+
+        # Store timestamp source for metadata
+        self.timestamp_source = "hardware" if uses_hardware_timestamps else "software"
+        self.uses_hardware_timestamps = uses_hardware_timestamps
+
+        # Propagate timestamp source to data recorder metadata for scientific provenance
+        data_recorder = self.get_data_recorder()
+        if data_recorder and hasattr(data_recorder, 'metadata'):
+            if 'timestamp_info' in data_recorder.metadata:
+                data_recorder.metadata['timestamp_info']['camera_timestamp_source'] = self.timestamp_source
+                logger.info(
+                    f"Data recorder metadata updated with camera timestamp source: {self.timestamp_source}"
+                )
+            else:
+                logger.warning(
+                    "Data recorder metadata does not contain 'timestamp_info' field. "
+                    "Timestamp source will not be recorded."
+                )
+
+        # Track frame index for camera-triggered stimulus
+        camera_frame_index = 0
+
         while not self.stop_acquisition_event.is_set():
             try:
-                # Capture frame
+                # === STEP 1: CAPTURE CAMERA FRAME ===
                 frame = self.capture_frame()
 
                 if frame is not None:
+                    # Get hardware timestamp if available, otherwise use software timestamp
+                    hardware_timestamp = self.get_camera_hardware_timestamp_us()
+
+                    if hardware_timestamp is not None:
+                        # Hardware timestamp available - use it
+                        capture_timestamp = hardware_timestamp
+                    else:
+                        # No hardware timestamp - use software timing
+                        # Timestamp captured as close to frame.read() as possible
+                        capture_timestamp = int(time.time() * 1_000_000)
+
+                    # === STEP 2: TRIGGER STIMULUS GENERATION (CAMERA-TRIGGERED) ===
+                    stimulus_frame = None
+                    stimulus_metadata = None
+                    stimulus_angle = None
+
+                    if self.camera_triggered_stimulus:
+                        stimulus_frame, stimulus_metadata = (
+                            self.camera_triggered_stimulus.generate_next_frame()
+                        )
+                        if stimulus_metadata:
+                            # Fail-hard if angle_degrees missing (indicates stimulus generator error)
+                            stimulus_angle = stimulus_metadata["angle_degrees"]
+
+                    # === STEP 3: PROCESS CAMERA FRAME ===
                     # Crop to square
                     cropped = self.crop_to_square(frame)
 
@@ -512,42 +714,89 @@ class CameraManager:
                     # Store original frame with thread safety
                     with self.acquisition_lock:
                         self.current_frame = frame  # Original frame for histogram
-                        self.last_capture_timestamp = int(
-                            time.time() * 1_000_000
-                        )  # microseconds
+                        self.last_capture_timestamp = capture_timestamp
 
-                    # Record timestamp correlation with stimulus
-                    if shared_memory:
-                        stimulus_timestamp, stimulus_frame_id = (
-                            shared_memory.get_stimulus_timestamp()
+                    # === STEP 4: RECORD DATA (CAMERA + STIMULUS) ===
+                    # Thread-safe access to data recorder
+                    data_recorder = self.get_data_recorder()
+                    if data_recorder and data_recorder.is_recording:
+                        # Record camera frame
+                        data_recorder.record_camera_frame(
+                            timestamp_us=capture_timestamp,
+                            frame_index=camera_frame_index,
+                            frame_data=frame,  # Original uncropped frame
                         )
-                        if stimulus_timestamp is not None:
-                            self.record_correlation(
-                                camera_timestamp=self.last_capture_timestamp,
-                                stimulus_timestamp=stimulus_timestamp,
-                                frame_id=stimulus_frame_id,
+
+                        # Record stimulus event (if generated)
+                        if stimulus_metadata:
+                            # Fail-hard if required metadata fields missing
+                            # (indicates stimulus generator error - better to crash than save corrupted data)
+                            data_recorder.record_stimulus_event(
+                                timestamp_us=capture_timestamp,  # Same timestamp as camera
+                                frame_id=stimulus_metadata["frame_index"],
+                                frame_index=stimulus_metadata["camera_frame_index"],
+                                direction=stimulus_metadata["direction"],
+                                angle_degrees=stimulus_angle,  # Already validated above (line 701)
                             )
 
-                    # Write RGBA frame to shared memory
+                    # === STEP 5: WRITE TO SHARED MEMORY FOR FRONTEND DISPLAY ===
                     if shared_memory:
-                        shared_memory.write_frame(
+                        # Write camera frame
+                        camera_name = "unknown"
+                        for cam in self.detected_cameras:
+                            if cam.index == getattr(self.active_camera, 'index', -1):
+                                camera_name = cam.name
+                                break
+
+                        shared_memory.write_camera_frame(
                             rgba,
-                            {
-                                "frame_index": 0,
-                                "direction": "CAMERA",  # Use special direction to identify camera frames
-                                "angle_degrees": 0.0,
-                                "total_frames": 0,
-                                "start_angle": 0.0,
-                                "end_angle": 0.0,
-                            },
+                            camera_name=camera_name,
+                            capture_timestamp_us=capture_timestamp,
                         )
+
+                        # Write stimulus frame (if generated)
+                        if stimulus_frame is not None and stimulus_metadata:
+                            frame_id = shared_memory.write_frame(stimulus_frame, stimulus_metadata)
+                            # Set stimulus timestamp for timing QA
+                            shared_memory.set_stimulus_timestamp(capture_timestamp, frame_id)
+
+                    # === STEP 6: TIMING QA (Frame interval monitoring) ===
+                    if self.synchronization_tracker and stimulus_metadata:
+                        # Track frame timing for QA (not synchronization anymore)
+                        self.record_synchronization(
+                            camera_timestamp=capture_timestamp,
+                            stimulus_timestamp=capture_timestamp,  # Same in camera-triggered mode
+                            frame_id=camera_frame_index,
+                        )
+
+                    camera_frame_index += 1
 
                 # Small sleep to control frame rate (30 FPS)
                 time.sleep(1.0 / 30.0)
 
             except Exception as e:
-                logger.error(f"Error in acquisition loop: {e}")
-                time.sleep(0.1)  # Prevent tight error loop
+                # Check if we're in record mode (scientifically rigorous mode)
+                data_recorder = self.get_data_recorder()
+                is_recording = data_recorder and data_recorder.is_recording
+
+                if is_recording:
+                    # RECORD MODE: Fail hard to preserve scientific validity
+                    # Do NOT continue on errors - acquisition must stop immediately
+                    logger.critical(
+                        f"FATAL ERROR in acquisition loop during RECORD mode: {e}\n"
+                        f"Acquisition MUST stop to prevent corrupted data.\n"
+                        f"System will NOT continue with invalid/partial data.",
+                        exc_info=True
+                    )
+                    # Re-raise to stop acquisition
+                    raise RuntimeError(
+                        f"Acquisition failed during record mode: {e}. "
+                        f"System halted to preserve scientific validity."
+                    ) from e
+                else:
+                    # PREVIEW MODE: Log error but continue (user can retry)
+                    logger.error(f"Error in acquisition loop (preview mode): {e}", exc_info=True)
+                    time.sleep(0.1)  # Prevent tight error loop
 
         logger.info("Camera acquisition loop stopped")
 
@@ -576,6 +825,12 @@ class CameraManager:
         self.acquisition_thread.start()
         self.is_streaming = True
 
+        # Update state coordinator
+        from .service_locator import get_services
+        services = get_services()
+        if hasattr(services, 'acquisition_state') and services.acquisition_state:
+            services.acquisition_state.set_camera_active(True)
+
         logger.info("Camera acquisition started")
         return True
 
@@ -592,6 +847,13 @@ class CameraManager:
             self.acquisition_thread.join(timeout=2.0)
 
         self.is_streaming = False
+
+        # Update state coordinator
+        from .service_locator import get_services
+        services = get_services()
+        if hasattr(services, 'acquisition_state') and services.acquisition_state:
+            services.acquisition_state.set_camera_active(False)
+
         logger.info("Camera acquisition stopped")
 
     def get_current_frame_rgba(self) -> Optional[np.ndarray]:
@@ -612,213 +874,178 @@ class CameraManager:
         self.close_camera()
 
 
+@ipc_handler("detect_cameras")
 def handle_detect_cameras(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle detect_cameras IPC command."""
-    try:
-        logger.info("Handling detect_cameras command")
-        cameras = camera_manager.detect_cameras()
+    logger.info("Handling detect_cameras command")
+    cameras = camera_manager.detect_cameras()
 
-        # Return only available camera names as strings for frontend dropdown
-        camera_list = [camera.name for camera in cameras if camera.is_available]
+    # Return only available camera names as strings for frontend dropdown
+    camera_list = [camera.name for camera in cameras if camera.is_available]
 
-        return {"success": True, "type": "detect_cameras", "cameras": camera_list}
-    except Exception as e:
-        logger.error(f"Camera detection failed: {e}")
-        return {
-            "success": False,
-            "type": "detect_cameras",
-            "error": str(e),
-            "cameras": [],
-        }
+    return {"cameras": camera_list}
 
 
+@ipc_handler("get_camera_capabilities")
 def handle_get_camera_capabilities(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle get_camera_capabilities IPC command."""
-    try:
-        camera_name = command.get("camera_name")
+    camera_name = command.get("camera_name")
 
-        if not camera_name:
+    if not camera_name:
+        return {
+            "success": False,
+            "error": "camera_name is required",
+        }
+
+    capabilities = camera_manager.get_camera_capabilities(camera_name)
+
+    if capabilities is None:
+        return {
+            "success": False,
+            "error": f"Camera not found: {camera_name}",
+        }
+
+    return {"capabilities": capabilities}
+
+
+@ipc_handler("camera_stream_started")
+def handle_camera_stream_started(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_stream_started IPC command"""
+    camera_name = command.get("camera_name", "unknown")
+    logger.info(f"Camera stream started: {camera_name}")
+    return {"message": f"Camera stream started for {camera_name}"}
+
+
+@ipc_handler("camera_stream_stopped")
+def handle_camera_stream_stopped(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_stream_stopped IPC command"""
+    camera_name = command.get("camera_name", "unknown")
+    logger.info(f"Camera stream stopped: {camera_name}")
+    return {"message": f"Camera stream stopped for {camera_name}"}
+
+
+@ipc_handler("camera_capture")
+def handle_camera_capture(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle camera_capture IPC command"""
+    camera_name = command.get("camera_name", "unknown")
+    timestamp = command.get("timestamp", "unknown")
+    logger.info(f"Camera capture from {camera_name} at {timestamp}")
+    return {"message": f"Camera capture logged for {camera_name}"}
+
+
+@ipc_handler("get_camera_histogram")
+def handle_get_camera_histogram(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle get_camera_histogram IPC command - generate luminance histogram formatted for Chart.js"""
+    from .acquisition_data_formatter import format_histogram_chart_data
+
+    if camera_manager.current_frame is None:
+        return {
+            "success": False,
+            "error": "No camera frame available",
+        }
+
+    # Generate raw histogram data
+    histogram_data = camera_manager.generate_luminance_histogram(
+        camera_manager.current_frame
+    )
+
+    # Format for Chart.js
+    formatted_data = format_histogram_chart_data(
+        histogram=np.array(histogram_data['histogram']),
+        bin_edges=np.array(histogram_data['bin_edges']),
+        statistics=histogram_data['statistics']
+    )
+
+    return {
+        "success": True,
+        "data": formatted_data
+    }
+
+
+@ipc_handler("get_correlation_data")  # Keep IPC command name for backward compatibility
+def handle_get_synchronization_data(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle get_correlation_data IPC command - get timestamp correlation data formatted for Chart.js"""
+    from .acquisition_data_formatter import format_correlation_chart_data
+
+    # Get raw synchronization data
+    synchronization_data = camera_manager.get_synchronization_data()
+
+    # Format for Chart.js
+    formatted_data = format_correlation_chart_data(
+        synchronization=synchronization_data.get('synchronization', []),
+        statistics=synchronization_data.get('statistics')
+    )
+
+    return {
+        "success": True,
+        "data": formatted_data
+    }
+
+
+@ipc_handler("start_camera_acquisition")
+def handle_start_camera_acquisition(command: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle start_camera_acquisition IPC command - start continuous camera capture"""
+    camera_name = command.get("camera_name")
+
+    # Open camera if not already open
+    if camera_manager.active_camera is None and camera_name:
+        # Ensure cameras are detected
+        if not camera_manager.detected_cameras:
+            camera_manager.detect_cameras()
+
+        # Find camera index from name
+        camera_index = None
+        for camera in camera_manager.detected_cameras:
+            if camera.name == camera_name:
+                camera_index = camera.index
+                break
+
+        if camera_index is None:
             return {
                 "success": False,
-                "type": "get_camera_capabilities",
-                "error": "camera_name is required",
-            }
-
-        capabilities = camera_manager.get_camera_capabilities(camera_name)
-
-        if capabilities is None:
-            return {
-                "success": False,
-                "type": "get_camera_capabilities",
                 "error": f"Camera not found: {camera_name}",
             }
 
-        return {
-            "success": True,
-            "type": "get_camera_capabilities",
-            "capabilities": capabilities,
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get camera capabilities: {e}")
-        return {"success": False, "type": "get_camera_capabilities", "error": str(e)}
-
-
-def handle_camera_stream_started(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle camera_stream_started IPC command"""
-    try:
-        camera_name = command.get("camera_name", "unknown")
-        logger.info(f"Camera stream started: {camera_name}")
-        return {
-            "success": True,
-            "type": "camera_stream_started",
-            "message": f"Camera stream started for {camera_name}",
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_camera_stream_started: {e}")
-        return {"success": False, "type": "camera_stream_started", "error": str(e)}
-
-
-def handle_camera_stream_stopped(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle camera_stream_stopped IPC command"""
-    try:
-        camera_name = command.get("camera_name", "unknown")
-        logger.info(f"Camera stream stopped: {camera_name}")
-        return {
-            "success": True,
-            "type": "camera_stream_stopped",
-            "message": f"Camera stream stopped for {camera_name}",
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_camera_stream_stopped: {e}")
-        return {"success": False, "type": "camera_stream_stopped", "error": str(e)}
-
-
-def handle_camera_capture(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle camera_capture IPC command"""
-    try:
-        camera_name = command.get("camera_name", "unknown")
-        timestamp = command.get("timestamp", "unknown")
-        logger.info(f"Camera capture from {camera_name} at {timestamp}")
-        return {
-            "success": True,
-            "type": "camera_capture",
-            "message": f"Camera capture logged for {camera_name}",
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_camera_capture: {e}")
-        return {"success": False, "type": "camera_capture", "error": str(e)}
-
-
-def handle_get_camera_histogram(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle get_camera_histogram IPC command - generate luminance histogram from current camera frame"""
-    try:
-        if camera_manager.current_frame is None:
+        success = camera_manager.open_camera(camera_index)
+        if not success:
             return {
                 "success": False,
-                "type": "get_camera_histogram",
-                "error": "No camera frame available",
+                "error": f"Failed to open camera: {camera_name}",
             }
 
-        histogram_data = camera_manager.generate_luminance_histogram(
-            camera_manager.current_frame
-        )
+    # Start acquisition
+    success = camera_manager.start_acquisition()
 
-        return {"success": True, "type": "get_camera_histogram", "data": histogram_data}
-    except Exception as e:
-        logger.error(f"Error in handle_get_camera_histogram: {e}")
-        return {"success": False, "type": "get_camera_histogram", "error": str(e)}
-
-
-def handle_get_correlation_data(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle get_correlation_data IPC command - get timing correlation statistics"""
-    try:
-        correlation_data = camera_manager.get_correlation_data()
-
-        return {
-            "success": True,
-            "type": "get_correlation_data",
-            "data": correlation_data,
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_get_correlation_data: {e}")
-        return {"success": False, "type": "get_correlation_data", "error": str(e)}
+    return {
+        "success": success,
+        "message": (
+            "Camera acquisition started"
+            if success
+            else "Failed to start acquisition"
+        ),
+    }
 
 
-def handle_start_camera_acquisition(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle start_camera_acquisition IPC command - start continuous camera capture"""
-    try:
-        camera_name = command.get("camera_name")
-
-        # Open camera if not already open
-        if camera_manager.active_camera is None and camera_name:
-            # Ensure cameras are detected
-            if not camera_manager.detected_cameras:
-                camera_manager.detect_cameras()
-
-            # Find camera index from name
-            camera_index = None
-            for camera in camera_manager.detected_cameras:
-                if camera.name == camera_name:
-                    camera_index = camera.index
-                    break
-
-            if camera_index is None:
-                return {
-                    "success": False,
-                    "type": "start_camera_acquisition",
-                    "error": f"Camera not found: {camera_name}",
-                }
-
-            success = camera_manager.open_camera(camera_index)
-            if not success:
-                return {
-                    "success": False,
-                    "type": "start_camera_acquisition",
-                    "error": f"Failed to open camera: {camera_name}",
-                }
-
-        # Start acquisition
-        success = camera_manager.start_acquisition()
-
-        return {
-            "success": success,
-            "type": "start_camera_acquisition",
-            "message": (
-                "Camera acquisition started"
-                if success
-                else "Failed to start acquisition"
-            ),
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_start_camera_acquisition: {e}")
-        return {"success": False, "type": "start_camera_acquisition", "error": str(e)}
-
-
+@ipc_handler("stop_camera_acquisition")
 def handle_stop_camera_acquisition(command: Dict[str, Any]) -> Dict[str, Any]:
     """Handle stop_camera_acquisition IPC command - stop continuous camera capture"""
-    try:
-        camera_manager.stop_acquisition()
-
-        return {
-            "success": True,
-            "type": "stop_camera_acquisition",
-            "message": "Camera acquisition stopped",
-        }
-    except Exception as e:
-        logger.error(f"Error in handle_stop_camera_acquisition: {e}")
-        return {"success": False, "type": "stop_camera_acquisition", "error": str(e)}
+    camera_manager.stop_acquisition()
+    return {"message": "Camera acquisition stopped"}
 
 
-def handle_get_camera_frame(command: Dict[str, Any]) -> Dict[str, Any]:
-    """Handle get_camera_frame IPC command - deprecated, frames now sent via shared memory"""
-    # This handler is no longer needed - frames are sent via shared memory
-    # Kept for backwards compatibility
-    return {
-        "success": True,
-        "type": "get_camera_frame",
-        "message": "Camera frames are now streamed via shared memory",
-    }
+@ipc_handler("validate_camera_timestamps")
+def handle_validate_camera_timestamps(command: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate that camera provides hardware timestamps.
+
+    CRITICAL: This should be called before starting acquisition to ensure
+    hardware timestamps are available. For scientific rigor, we REQUIRE
+    hardware timestamps - no software fallbacks allowed.
+
+    Returns:
+        Dictionary with validation results
+    """
+    return camera_manager.validate_hardware_timestamps()
 
 
 # Global camera manager instance

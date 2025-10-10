@@ -5,7 +5,6 @@ This module extracts common patterns used across camera and display managers
 to reduce duplication and provide consistent hardware abstractions.
 """
 
-import logging
 import platform
 import subprocess
 import json
@@ -13,7 +12,9 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger(__name__)
+from .logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass

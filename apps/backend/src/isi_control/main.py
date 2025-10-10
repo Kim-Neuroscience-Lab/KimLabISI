@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional
 
 from .config import AppConfig
 from .logging_utils import configure_root_logger, get_logger
@@ -19,17 +19,20 @@ from .parameter_manager import ParameterManager, ParameterValidationError
 from .service_locator import ServiceRegistry, set_registry, get_services
 from .stimulus_manager import provide_stimulus_generator
 from .stimulus_manager import render_initial_stimulus_frame
+from .timestamp_synchronization_tracker import TimestampSynchronizationTracker
+from .acquisition_state import AcquisitionStateCoordinator
+from .stimulus_controller import StimulusController
 from .camera_manager import (
+    camera_manager,
     handle_detect_cameras,
     handle_get_camera_capabilities,
     handle_camera_stream_started,
     handle_camera_stream_stopped,
     handle_camera_capture,
     handle_get_camera_histogram,
-    handle_get_correlation_data,
+    handle_get_synchronization_data,
     handle_start_camera_acquisition,
     handle_stop_camera_acquisition,
-    handle_get_camera_frame,
 )
 from .stimulus_manager import (
     handle_get_stimulus_parameters,
@@ -49,19 +52,31 @@ from .display_manager import (
     handle_get_display_capabilities,
     handle_select_display,
 )
-from .acquisition_manager import (
-    get_acquisition_manager,
+from .acquisition_manager import get_acquisition_manager
+from .acquisition_ipc_handlers import (
     handle_start_acquisition,
     handle_stop_acquisition,
     handle_get_acquisition_status,
+    handle_set_acquisition_mode,
+)
+from .playback_ipc_handlers import (
+    handle_list_sessions,
+    handle_load_session,
+    handle_get_session_data,
+    handle_unload_session,
+    handle_get_playback_frame,
+)
+from .analysis_ipc_handlers import (
+    handle_start_analysis,
+    handle_stop_analysis,
+    handle_get_analysis_status,
+    handle_capture_anatomical,
+    handle_get_analysis_results,
+    handle_get_analysis_layer,
 )
 
-if TYPE_CHECKING:
-    from .startup_coordinator import StartupCoordinator
-    from .health_monitor import SystemHealthMonitor
-else:
-    from .startup_coordinator import StartupCoordinator
-    from .health_monitor import SystemHealthMonitor
+from .startup_coordinator import StartupCoordinator
+from .health_monitor import SystemHealthMonitor
 
 logger = get_logger(__name__)
 
@@ -80,10 +95,6 @@ class ISIMacroscopeBackend:
         services = get_services()
         self.multi_channel_ipc = services.ipc
         self.shared_memory_service = services.shared_memory
-        self.realtime_producer = None
-
-        # Startup coordination
-        self.startup_ping_responses: Dict[str, Dict[str, Any]] = {}
 
         # Command handlers
         self.command_handlers = {
@@ -93,10 +104,9 @@ class ISIMacroscopeBackend:
             "camera_stream_stopped": handle_camera_stream_stopped,
             "camera_capture": handle_camera_capture,
             "get_camera_histogram": handle_get_camera_histogram,
-            "get_correlation_data": handle_get_correlation_data,
+            "get_correlation_data": handle_get_synchronization_data,  # Backward compatibility
             "start_camera_acquisition": handle_start_camera_acquisition,
             "stop_camera_acquisition": handle_stop_camera_acquisition,
-            "get_camera_frame": handle_get_camera_frame,
             "ping": self.handle_ping,
             "frontend_ready": self.handle_frontend_ready,
             "get_system_status": self.handle_get_system_status,
@@ -123,6 +133,18 @@ class ISIMacroscopeBackend:
             "start_acquisition": handle_start_acquisition,
             "stop_acquisition": handle_stop_acquisition,
             "get_acquisition_status": handle_get_acquisition_status,
+            "set_acquisition_mode": handle_set_acquisition_mode,
+            "list_sessions": handle_list_sessions,
+            "load_session": handle_load_session,
+            "get_session_data": handle_get_session_data,
+            "unload_session": handle_unload_session,
+            "get_playback_frame": handle_get_playback_frame,
+            "start_analysis": handle_start_analysis,
+            "stop_analysis": handle_stop_analysis,
+            "get_analysis_status": handle_get_analysis_status,
+            "capture_anatomical": handle_capture_anatomical,
+            "get_analysis_results": handle_get_analysis_results,
+            "get_analysis_layer": handle_get_analysis_layer,
         }
 
         logger.info("ISI Backend initialized (dev_mode=%s)", development_mode)
@@ -133,11 +155,6 @@ class ISIMacroscopeBackend:
 
         # DO NOT initialize multi-channel IPC here - let the startup coordinator handle it
         # This ensures proper sequenced initialization with progress updates
-
-    def _handle_health_update(self, health_status):
-        """Handle health updates from multi-channel IPC system"""
-        # Optional: forward health updates to frontend
-        pass
 
     def handle_ping(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Handle ping request for health checks."""
@@ -160,14 +177,6 @@ class ISIMacroscopeBackend:
         startup_coordinator = get_services().startup_coordinator
         startup_coordinator.frontend_ready = True
 
-        # Support legacy ping_id for backwards compatibility
-        ping_id = command.get("ping_id")
-        if ping_id:
-            self.startup_ping_responses[ping_id] = {
-                "received": True,
-                "success": True,
-            }
-
         return {
             "success": True,
             "message": "Frontend ready acknowledged",
@@ -183,21 +192,6 @@ class ISIMacroscopeBackend:
             "development_mode": self.development_mode,
         }
 
-    def send_ipc_message(self, message: Dict[str, Any]):
-        """Send IPC message to frontend via SYNC channel only."""
-
-        try:
-            multi_channel_ipc = get_services().ipc
-            success = multi_channel_ipc.send_sync_message(message)
-            if success:
-                logger.info(f"Sent SYNC message: {message.get('type', 'unknown')}")
-            else:
-                logger.warning(
-                    f"Failed to send SYNC message: {message.get('type', 'unknown')}"
-                )
-        except Exception as e:
-            logger.error(f"Error sending SYNC message: {e}")
-
     def _publish_parameter_snapshot(self) -> None:
         param_manager = get_services().parameter_manager
         snapshot = {
@@ -208,57 +202,8 @@ class ISIMacroscopeBackend:
                 "parameter_config", {}
             ),
         }
-        self.send_ipc_message(snapshot)
+        get_services().ipc.send_sync_message(snapshot)
 
-    def start_realtime_streaming(self, stimulus_generator, fps: float = 60.0):
-        """Start real-time frame streaming using shared memory"""
-        logger.debug(
-            f"start_realtime_streaming called: shared_memory_service={self.shared_memory_service is not None}, generator={stimulus_generator is not None}, fps={fps}"
-        )
-
-        if self.shared_memory_service:
-            try:
-                # Stop any existing producer first
-                if self.realtime_producer:
-                    logger.info(
-                        "Stopping existing realtime producer before starting new one"
-                    )
-                    self.shared_memory_service.stop_realtime_streaming()
-                    self.realtime_producer = None
-
-                logger.debug("Creating realtime producer...")
-                self.realtime_producer = (
-                    self.shared_memory_service.start_realtime_streaming(
-                        stimulus_generator, fps
-                    )
-                )
-                logger.info(
-                    f"Real-time streaming started at {fps} FPS, producer={self.realtime_producer is not None}"
-                )
-                return True
-            except Exception as exc:
-                logger.error(
-                    f"Failed to start real-time streaming: {exc}", exc_info=True
-                )
-                return False
-        else:
-            logger.error(
-                "Cannot start real-time streaming: shared_memory_service is None"
-            )
-            return False
-
-    def stop_realtime_streaming(self):
-        """Stop real-time frame streaming"""
-        if self.realtime_producer:
-            self.shared_memory_service.stop_realtime_streaming()
-            self.realtime_producer = None
-            logger.info("Real-time streaming stopped")
-
-    def send_log_message(self, message: str, level: str = "info"):
-        """Send a log message to the frontend console."""
-        self.send_ipc_message(
-            {"type": "log_message", "message": message, "level": level}
-        )
 
     def background_health_monitor(self):
         """Background task to periodically check and broadcast system health (ongoing monitoring only)."""
@@ -286,7 +231,7 @@ class ISIMacroscopeBackend:
                 }
 
                 # Send health update to frontend (not displayed in console)
-                self.send_ipc_message(
+                get_services().ipc.send_sync_message(
                     {
                         "type": "system_health",
                         "timestamp": time.time(),
@@ -489,23 +434,18 @@ class ISIMacroscopeBackend:
                         "Failed to report IPC error via control channel: %s", ipc_error
                     )
 
-    async def start_ipc(self):
-        """Start IPC communication mode."""
-        # Use the synchronous version that actually works
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.start_ipc_sync)
-
     async def shutdown(self):
         """Shutdown the backend gracefully."""
         logger.info("Shutting down ISI Backend...")
         self.running = False
 
-        # Stop real-time streaming
-        self.stop_realtime_streaming()
-
-        # Cleanup multi-channel IPC and shared memory
+        # Cleanup multi-channel IPC and shared memory (cleanup also stops streaming)
         get_services().ipc.cleanup()
         get_services().shared_memory.cleanup()
+
+        # Cleanup analysis shared memory buffer
+        from .analysis_ipc_handlers import cleanup_analysis_shm
+        cleanup_analysis_shm()
 
         # Wait for health monitor thread to finish if it exists
         if self.health_monitor_thread and self.health_monitor_thread.is_alive():
@@ -689,7 +629,42 @@ def build_backend(app_config: AppConfig) -> ISIMacroscopeBackend:
     )
     startup_coordinator = StartupCoordinator()
     health_monitor = SystemHealthMonitor()
+
+    # Create shared services and inject into managers
+    synchronization_tracker = TimestampSynchronizationTracker()
+    acquisition_state = AcquisitionStateCoordinator()
+    stimulus_controller = StimulusController()
+
+    # Create camera-triggered stimulus controller for record mode
+    from .camera_triggered_stimulus import CameraTriggeredStimulusController
+    from .acquisition_mode_controllers import PlaybackModeController
+
+    # Pass parameter_manager during initialization (before service registry is set)
+    stimulus_generator = provide_stimulus_generator(param_manager=parameter_manager)
+    camera_triggered_stimulus = CameraTriggeredStimulusController(stimulus_generator)
+
+    # Create playback controller for playback mode
+    playback_mode_controller = PlaybackModeController(state_coordinator=acquisition_state)
+
+    # Set playback controller globally for IPC handlers
+    import isi_control.playback_ipc_handlers as playback_ipc
+    playback_ipc.playback_controller = playback_mode_controller
+
+    # Create analysis manager for analysis operations
+    from .analysis_manager import get_analysis_manager
+    analysis_manager = get_analysis_manager()
+
     acquisition_manager = get_acquisition_manager()
+    acquisition_manager.synchronization_tracker = synchronization_tracker
+    acquisition_manager.state_coordinator = acquisition_state
+    acquisition_manager.stimulus_controller = stimulus_controller
+    acquisition_manager.camera_triggered_stimulus = camera_triggered_stimulus
+    acquisition_manager.playback_controller = playback_mode_controller
+    # data_recorder will be created dynamically in start_acquisition()
+
+    camera_manager.synchronization_tracker = synchronization_tracker
+    camera_manager.camera_triggered_stimulus = camera_triggered_stimulus
+    # data_recorder will be passed from acquisition_manager
 
     registry = ServiceRegistry(
         config=app_config,
@@ -700,6 +675,12 @@ def build_backend(app_config: AppConfig) -> ISIMacroscopeBackend:
         health_monitor=health_monitor,
         stimulus_generator_provider=lambda: provide_stimulus_generator(),
         acquisition_manager=acquisition_manager,
+        synchronization_tracker=synchronization_tracker,
+        acquisition_state=acquisition_state,
+        camera_triggered_stimulus=camera_triggered_stimulus,
+        playback_controller=playback_mode_controller,
+        data_recorder=None,  # Will be created dynamically in acquisition_manager
+        analysis_manager=analysis_manager,
     )
     set_registry(registry)
 
@@ -719,7 +700,7 @@ async def main():
     signal.signal(signal.SIGINT, backend.handle_signal)
     signal.signal(signal.SIGTERM, backend.handle_signal)
     try:
-        await backend.start_ipc()
+        backend.start_ipc_sync()
     except KeyboardInterrupt:
         pass
     except Exception as exc:

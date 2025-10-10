@@ -25,6 +25,7 @@ function App() {
     errorMessage,
     connectionError,
     lastControlMessage,
+    lastSyncMessage,
     sendCommand,
     healthSnapshot
   } = useSystemContext()
@@ -136,6 +137,7 @@ function App() {
             errorMessage={errorMessage}
             connectionError={connectionError}
             healthSnapshot={healthSnapshot}
+            lastSyncMessage={lastSyncMessage}
             isExperimentRunning={isExperimentRunning}
             currentProgress={currentProgress}
           />

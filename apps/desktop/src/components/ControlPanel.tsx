@@ -13,16 +13,18 @@ import {
 import { ParameterSection, ParameterConfig } from './ParameterSection'
 import { useParameters } from '../hooks/useParameters'
 import type { ISIMessage } from '../types/ipc-messages'
-import type { SystemStatus, SystemStatusValue, CameraInfo, DisplayInfo } from '../types/shared'
 import type {
+  SystemStatus,
+  SystemStatusValue,
+  CameraInfo,
+  DisplayInfo,
   SessionParameters,
   MonitorParameters,
   StimulusParameters,
   AcquisitionParameters,
   AnalysisParameters,
   CameraParameters
-} from '../hooks/useParameterManager'
-// Moved types locally since useHardwareStatus hook has been removed - now consolidated in shared.ts
+} from '../types/shared'
 
 // Backend-compatible parameter configurations
 const sessionParameterConfigs: ParameterConfig[] = [
@@ -440,8 +442,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: FolderCog,
       configs: sessionParameterConfigs,
       initialValues: sessionParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('session', params),
-      validationBoundaries: parameterConfig?.session
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('session', params)
     },
     {
       key: 'monitor',
@@ -453,8 +454,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           : config
       ),
       initialValues: monitorParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('monitor', params),
-      validationBoundaries: parameterConfig?.monitor
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('monitor', params)
     },
     {
       key: 'stimulus',
@@ -462,8 +462,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: Columns3Cog,
       configs: stimulusParameterConfigs,
       initialValues: stimulusParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('stimulus', params),
-      validationBoundaries: parameterConfig?.stimulus
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('stimulus', params)
     },
     {
       key: 'camera',
@@ -475,8 +474,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           : config
       ),
       initialValues: cameraParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('camera', params),
-      validationBoundaries: parameterConfig?.camera
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('camera', params)
     },
     {
       key: 'acquisition',
@@ -484,8 +482,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: FileVideoCamera,
       configs: acquisitionParameterConfigs,
       initialValues: acquisitionParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('acquisition', params),
-      validationBoundaries: parameterConfig?.acquisition
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('acquisition', params)
     },
     {
       key: 'analysis',
@@ -493,8 +490,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       icon: BrainCog,
       configs: analysisParameterConfigs,
       initialValues: analysisParams ?? {},
-      onParametersChange: (params: Record<string, any>) => handleParameterChange('analysis', params),
-      validationBoundaries: parameterConfig?.analysis
+      onParametersChange: (params: Record<string, any>) => handleParameterChange('analysis', params)
     }
   ], [
     sessionParams,
@@ -503,11 +499,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     cameraParams,
     availableCameras,
     availableDisplays,
-    // cameraParametersAutoDetected, // Removed auto-detection
-    // displayParametersAutoDetected, // Removed auto-detection
     acquisitionParams,
     analysisParams,
-    parameterConfig,
     handleParameterChange
   ])
 
@@ -553,7 +546,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
         {/* Parameter Sections */}
-        {sectionConfigs.map(({ key, title, icon, configs, initialValues, onParametersChange, validationBoundaries }) => (
+        {sectionConfigs.map(({ key, title, icon, configs, initialValues, onParametersChange }) => (
           <CollapsibleSection
             key={key}
             title={title}
@@ -567,7 +560,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               initialValues={initialValues}
               configs={configs}
               onParametersChange={onParametersChange}
-              validationBoundaries={validationBoundaries}
             />
           </CollapsibleSection>
         ))}

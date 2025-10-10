@@ -11,7 +11,7 @@ export interface ElectronAPI {
   onSyncMessage: (callback: (message: SyncMessage) => void) => () => void
   onHealthMessage: (callback: (message: HealthMessage) => void) => () => void
   onSharedMemoryFrame: (callback: (frameData: SharedMemoryFrameData) => void) => () => void
-  readSharedMemoryFrame: (offset: number, size: number) => Promise<ArrayBuffer>
+  readSharedMemoryFrame: (offset: number, size: number, shmPath: string) => Promise<ArrayBuffer>
   removeSharedMemoryListener: () => void
   onBackendError: (callback: (error: string) => void) => () => void
   onMainMessage: (callback: (message: string) => void) => () => void

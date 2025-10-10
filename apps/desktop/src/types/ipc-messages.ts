@@ -85,6 +85,103 @@ export interface StartupCommand {
   [key: string]: unknown
 }
 
+// Analysis message types
+export interface AnalysisStartedMessage extends ISIMessage {
+  type: 'analysis_started'
+  session_path: string
+}
+
+export interface AnalysisProgressMessage extends ISIMessage {
+  type: 'analysis_progress'
+  progress: number
+  stage: string
+}
+
+export interface AnalysisLayerReadyMessage extends ISIMessage {
+  type: 'analysis_layer_ready'
+  layer_name: string
+  shape: number[]
+  dtype: string
+  data_min: number
+  data_max: number
+  shm_path: string
+  session_path: string
+  // PNG-based rendering fields
+  image_base64?: string
+  width?: number
+  height?: number
+  format?: string
+}
+
+export interface AnalysisCompleteMessage extends ISIMessage {
+  type: 'analysis_complete'
+  session_path: string
+  output_path: string
+  num_areas: number
+  success: boolean
+}
+
+export interface AnalysisErrorMessage extends ISIMessage {
+  type: 'analysis_error'
+  error: string
+  session_path: string
+}
+
+// Session information
+export interface SessionInfo {
+  session_name: string
+  session_path: string
+  created_at: string
+  last_modified: string
+}
+
+// Command types
+export interface ListSessionsCommand extends ISIMessage {
+  type: 'list_sessions'
+}
+
+export interface ListSessionsResponse extends CommandResponse {
+  sessions?: SessionInfo[]
+}
+
+export interface GetAnalysisResultsCommand extends ISIMessage {
+  type: 'get_analysis_results'
+  session_path: string
+}
+
+export interface GetAnalysisResultsResponse extends CommandResponse {
+  session_path?: string
+  shape?: [number, number]
+  num_areas?: number
+  primary_layers?: string[]
+  advanced_layers?: string[]
+  has_anatomical?: boolean
+}
+
+export interface GetAnalysisCompositeImageCommand extends ISIMessage {
+  type: 'get_analysis_composite_image'
+  session_path: string
+  layers: {
+    anatomical?: { visible: boolean; alpha: number }
+    signal?: { visible: boolean; type: string; alpha: number }
+    overlay?: { visible: boolean; type: string; alpha: number }
+  }
+  width?: number
+  height?: number
+}
+
+export interface GetAnalysisCompositeImageResponse extends CommandResponse {
+  image_base64?: string
+  width?: number
+  height?: number
+  format?: string
+}
+
+export interface StartAnalysisCommand extends ISIMessage {
+  type: 'start_analysis'
+  session_path: string
+}
+
 // Generic message type for untyped messages
 export interface GenericMessage extends ISIMessage {
   type: string
@@ -105,6 +202,11 @@ export type SyncMessage =
   | SystemStateMessage
   | ParameterUpdateMessage
   | HardwareStatusMessage
+  | AnalysisStartedMessage
+  | AnalysisProgressMessage
+  | AnalysisLayerReadyMessage
+  | AnalysisCompleteMessage
+  | AnalysisErrorMessage
   | GenericMessage
 
 // Type guards

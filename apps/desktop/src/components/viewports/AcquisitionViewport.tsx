@@ -27,7 +27,10 @@ import type { ISIMessage, ControlMessage, SyncMessage } from '../../types/ipc-me
 import type { SystemState } from '../../types/shared'
 import type { CameraParameters, StimulusParameters, MonitorParameters, AcquisitionParameters } from '../../hooks/useParameterManager'
 
-// Register Chart.js components
+
+const acquisitionModes = ['preview', 'record', 'playback'] as const
+type AcquisitionMode = typeof acquisitionModes[number]
+
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -39,29 +42,26 @@ ChartJS.register(
   Legend
 )
 
-const acquisitionModes = ["preview", "record", "playback"] as const
-type AcquisitionMode = typeof acquisitionModes[number]
-
 const modeControls: Record<AcquisitionMode, { icon: LucideIcon; key: string; label: string }[]> = {
   preview: [
-    { key: "skipBack", icon: SkipBack, label: "Skip Back" },
-    { key: "stepBack", icon: StepBack, label: "Step Back" },
-    { key: "playPause", icon: Play, label: "Play/Pause" },
-    { key: "stop", icon: Square, label: "Stop" },
-    { key: "stepForward", icon: StepForward, label: "Step Forward" },
-    { key: "skipForward", icon: SkipForward, label: "Skip Forward" },
+    { key: 'skipBack', icon: SkipBack, label: 'Skip Back' },
+    { key: 'stepBack', icon: StepBack, label: 'Step Back' },
+    { key: 'playPause', icon: Play, label: 'Play/Pause' },
+    { key: 'stop', icon: Square, label: 'Stop' },
+    { key: 'stepForward', icon: StepForward, label: 'Step Forward' },
+    { key: 'skipForward', icon: SkipForward, label: 'Skip Forward' },
   ],
   record: [
-    { key: "record", icon: Circle, label: "Record" },
-    { key: "stop", icon: Square, label: "Stop" },
+    { key: 'record', icon: Circle, label: 'Record' },
+    { key: 'stop', icon: Square, label: 'Stop' },
   ],
   playback: [
-    { key: "skipBack", icon: SkipBack, label: "Skip Back" },
-    { key: "stepBack", icon: StepBack, label: "Step Back" },
-    { key: "playPause", icon: Play, label: "Play/Pause" },
-    { key: "stop", icon: Square, label: "Stop" },
-    { key: "stepForward", icon: StepForward, label: "Step Forward" },
-    { key: "skipForward", icon: SkipForward, label: "Skip Forward" },
+    { key: 'skipBack', icon: SkipBack, label: 'Skip Back' },
+    { key: 'stepBack', icon: StepBack, label: 'Step Back' },
+    { key: 'playPause', icon: Play, label: 'Play/Pause' },
+    { key: 'stop', icon: Square, label: 'Stop' },
+    { key: 'stepForward', icon: StepForward, label: 'Step Forward' },
+    { key: 'skipForward', icon: SkipForward, label: 'Skip Forward' },
   ],
 }
 
@@ -99,6 +99,15 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
   const [acquisitionMode, setAcquisitionMode] = useState<AcquisitionMode>('preview')
   const [isCameraVisible, setIsCameraVisible] = useState(true)
   const [cameraError, setCameraError] = useState<string | null>(null)
+
+  // Playback state
+  const [availableSessions, setAvailableSessions] = useState<any[]>([])
+  const [selectedSession, setSelectedSession] = useState<string | null>(null)
+  const [loadedSessionData, setLoadedSessionData] = useState<any>(null)
+  const [playbackFrameIndex, setPlaybackFrameIndex] = useState(0)
+  const [isPlayingBack, setIsPlayingBack] = useState(false)
+  const [currentPlaybackFrame, setCurrentPlaybackFrame] = useState<any>(null)
+  const [isLoadingFrame, setIsLoadingFrame] = useState(false)
 
   // Mini stimulus preview
   const stimulusCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -296,19 +305,104 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     }
   }
 
-  // Listen for camera frames from shared memory (works in both preview and acquisition mode)
+  // Load available sessions for playback
+  const loadAvailableSessions = async () => {
+    try {
+      const result = await sendCommand?.({ type: 'list_sessions' })
+      if (result?.success) {
+        setAvailableSessions(result.sessions || [])
+      }
+    } catch (error) {
+      console.error('Error loading sessions:', error)
+    }
+  }
+
+  // Load a specific session for playback
+  const loadSession = async (sessionPath: string) => {
+    try {
+      console.log('🎬 Loading session:', sessionPath)
+      const result = await sendCommand?.({ type: 'load_session', session_path: sessionPath })
+      console.log('🎬 Load session result:', result)
+
+      if (result?.success) {
+        setSelectedSession(sessionPath)
+        // Load session data for first available direction
+        const dataResult = await sendCommand?.({ type: 'get_session_data' })
+        console.log('🎬 Get session data result:', dataResult)
+
+        if (dataResult?.success && dataResult.directions?.length > 0) {
+          // Load data for first direction
+          const firstDirection = dataResult.directions[0]
+          console.log('🎬 Loading direction:', firstDirection)
+
+          const directionData = await sendCommand?.({
+            type: 'get_session_data',
+            direction: firstDirection
+          })
+          console.log('🎬 Direction data result:', directionData)
+          console.log('🎬 Has camera frames:', !!directionData?.camera_data?.has_frames)
+          console.log('🎬 Frame count:', directionData?.camera_data?.frame_count)
+
+          if (directionData?.success) {
+            setLoadedSessionData(directionData)
+            setPlaybackFrameIndex(0)
+            console.log('✅ Session loaded successfully')
+          } else {
+            console.error('❌ Failed to load direction data')
+          }
+        } else {
+          console.error('❌ No directions available in session')
+        }
+      } else {
+        console.error('❌ Failed to load session:', result?.error)
+      }
+    } catch (error) {
+      console.error('❌ Error loading session:', error)
+    }
+  }
+
+  // Play/pause playback
+  const togglePlayback = () => {
+    setIsPlayingBack(!isPlayingBack)
+  }
+
+  // Step forward one frame
+  const stepForward = () => {
+    if (loadedSessionData?.camera_data?.has_frames) {
+      setPlaybackFrameIndex(prev =>
+        Math.min(prev + 1, loadedSessionData.camera_data.frame_count - 1)
+      )
+    }
+  }
+
+  // Step backward one frame
+  const stepBackward = () => {
+    setPlaybackFrameIndex(prev => Math.max(prev - 1, 0))
+  }
+
+  // Skip to start
+  const skipToStart = () => {
+    setPlaybackFrameIndex(0)
+  }
+
+  // Skip to end
+  const skipToEnd = () => {
+    if (loadedSessionData?.camera_data?.has_frames) {
+      setPlaybackFrameIndex(loadedSessionData.camera_data.frame_count - 1)
+    }
+  }
+
+  // Listen for camera frames from camera-specific shared memory channel
   useEffect(() => {
     if (!isPreviewing && !isAcquiring) return
 
-    const handleSharedMemoryFrame = async (metadata: any) => {
+    const handleCameraFrame = async (metadata: any) => {
       try {
-        // Only process camera frames (direction === 'CAMERA')
-        if (metadata.direction !== 'CAMERA') return
-
-        // Read actual frame data from shared memory using offset and size
+        // Read actual frame data from shared memory using offset, size, and path
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
-          metadata.data_size_bytes
+          metadata.data_size_bytes,
+          metadata.shm_path
         )
 
         // Create ImageData from RGBA buffer
@@ -343,9 +437,10 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         setCameraStats({
           width,
           height,
-          timestamp_us: metadata.timestamp_us,
-          timestamp_ms: metadata.timestamp_us / 1000,
-          frame_id: metadata.frame_id || frameCount
+          timestamp_us: metadata.timestamp_us || metadata.capture_timestamp_us,
+          timestamp_ms: (metadata.timestamp_us || metadata.capture_timestamp_us) / 1000,
+          frame_id: metadata.frame_id || frameCount,
+          camera_name: metadata.camera_name
         })
       } catch (error) {
         console.error('Failed to read camera frame from shared memory:', error)
@@ -353,8 +448,8 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     }
 
     let unsubscribe: (() => void) | undefined
-    if (window.electronAPI?.onSharedMemoryFrame) {
-      unsubscribe = window.electronAPI.onSharedMemoryFrame(handleSharedMemoryFrame)
+    if (window.electronAPI?.onCameraFrame) {
+      unsubscribe = window.electronAPI.onCameraFrame(handleCameraFrame)
     }
 
     return () => {
@@ -362,15 +457,12 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     }
   }, [isPreviewing, isAcquiring])
 
-  // Listen for stimulus frames from shared memory for mini preview
+  // Listen for stimulus frames from stimulus-specific shared memory channel for mini preview
   // During acquisition: show live stimulus
   // During preview: show static frame from slider
   useEffect(() => {
     const handleStimulusFrame = async (metadata: any) => {
       try {
-        // Only process stimulus frames (direction !== 'CAMERA')
-        if (metadata.direction === 'CAMERA') return
-
         // During acquisition: accept all stimulus frames (show live playback)
         // During preview: only accept frames matching slider position
         if (!isAcquiring && metadata.frame_index !== sharedFrameIndex) {
@@ -380,7 +472,8 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
         // Read actual frame data from shared memory
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
           metadata.offset_bytes,
-          metadata.data_size_bytes
+          metadata.data_size_bytes,
+          metadata.shm_path
         )
 
         // Render to stimulus canvas
@@ -430,89 +523,68 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     }
   }, [sharedFrameIndex, isAcquiring])
 
-  // Update histogram chart data
+  // Update histogram chart data (backend now provides Chart.js-ready format)
   const updateHistogramChart = useCallback((data: any) => {
-    if (!data?.histogram || !data?.bin_edges) return
-
-    const { histogram, bin_edges, statistics } = data
-
-    // Create labels from bin edges (show every 32nd bin for readability)
-    const labels = bin_edges.slice(0, -1).map((_: number, i: number) =>
-      i % 32 === 0 ? Math.round(bin_edges[i]).toString() : ''
-    )
+    if (!data?.labels || !data?.data) return
 
     setHistogramChartData({
-      labels,
+      labels: data.labels,
       datasets: [{
         label: 'Pixel Count',
-        data: histogram,
+        data: data.data,
         backgroundColor: 'rgba(255, 255, 255, 0.8)',
         borderColor: 'rgba(255, 255, 255, 1)',
         borderWidth: 1,
       }]
     })
 
-    setHistogramStats(statistics)
+    setHistogramStats(data.statistics)
   }, [])
 
-  // Update correlation chart data - scrolling line chart of last 5 seconds
+  // Update correlation chart data (backend now provides Chart.js-ready format)
   const updateCorrelationChart = useCallback((data: any) => {
-    console.log('📈 Correlation data received:', data)
+    console.log('📈 Timing data received:', data)
 
-    // Check if we have correlation data
-    if (!data?.correlations || data.correlations.length === 0) {
-      console.warn('📈 No correlation data yet')
+    // Backend sends empty arrays if no valid data
+    if (!data?.labels || data.labels.length === 0) {
+      console.warn('📈 No timing data available')
+      setCorrelationChartData({
+        labels: [],
+        datasets: [{
+          label: 'Timing Difference (ms)',
+          data: [],
+          borderColor: 'rgba(59, 130, 246, 1)',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          borderWidth: 2,
+          pointRadius: 1,
+          pointHoverRadius: 4,
+          tension: 0.1,
+        }]
+      })
+      setCorrelationStats(null)
       return
     }
 
-    const { correlations, statistics } = data
-    const currentTime = Date.now() * 1000 // Convert to microseconds
-    const fiveSecondsAgo = currentTime - (5 * 1_000_000) // 5 seconds in microseconds
-
-    // Filter to only show last 5 seconds and valid correlations
-    const recentCorrelations = correlations
-      .filter((c: any) =>
-        c.camera_timestamp >= fiveSecondsAgo &&
-        c.time_difference_us !== null &&
-        c.time_difference_us !== undefined
-      )
-
-    if (recentCorrelations.length === 0) {
-      console.warn('📈 No recent correlations in last 5 seconds')
-      return
-    }
-
-    // Get the earliest timestamp for relative time calculation
-    const earliestTimestamp = Math.min(...recentCorrelations.map((c: any) => c.camera_timestamp))
-
-    // Convert to relative time (seconds from start) and time difference (milliseconds)
-    const timePoints = recentCorrelations.map((c: any) =>
-      (c.camera_timestamp - earliestTimestamp) / 1_000_000 // Convert to seconds
-    )
-    const timeDiffs = recentCorrelations.map((c: any) =>
-      c.time_difference_us / 1000 // Convert to milliseconds
-    )
-
-    console.log('📈 Plotting', recentCorrelations.length, 'correlations from last 5 seconds')
+    console.log('📈 Plotting', data.labels.length, 'timing points')
 
     setCorrelationChartData({
-      labels: timePoints.map((t: number) => t.toFixed(2)),
+      labels: data.labels,
       datasets: [{
         label: 'Timing Difference (ms)',
-        data: timeDiffs,
+        data: data.data,
         borderColor: 'rgba(59, 130, 246, 1)',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         borderWidth: 2,
         pointRadius: 1,
         pointHoverRadius: 4,
-        tension: 0.1, // Slight smoothing
+        tension: 0.1,
       }]
     })
 
-    setCorrelationStats(statistics)
+    setCorrelationStats(data.statistics)
   }, [])
 
-  // Format elapsed time as HH:MM:SS:FF (frames at 30fps)
+  // Format elapsed time as HH:MM:SS:FF (frames at camera FPS)
   const formatElapsedTime = useCallback((startTime: number | null, currentFrameCount: number): string => {
     if (!startTime || !isAcquiring) {
       return '00:00:00:00'
@@ -522,10 +594,13 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     const hours = Math.floor(elapsedMs / 3600000)
     const minutes = Math.floor((elapsedMs % 3600000) / 60000)
     const seconds = Math.floor((elapsedMs % 60000) / 1000)
-    const frames = currentFrameCount % 30 // Assuming 30fps
+
+    // Use camera FPS from parameters, fallback to 30fps
+    const cameraFps = cameraParams?.camera_fps || 30
+    const frames = currentFrameCount % cameraFps
 
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`
-  }, [isAcquiring])
+  }, [isAcquiring, cameraParams?.camera_fps])
 
   // Poll for histogram (any time camera is active)
   useEffect(() => {
@@ -649,12 +724,119 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     }
   }, [isAcquiring, sendCommand])
 
-  // Auto-start preview when camera is selected
+  // Load available sessions when playback mode is selected
   useEffect(() => {
-    if (cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring) {
+    if (acquisitionMode === 'playback' && systemState?.isConnected) {
+      loadAvailableSessions()
+    }
+  }, [acquisitionMode, systemState?.isConnected])
+
+  // Load playback frame on-demand when frame index changes
+  useEffect(() => {
+    if (!loadedSessionData?.camera_data?.has_frames || acquisitionMode !== 'playback') return
+
+    const loadFrame = async () => {
+      setIsLoadingFrame(true)
+      try {
+        const result = await sendCommand?.({
+          type: 'get_playback_frame',
+          direction: loadedSessionData.direction,
+          frame_index: playbackFrameIndex
+        })
+
+        if (result?.success && result?.frame_data) {
+          setCurrentPlaybackFrame(result)
+        } else {
+          console.error('❌ Failed to load playback frame:', result?.error)
+        }
+      } catch (error) {
+        console.error('❌ Error loading playback frame:', error)
+      } finally {
+        setIsLoadingFrame(false)
+      }
+    }
+
+    loadFrame()
+  }, [playbackFrameIndex, loadedSessionData, acquisitionMode, sendCommand])
+
+  // Playback timer - auto-advance frames at session FPS (only when not loading)
+  useEffect(() => {
+    if (!isPlayingBack || !loadedSessionData?.camera_data?.has_frames) return
+
+    // Get FPS from session metadata, fallback to 30fps
+    const playbackFps = loadedSessionData?.metadata?.acquisition?.camera_fps ||
+                        loadedSessionData?.metadata?.camera?.camera_fps ||
+                        30
+
+    const interval = setInterval(() => {
+      // Only advance if not currently loading a frame (backpressure)
+      if (!isLoadingFrame) {
+        setPlaybackFrameIndex(prev => {
+          const next = prev + 1
+          if (next >= loadedSessionData.camera_data.frame_count) {
+            setIsPlayingBack(false) // Stop at end
+            return prev
+          }
+          return next
+        })
+      }
+    }, 1000 / playbackFps)
+
+    return () => clearInterval(interval)
+  }, [isPlayingBack, loadedSessionData, isLoadingFrame])
+
+  // Render playback frame to canvas
+  useEffect(() => {
+    if (!currentPlaybackFrame?.frame_data || acquisitionMode !== 'playback') return
+
+    const canvas = cameraCanvasRef.current
+    if (!canvas) return
+
+    const frameData = currentPlaybackFrame.frame_data
+    if (!frameData) return
+
+    // Frame data is shape [height, width] grayscale
+    const height = frameData.length
+    const width = frameData[0]?.length || 0
+
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width
+      canvas.height = height
+    }
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // Convert grayscale to RGBA
+    const imageData = ctx.createImageData(width, height)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4
+        const value = frameData[y][x]
+        imageData.data[idx] = value     // R
+        imageData.data[idx + 1] = value // G
+        imageData.data[idx + 2] = value // B
+        imageData.data[idx + 3] = 255   // A
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0)
+  }, [currentPlaybackFrame, acquisitionMode])
+
+  // Stop camera when entering playback mode
+  useEffect(() => {
+    if (acquisitionMode === 'playback' && (isPreviewing || isAcquiring)) {
+      console.log('🎬 Entering playback mode - stopping live camera')
+      stopPreview()
+    }
+  }, [acquisitionMode, isPreviewing, isAcquiring])
+
+  // Auto-start preview when camera is selected (not in playback mode)
+  useEffect(() => {
+    if (acquisitionMode !== 'playback' && cameraParams?.selected_camera && systemState?.isConnected && !isPreviewing && !isAcquiring) {
       startPreview()
     }
-  }, [cameraParams?.selected_camera, systemState?.isConnected, isPreviewing, isAcquiring])
+  }, [cameraParams?.selected_camera, systemState?.isConnected, isPreviewing, isAcquiring, acquisitionMode])
 
   // Update mini stimulus preview when parameters or shared state change
   // This triggers backend to generate and write frame to shared memory
@@ -692,15 +874,24 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
     (action: string) => {
       switch (action) {
         case 'playPause': {
-          if (isAcquiring) {
-            stopAcquisition()
+          if (acquisitionMode === 'playback') {
+            togglePlayback()
           } else {
-            startAcquisition()
+            if (isAcquiring) {
+              stopAcquisition()
+            } else {
+              startAcquisition()
+            }
           }
           break
         }
         case 'stop': {
-          stopAcquisition()
+          if (acquisitionMode === 'playback') {
+            setIsPlayingBack(false)
+            setPlaybackFrameIndex(0)
+          } else {
+            stopAcquisition()
+          }
           break
         }
         case 'record': {
@@ -709,11 +900,28 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
           }
           break
         }
-        case 'skipBack':
-        case 'stepBack':
-        case 'stepForward':
+        case 'skipBack': {
+          if (acquisitionMode === 'playback') {
+            skipToStart()
+          }
+          break
+        }
+        case 'stepBack': {
+          if (acquisitionMode === 'playback') {
+            stepBackward()
+          }
+          break
+        }
+        case 'stepForward': {
+          if (acquisitionMode === 'playback') {
+            stepForward()
+          }
+          break
+        }
         case 'skipForward': {
-          console.debug(`[AcquisitionViewport] Control '${action}' not yet implemented`)
+          if (acquisitionMode === 'playback') {
+            skipToEnd()
+          }
           break
         }
         default: {
@@ -726,16 +934,16 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Two-column layout: Camera+Info | Stimulus+Plots */}
-      <div className="flex-1 flex gap-2 p-2 min-h-0 items-start">
-        {/* Left Column - Camera + Info */}
-        <div className="flex flex-col gap-2 h-full">
-          {/* Camera Feed - Square Aspect Ratio */}
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col gap-2 p-2 min-h-0 overflow-hidden">
+        {/* Top row: Camera | Camera Status | Stimulus */}
+        <div className="flex gap-2 min-h-0" style={{ height: '50%' }}>
+          {/* Camera Feed */}
           {isCameraVisible ? (
-            <div className="flex-1 aspect-square bg-black border border-sci-secondary-600 rounded-lg overflow-hidden relative min-h-0">
+            <div className="relative bg-black border border-sci-secondary-600 rounded-lg overflow-hidden" style={{ aspectRatio: `${cameraStats?.width || 640} / ${cameraStats?.height || 480}`, height: '100%', contain: 'layout size' }}>
               <canvas
                 ref={cameraCanvasRef}
-                style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+                className="absolute inset-0 w-full h-full"
               />
 
               {/* Error State */}
@@ -761,7 +969,7 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
               )}
             </div>
           ) : (
-            <div className="flex-1 aspect-square bg-sci-secondary-800 border border-dashed border-sci-secondary-600 rounded-lg flex items-center justify-center text-sci-secondary-400">
+            <div className="bg-sci-secondary-800 border border-dashed border-sci-secondary-600 rounded-lg flex items-center justify-center text-sci-secondary-400" style={{ aspectRatio: '4/3', height: '100%' }}>
               <div className="flex flex-col items-center gap-2">
                 <ScanEye className="w-6 h-6" />
                 <span className="text-sm">Camera view hidden</span>
@@ -769,27 +977,70 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
             </div>
           )}
 
-          {/* Camera Information */}
-          <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-3">
+          {/* Camera Information - Expands to fill center */}
+          <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-3 h-full overflow-auto flex-1 min-w-0">
             <div className="text-sm font-medium text-sci-secondary-200 mb-2">
-              {isAcquiring ? 'Acquisition Status' : 'Camera Status'}
+              {acquisitionMode === 'playback' ? 'Playback Status' : isAcquiring ? 'Acquisition Status' : 'Camera Status'}
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <div>
-                <span className="text-sci-secondary-400">Camera:</span>
-                <span className="ml-1 text-sci-secondary-200">
-                  {cameraParams?.selected_camera || 'None'}
-                </span>
-              </div>
-              <div>
-                <span className="text-sci-secondary-400">Status:</span>
-                <span className={`ml-1 font-medium ${
-                  isAcquiring ? 'text-sci-success-400' : isPreviewing ? 'text-sci-accent-400' : 'text-sci-secondary-500'
-                }`}>
-                  {isAcquiring ? 'ACQUIRING' : isPreviewing ? 'PREVIEW' : 'STOPPED'}
-                </span>
-              </div>
-              {(isPreviewing || isAcquiring) && (
+              {acquisitionMode === 'playback' ? (
+                <>
+                  <div className="col-span-2">
+                    <span className="text-sci-secondary-400">Session:</span>
+                    <span className="ml-1 text-sci-secondary-200">
+                      {loadedSessionData?.metadata?.session_name || 'None'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-sci-secondary-400">Frame:</span>
+                    <span className="ml-1 text-sci-secondary-200 font-mono">
+                      {playbackFrameIndex + 1}/{loadedSessionData?.camera_data?.frame_count || 0}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-sci-secondary-400">Status:</span>
+                    <span className={`ml-1 font-medium ${
+                      isPlayingBack ? 'text-sci-success-400' : 'text-sci-secondary-500'
+                    }`}>
+                      {isPlayingBack ? 'PLAYING' : 'PAUSED'}
+                    </span>
+                  </div>
+                  {loadedSessionData?.camera_data && (
+                    <>
+                      <div>
+                        <span className="text-sci-secondary-400">Direction:</span>
+                        <span className="ml-1 text-sci-secondary-200">
+                          {loadedSessionData.direction || 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-sci-secondary-400">Resolution:</span>
+                        <span className="ml-1 text-sci-secondary-200 font-mono">
+                          {currentPlaybackFrame?.frame_data?.[0]?.length || 0}×{currentPlaybackFrame?.frame_data?.length || 0}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span className="text-sci-secondary-400">Camera:</span>
+                    <span className="ml-1 text-sci-secondary-200">
+                      {cameraParams?.selected_camera || 'None'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-sci-secondary-400">Status:</span>
+                    <span className={`ml-1 font-medium ${
+                      isAcquiring ? 'text-sci-success-400' : isPreviewing ? 'text-sci-accent-400' : 'text-sci-secondary-500'
+                    }`}>
+                      {isAcquiring ? 'ACQUIRING' : isPreviewing ? 'PREVIEW' : 'STOPPED'}
+                    </span>
+                  </div>
+                </>
+              )}
+              {acquisitionMode !== 'playback' && (isPreviewing || isAcquiring) && (
                 <>
                   <div>
                     <span className="text-sci-secondary-400">Frame:</span>
@@ -858,22 +1109,20 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
               )}
             </div>
           </div>
-        </div>
 
-        {/* Right Column - Stimulus + Plots */}
-        <div className="flex flex-col gap-2 h-full">
-          {/* Stimulus Preview - Monitor Aspect Ratio */}
-          <div className="flex-1 bg-black border border-sci-secondary-600 rounded-lg overflow-hidden min-h-0" style={{ aspectRatio: `${monitorParams?.monitor_width_px || 1728} / ${monitorParams?.monitor_height_px || 1117}` }}>
+          {/* Stimulus Preview - Same height as camera */}
+          <div className="relative bg-black border border-sci-secondary-600 rounded-lg overflow-hidden" style={{ aspectRatio: `${monitorParams?.monitor_width_px || 1728} / ${monitorParams?.monitor_height_px || 1117}`, height: '100%', contain: 'layout size' }}>
             <canvas
               ref={stimulusCanvasRef}
-              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+              className="absolute inset-0 w-full h-full"
             />
           </div>
+        </div>
 
-          {/* Plots Row */}
-          <div className="grid grid-cols-2 gap-2">
+        {/* Bottom row: Two plots equally sized */}
+        <div className="grid grid-cols-2 gap-2 flex-1 min-h-0">
             {/* Luminance Histogram */}
-            <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-2 flex flex-col h-48">
+            <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-2 flex flex-col h-full min-w-0">
               <div className="text-xs text-sci-secondary-400 mb-1 flex-none">
                 Luminance
                 {histogramStats && (
@@ -910,13 +1159,13 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
               </div>
             </div>
 
-            {/* Timing Correlation Plot - Scrolling Line Chart (Last 5s) */}
-            <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-2 flex flex-col h-48">
+            {/* Frame Timing Plot - Scrolling Line Chart (Last 5s) */}
+            <div className="bg-sci-secondary-800 border border-sci-secondary-600 rounded-lg p-2 flex flex-col h-full min-w-0">
               <div className="text-xs text-sci-secondary-400 mb-1 flex-none">
-                Timing Correlation (Last 5s)
-                {correlationStats && (
+                Frame Timing (Last 5s)
+                {correlationStats && correlationStats.matched_count > 0 && (
                   <span className="ml-2 text-sci-secondary-500">
-                    μ={(correlationStats.mean_diff_ms || 0).toFixed(2)}ms σ={(correlationStats.std_diff_ms || 0).toFixed(2)}ms
+                    μ={correlationStats.mean_diff_ms.toFixed(2)}ms σ={correlationStats.std_diff_ms.toFixed(2)}ms
                   </span>
                 )}
               </div>
@@ -950,12 +1199,10 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
               </div>
             </div>
           </div>
-        </div>
       </div>
 
       {/* Control Buttons */}
-      <div className="flex flex-col gap-2 p-3 border-t border-sci-secondary-600 bg-sci-secondary-800/60">
-        <div className="flex items-center gap-3 justify-center">
+      <div className="flex items-center gap-4 p-3 border-t border-sci-secondary-600 bg-sci-secondary-800/60 justify-center">
           <div className="flex items-center gap-2">
             <label className="text-xs uppercase tracking-wide text-sci-secondary-400">Mode</label>
             <select
@@ -971,28 +1218,49 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
             </select>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsCameraVisible((value) => !value)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
-              isCameraVisible
-                ? 'bg-sci-primary-600 border-sci-primary-500 text-white hover:bg-sci-primary-500'
-                : 'bg-sci-secondary-700 border-sci-secondary-500 text-sci-secondary-200 hover:bg-sci-secondary-600'
-            }`}
-          >
-            <ScanEye className="w-4 h-4" />
-            Camera {isCameraVisible ? 'On' : 'Off'}
-          </button>
-        </div>
+          {/* Session selector for playback mode */}
+          {acquisitionMode === 'playback' && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs uppercase tracking-wide text-sci-secondary-400">Session</label>
+              <select
+                value={selectedSession || ''}
+                onChange={(event) => loadSession(event.target.value)}
+                className="bg-sci-secondary-700 border border-sci-secondary-500 rounded px-2 py-1 text-sm text-sci-secondary-100 focus:outline-none focus:ring-2 focus:ring-sci-primary-600"
+              >
+                <option value="">Select a session...</option>
+                {availableSessions.map((session) => (
+                  <option key={session.session_path} value={session.session_path}>
+                    {session.session_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-        <div className="flex items-center justify-center gap-2">
+          {acquisitionMode !== 'playback' && (
+            <button
+              type="button"
+              onClick={() => setIsCameraVisible((value) => !value)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
+                isCameraVisible
+                  ? 'bg-sci-primary-600 border-sci-primary-500 text-white hover:bg-sci-primary-500'
+                  : 'bg-sci-secondary-700 border-sci-secondary-500 text-sci-secondary-200 hover:bg-sci-secondary-600'
+              }`}
+            >
+              <ScanEye className="w-4 h-4" />
+              Camera {isCameraVisible ? 'On' : 'Off'}
+            </button>
+          )}
+
           {modeControls[acquisitionMode].map(({ key, icon }) => {
             const isPlayPause = key === 'playPause'
             const isRecord = key === 'record'
             const isStop = key === 'stop'
 
             const isDisabled =
-              !isPreviewing && !isAcquiring && key !== 'playPause' && key !== 'record'
+              acquisitionMode === 'playback'
+                ? !loadedSessionData?.camera_data?.has_frames // Disable if no frames loaded in playback mode
+                : (!isPreviewing && !isAcquiring && key !== 'playPause' && key !== 'record')
 
             const baseButtonClasses =
               'w-9 h-9 flex items-center justify-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-sci-secondary-900'
@@ -1003,7 +1271,17 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
             let IconComponent: LucideIcon = icon
 
             if (isPlayPause) {
-              if (isAcquiring) {
+              if (acquisitionMode === 'playback') {
+                if (isPlayingBack) {
+                  IconComponent = Pause
+                  buttonClasses =
+                    'bg-sci-accent-600 border-sci-accent-500 text-white hover:bg-sci-accent-500'
+                } else {
+                  IconComponent = Play
+                  buttonClasses =
+                    'bg-sci-primary-600 border-sci-primary-500 text-white hover:bg-sci-primary-500'
+                }
+              } else if (isAcquiring) {
                 IconComponent = Pause
                 buttonClasses =
                   'bg-sci-accent-600 border-sci-accent-500 text-white hover:bg-sci-accent-500'
@@ -1038,7 +1316,6 @@ const AcquisitionViewport: React.FC<AcquisitionViewportProps> = ({
               </button>
             )
           })}
-        </div>
       </div>
     </div>
   )

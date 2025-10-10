@@ -11,17 +11,64 @@ import numpy as np
 import h5py
 import json
 import os
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Tuple, Any, Optional
 from scipy import ndimage
 from scipy.fft import fft, fftfreq
 import cv2
 
+from .logging_utils import get_logger
+
+logger = get_logger(__name__)
+
+# GPU acceleration support
+try:
+    import torch
+    GPU_AVAILABLE = torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else torch.cuda.is_available()
+    if GPU_AVAILABLE:
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            DEVICE = torch.device('mps')
+            DEVICE_NAME = 'MPS (Apple Metal)'
+        elif torch.cuda.is_available():
+            DEVICE = torch.device('cuda')
+            DEVICE_NAME = f'CUDA (GPU {torch.cuda.get_device_name(0)})'
+        else:
+            GPU_AVAILABLE = False
+            DEVICE = torch.device('cpu')
+            DEVICE_NAME = 'CPU'
+    else:
+        DEVICE = torch.device('cpu')
+        DEVICE_NAME = 'CPU'
+except ImportError:
+    GPU_AVAILABLE = False
+    DEVICE = None
+    DEVICE_NAME = 'CPU (PyTorch not available)'
+
+logger.info(f"ISI Analysis GPU Status: {DEVICE_NAME}, GPU Available: {GPU_AVAILABLE}")
+
 class ISIAnalysis:
     """Complete analysis pipeline for ISI data"""
 
-    def __init__(self):
+    def __init__(self, params: Optional[Dict[str, Any]] = None, layer_callback=None):
+        """
+        Initialize ISI analysis pipeline.
+
+        Args:
+            params: Analysis parameters dictionary (from ParameterManager)
+                   If None, uses default values for all parameters
+            layer_callback: Optional callback function(layer_name, layer_data) called when
+                           intermediate results are ready for visualization
+        """
+        self.params = params or {}
         self.session_data = {}
         self.results = {}
+        self.use_gpu = GPU_AVAILABLE
+        self.layer_callback = layer_callback
+
+        # Log GPU status on initialization
+        if self.use_gpu:
+            logger.info(f"✓ GPU acceleration enabled: {DEVICE_NAME}")
+        else:
+            logger.warning(f"⚠ GPU acceleration not available, using CPU: {DEVICE_NAME}")
 
     # ========== PREPROCESSING ==========
 
@@ -50,8 +97,8 @@ class ISIAnalysis:
             session_data['anatomical'] = np.load(anatomical_path)
             print(f"  Loaded anatomical image: {session_data['anatomical'].shape}")
 
-        # Load direction data
-        directions = metadata.get('directions', ['LR', 'RL', 'TB', 'BT'])
+        # Load direction data (from acquisition section)
+        directions = metadata.get('acquisition', {}).get('directions', ['LR', 'RL', 'TB', 'BT'])
 
         for direction in directions:
             print(f"  Loading {direction} data...")
@@ -60,12 +107,44 @@ class ISIAnalysis:
             camera_path = os.path.join(session_path, f"{direction}_camera.h5")
             if os.path.exists(camera_path):
                 with h5py.File(camera_path, 'r') as f:
+                    frames = f['frames'][:]
+                    timestamps = f['timestamps'][:]
+
+                    # Convert RGB/BGR frames to grayscale if needed
+                    # Camera saves BGR frames (h, w, 3), but analysis expects grayscale (h, w)
+                    if len(frames.shape) == 4:
+                        original_shape = frames.shape
+                        if frames.shape[3] == 3:
+                            # RGB/BGR to grayscale using proper luminance weights
+                            # Use BGR order since OpenCV captures in BGR
+                            # Weights: 0.299*R + 0.587*G + 0.114*B
+                            print(f"    Converting BGR frames {original_shape} to grayscale...")
+                            frames = np.dot(frames[..., :3], [0.114, 0.587, 0.299])
+                            frames = frames.astype(np.uint8)
+                            print(f"    Converted to grayscale: {frames.shape}")
+                        elif frames.shape[3] == 4:
+                            # RGBA to grayscale (ignore alpha channel)
+                            print(f"    Converting RGBA frames {original_shape} to grayscale...")
+                            frames = np.dot(frames[..., :3], [0.114, 0.587, 0.299])
+                            frames = frames.astype(np.uint8)
+                            print(f"    Converted to grayscale: {frames.shape}")
+                        else:
+                            raise ValueError(
+                                f"Unexpected frame shape: {original_shape}. "
+                                f"Expected (n, h, w) for grayscale or (n, h, w, 3) for RGB/BGR"
+                            )
+                    elif len(frames.shape) != 3:
+                        raise ValueError(
+                            f"Invalid frame array shape: {frames.shape}. "
+                            f"Expected 3D (n, h, w) or 4D (n, h, w, c)"
+                        )
+
                     camera_data = {
-                        'frames': f['frames'][:],
-                        'timestamps': f['timestamps'][:]
+                        'frames': frames,
+                        'timestamps': timestamps
                     }
                 session_data[f'{direction}_camera'] = camera_data
-                print(f"    Camera: {camera_data['frames'].shape}")
+                print(f"    Camera: {camera_data['frames'].shape} dtype={camera_data['frames'].dtype}")
 
             # Load stimulus events
             events_path = os.path.join(session_path, f"{direction}_events.json")
@@ -83,7 +162,7 @@ class ISIAnalysis:
                 session_data[f'{direction}_stimulus'] = stimulus_data
 
         self.session_data = session_data
-        print(f"Session data loaded successfully!")
+        print("Session data loaded successfully!")
         return session_data
 
     def correlate_temporal_data(self, direction: str) -> np.ndarray:
@@ -175,6 +254,13 @@ class ISIAnalysis:
         """
         print("    Computing FFT phase maps...")
 
+        # Validate frame array shape
+        if len(frames.shape) != 3:
+            raise ValueError(
+                f"Expected 3D frame array (n_frames, height, width), got shape {frames.shape}. "
+                f"If frames are RGB/BGR, convert to grayscale first in load_acquisition_data()."
+            )
+
         # Convert frames to float for processing
         frames_float = frames.astype(np.float32)
         n_frames, height, width = frames_float.shape
@@ -185,41 +271,78 @@ class ISIAnalysis:
         # Determine stimulus frequency from angle progression
         # For drifting bar, frequency is cycles per acquisition
         angle_range = np.max(angles) - np.min(angles)
-        num_cycles = self.session_data['metadata']['stimulus_params']['num_cycles']
+        num_cycles = self.session_data['metadata'].get('acquisition', {}).get('cycles', 1)
         stimulus_freq = num_cycles / n_frames  # Cycles per frame
 
         print(f"      Stimulus frequency: {stimulus_freq:.4f} cycles/frame")
         print(f"      Processing {height}x{width} pixels...")
 
-        # Initialize output arrays
-        phase_map = np.zeros((height, width), dtype=np.float32)
-        magnitude_map = np.zeros((height, width), dtype=np.float32)
+        # Reshape frames from (n_frames, height, width) to (n_frames, n_pixels)
+        n_pixels = height * width
+        frames_reshaped = frames_float.reshape(n_frames, n_pixels)
 
-        # Process each pixel
-        for y in range(height):
-            if y % 100 == 0:
-                print(f"        Row {y}/{height}")
+        if self.use_gpu:
+            # GPU-accelerated FFT computation using PyTorch
+            logger.info(f"      Computing FFT for {n_pixels:,} pixels on {DEVICE_NAME}...")
 
-            for x in range(width):
-                # Extract time series for this pixel
-                pixel_timeseries = frames_float[:, y, x]
+            # Transfer to GPU
+            frames_tensor = torch.from_numpy(frames_reshaped).to(DEVICE)
 
-                # Remove DC component (mean)
-                pixel_timeseries = pixel_timeseries - np.mean(pixel_timeseries)
+            # Remove DC component (mean) from all pixels at once
+            frames_centered = frames_tensor - torch.mean(frames_tensor, dim=0, keepdim=True)
 
-                # Compute FFT
-                fft_result = fft(pixel_timeseries)
-                freqs = fftfreq(n_frames)
+            # Compute FFT along time axis for all pixels simultaneously
+            # PyTorch FFT returns complex tensor
+            fft_result = torch.fft.fft(frames_centered, dim=0)
 
-                # Find frequency component closest to stimulus frequency
-                freq_idx = np.argmin(np.abs(freqs - stimulus_freq))
+            # Get frequency bins (on CPU for argmin)
+            freqs = fftfreq(n_frames)
+            freq_idx = np.argmin(np.abs(freqs - stimulus_freq))
+            logger.info(f"      Extracting phase/magnitude at frequency index {freq_idx}")
 
-                # Extract phase and magnitude at stimulus frequency
-                complex_amplitude = fft_result[freq_idx]
-                phase_map[y, x] = np.angle(complex_amplitude)
-                magnitude_map[y, x] = np.abs(complex_amplitude)
+            # Extract complex amplitude at stimulus frequency for all pixels
+            complex_amplitude = fft_result[freq_idx, :]
 
-        print(f"    Phase maps computed")
+            # Compute phase and magnitude for all pixels
+            phase_flat = torch.angle(complex_amplitude)
+            magnitude_flat = torch.abs(complex_amplitude)
+
+            # Transfer back to CPU and convert to numpy
+            phase_map = phase_flat.cpu().numpy().reshape(height, width).astype(np.float32)
+            magnitude_map = magnitude_flat.cpu().numpy().reshape(height, width).astype(np.float32)
+
+            logger.info(f"    Phase maps computed (GPU-accelerated on {DEVICE_NAME})")
+
+        else:
+            # CPU fallback: Vectorized FFT computation
+            logger.info(f"      Computing FFT for {n_pixels:,} pixels on CPU...")
+
+            # Remove DC component (mean) from all pixels at once
+            frames_centered = frames_reshaped - np.mean(frames_reshaped, axis=0, keepdims=True)
+
+            # Compute FFT along time axis for all pixels simultaneously
+            fft_result = fft(frames_centered, axis=0)
+
+            # Get frequency bins
+            freqs = fftfreq(n_frames)
+
+            # Find frequency index closest to stimulus frequency
+            freq_idx = np.argmin(np.abs(freqs - stimulus_freq))
+            print(f"      Extracting phase/magnitude at frequency index {freq_idx}")
+
+            # Extract complex amplitude at stimulus frequency for all pixels
+            complex_amplitude = fft_result[freq_idx, :]
+
+            # Compute phase and magnitude for all pixels
+            phase_flat = np.angle(complex_amplitude)
+            magnitude_flat = np.abs(complex_amplitude)
+
+            # Reshape back to (height, width)
+            phase_map = phase_flat.reshape(height, width).astype(np.float32)
+            magnitude_map = magnitude_flat.reshape(height, width).astype(np.float32)
+
+            print("    Phase maps computed (CPU vectorized)")
+
         return phase_map, magnitude_map
 
     def bidirectional_analysis(self, forward_phase: np.ndarray, reverse_phase: np.ndarray) -> np.ndarray:
@@ -238,15 +361,50 @@ class ISIAnalysis:
         # The retinotopic center is where forward and reverse phases are equal
         # This removes the hemodynamic delay component
 
-        # Unwrap phases to handle 2π discontinuities
-        forward_unwrapped = np.unwrap(forward_phase.flatten()).reshape(forward_phase.shape)
-        reverse_unwrapped = np.unwrap(reverse_phase.flatten()).reshape(reverse_phase.shape)
+        if self.use_gpu:
+            # GPU-accelerated phase unwrapping and averaging
+            logger.info(f"      Unwrapping phases on {DEVICE_NAME}...")
 
-        # Average the two directions
-        center_map = (forward_unwrapped + reverse_unwrapped) / 2
+            # Transfer to GPU
+            forward_tensor = torch.from_numpy(forward_phase).to(DEVICE)
+            reverse_tensor = torch.from_numpy(reverse_phase).to(DEVICE)
 
-        # Wrap back to [-π, π]
-        center_map = np.arctan2(np.sin(center_map), np.cos(center_map))
+            # Unwrap phases row-by-row on GPU
+            # PyTorch doesn't have unwrap, so we implement it using diff and cumsum
+            def unwrap_tensor(phase_tensor):
+                # Compute differences between adjacent elements along rows
+                diff = torch.diff(phase_tensor, dim=1)
+                # Find where phase jumps exceed π
+                diff_adjusted = diff - 2 * torch.pi * torch.round(diff / (2 * torch.pi))
+                # Cumulative sum to reconstruct unwrapped phase
+                unwrapped = torch.zeros_like(phase_tensor)
+                unwrapped[:, 0] = phase_tensor[:, 0]
+                unwrapped[:, 1:] = phase_tensor[:, 0:1] + torch.cumsum(diff_adjusted, dim=1)
+                return unwrapped
+
+            forward_unwrapped = unwrap_tensor(forward_tensor)
+            reverse_unwrapped = unwrap_tensor(reverse_tensor)
+
+            # Average the two directions
+            center_map_tensor = (forward_unwrapped + reverse_unwrapped) / 2
+
+            # Wrap back to [-π, π] using atan2
+            center_map = torch.atan2(torch.sin(center_map_tensor), torch.cos(center_map_tensor))
+
+            # Transfer back to CPU
+            center_map = center_map.cpu().numpy()
+
+        else:
+            # CPU fallback: Unwrap row-by-row using NumPy
+            logger.info("      Unwrapping phases on CPU...")
+            forward_unwrapped = np.apply_along_axis(np.unwrap, axis=1, arr=forward_phase)
+            reverse_unwrapped = np.apply_along_axis(np.unwrap, axis=1, arr=reverse_phase)
+
+            # Average the two directions
+            center_map = (forward_unwrapped + reverse_unwrapped) / 2
+
+            # Wrap back to [-π, π]
+            center_map = np.arctan2(np.sin(center_map), np.cos(center_map))
 
         return center_map
 
@@ -312,19 +470,51 @@ class ISIAnalysis:
         print("  Computing spatial gradients...")
 
         # Smooth maps before computing gradients (reduce noise)
-        azimuth_smooth = ndimage.gaussian_filter(azimuth_map, sigma=2.0)
-        elevation_smooth = ndimage.gaussian_filter(elevation_map, sigma=2.0)
+        # Use smoothing_sigma parameter or default to 2.0
+        sigma = self.params.get('smoothing_sigma', 2.0)
 
-        # Compute gradients using Sobel operators
-        d_azimuth_dy, d_azimuth_dx = np.gradient(azimuth_smooth)
-        d_elevation_dy, d_elevation_dx = np.gradient(elevation_smooth)
+        if self.use_gpu:
+            # GPU-accelerated gradient computation
+            logger.info(f"    Computing gradients on {DEVICE_NAME}...")
 
-        gradients = {
-            'd_azimuth_dx': d_azimuth_dx,
-            'd_azimuth_dy': d_azimuth_dy,
-            'd_elevation_dx': d_elevation_dx,
-            'd_elevation_dy': d_elevation_dy
-        }
+            # Note: Gaussian filtering still uses scipy (CPU) as it's efficient and
+            # GPU transfer overhead may not be worth it for this operation
+            azimuth_smooth = ndimage.gaussian_filter(azimuth_map, sigma=sigma)
+            elevation_smooth = ndimage.gaussian_filter(elevation_map, sigma=sigma)
+
+            # Transfer smoothed maps to GPU for gradient computation
+            azimuth_tensor = torch.from_numpy(azimuth_smooth).to(DEVICE)
+            elevation_tensor = torch.from_numpy(elevation_smooth).to(DEVICE)
+
+            # Compute gradients using PyTorch's gradient function
+            # torch.gradient returns tuple of (dy, dx) for 2D arrays
+            d_azimuth_dy, d_azimuth_dx = torch.gradient(azimuth_tensor)
+            d_elevation_dy, d_elevation_dx = torch.gradient(elevation_tensor)
+
+            # Transfer back to CPU and convert to numpy
+            gradients = {
+                'd_azimuth_dx': d_azimuth_dx.cpu().numpy(),
+                'd_azimuth_dy': d_azimuth_dy.cpu().numpy(),
+                'd_elevation_dx': d_elevation_dx.cpu().numpy(),
+                'd_elevation_dy': d_elevation_dy.cpu().numpy()
+            }
+
+        else:
+            # CPU fallback
+            logger.info("    Computing gradients on CPU...")
+            azimuth_smooth = ndimage.gaussian_filter(azimuth_map, sigma=sigma)
+            elevation_smooth = ndimage.gaussian_filter(elevation_map, sigma=sigma)
+
+            # Compute gradients using numpy
+            d_azimuth_dy, d_azimuth_dx = np.gradient(azimuth_smooth)
+            d_elevation_dy, d_elevation_dx = np.gradient(elevation_smooth)
+
+            gradients = {
+                'd_azimuth_dx': d_azimuth_dx,
+                'd_azimuth_dy': d_azimuth_dy,
+                'd_elevation_dx': d_elevation_dx,
+                'd_elevation_dy': d_elevation_dy
+            }
 
         return gradients
 
@@ -388,19 +578,23 @@ class ISIAnalysis:
         return boundary_map
 
     def segment_visual_areas(self, sign_map: np.ndarray, boundary_map: np.ndarray,
-                           min_area_size: int = 1000) -> np.ndarray:
+                           min_area_size: Optional[int] = None) -> np.ndarray:
         """
         Identify distinct visual areas
 
         Args:
             sign_map: Visual field sign map
             boundary_map: Area boundary map
-            min_area_size: Minimum area size in pixels
+            min_area_size: Minimum area size in pixels (uses parameter if None)
 
         Returns:
             area_map: Labeled map of visual areas
         """
         print("  Segmenting visual areas...")
+
+        # Use area_min_size_mm2 parameter or default to 1000
+        if min_area_size is None:
+            min_area_size = int(self.params.get('area_min_size_mm2', 1000))
 
         # Create mask of valid pixels (exclude boundaries)
         valid_mask = (boundary_map == 0) & (~np.isnan(sign_map))
@@ -450,7 +644,8 @@ class ISIAnalysis:
         phase_maps = {}
         magnitude_maps = {}
 
-        directions = self.session_data['metadata']['directions']
+        # Get directions from metadata (nested under 'acquisition')
+        directions = self.session_data['metadata'].get('acquisition', {}).get('directions', ['LR', 'RL', 'TB', 'BT'])
         for direction in directions:
             print(f"\nProcessing {direction} direction...")
 
@@ -469,13 +664,32 @@ class ISIAnalysis:
         # Step 3: Generate retinotopic maps
         print("\nGenerating retinotopic maps...")
         azimuth_map = self.generate_azimuth_map(phase_maps['LR'], phase_maps['RL'])
+
+        # Publish azimuth map for real-time visualization
+        if self.layer_callback:
+            self.layer_callback('azimuth_map', azimuth_map)
+
         elevation_map = self.generate_elevation_map(phase_maps['TB'], phase_maps['BT'])
+
+        # Publish elevation map for real-time visualization
+        if self.layer_callback:
+            self.layer_callback('elevation_map', elevation_map)
 
         # Step 4: Visual field sign analysis
         print("\nPerforming visual field sign analysis...")
         gradients = self.compute_spatial_gradients(azimuth_map, elevation_map)
         sign_map = self.calculate_visual_field_sign(gradients)
+
+        # Publish sign map for real-time visualization
+        if self.layer_callback:
+            self.layer_callback('sign_map', sign_map)
+
         boundary_map = self.detect_area_boundaries(sign_map)
+
+        # Publish boundary map for real-time visualization
+        if self.layer_callback:
+            self.layer_callback('boundary_map', boundary_map)
+
         area_map = self.segment_visual_areas(sign_map, boundary_map)
 
         # Compile results
@@ -523,6 +737,11 @@ class ISIAnalysis:
             phase_group = f.create_group('phase_maps')
             for direction, phase_map in self.results['phase_maps'].items():
                 phase_group.create_dataset(direction, data=phase_map)
+
+            # Magnitude maps for each direction
+            magnitude_group = f.create_group('magnitude_maps')
+            for direction, magnitude_map in self.results['magnitude_maps'].items():
+                magnitude_group.create_dataset(direction, data=magnitude_map)
 
         # Save individual maps as images
         for name, data in [

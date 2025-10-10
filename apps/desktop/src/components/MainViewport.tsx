@@ -19,6 +19,7 @@ interface MainViewportProps {
   errorMessage?: string | null
   connectionError?: string
   healthSnapshot?: HealthMessage | null
+  lastSyncMessage?: any
   isExperimentRunning?: boolean
   currentProgress?: number
 }
@@ -33,6 +34,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
   errorMessage = null,
   connectionError,
   healthSnapshot,
+  lastSyncMessage,
   isExperimentRunning = false,
   currentProgress = 0
 }) => {
@@ -124,6 +126,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
       className="flex-1"
       systemState={systemContext}
       sendCommand={sendCommand}
+      lastMessage={lastSyncMessage}
     />
   )
 

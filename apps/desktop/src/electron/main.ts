@@ -48,9 +48,12 @@ let isInitialLoad = true
 // Shared Memory Frame Reader for high-performance streaming
 class SharedMemoryFrameReader {
   private zmqSocket: zmq.Subscriber | null = null
-  private sharedMemoryFd: number | null = null
-  private sharedMemoryPath = PATHS.SHARED_MEMORY_PATH
   private isRunning = false
+  private ipcChannel: string // IPC channel to send frames to renderer
+
+  constructor(ipcChannel: string = 'shared-memory-frame') {
+    this.ipcChannel = ipcChannel
+  }
 
   async initialize(zmqPort: number = IPC_CONFIG.SHARED_MEMORY_PORT): Promise<void> {
     try {
@@ -60,7 +63,7 @@ class SharedMemoryFrameReader {
       this.zmqSocket.subscribe() // Subscribe to all messages
 
       this.isRunning = true
-      mainLogger.info(`SharedMemoryFrameReader initialized on port ${zmqPort}`)
+      mainLogger.info(`SharedMemoryFrameReader initialized on port ${zmqPort}, channel: ${this.ipcChannel}`)
 
       // Start listening for frame metadata
       this.startMetadataListener()
@@ -108,39 +111,14 @@ class SharedMemoryFrameReader {
       }
 
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('shared-memory-frame', frameMetadata)
+        mainWindow.webContents.send(this.ipcChannel, frameMetadata)
       }
 
       if (presentationWindow && !presentationWindow.isDestroyed()) {
-        presentationWindow.webContents.send('shared-memory-frame', frameMetadata)
+        presentationWindow.webContents.send(this.ipcChannel, frameMetadata)
       }
     } catch (error) {
       mainLogger.error('Error handling frame metadata:', error)
-    }
-  }
-
-  private async readFrameFromSharedMemory(offset: number, size: number): Promise<Buffer> {
-    try {
-      // Open shared memory file if not already open
-      if (!this.sharedMemoryFd) {
-        if (!fs.existsSync(this.sharedMemoryPath)) {
-          throw new Error(`Shared memory file does not exist: ${this.sharedMemoryPath}`)
-        }
-        this.sharedMemoryFd = fs.openSync(this.sharedMemoryPath, 'r')
-      }
-
-      // Read frame data at specified offset
-      const buffer = Buffer.alloc(size)
-      const bytesRead = fs.readSync(this.sharedMemoryFd, buffer, 0, size, offset)
-
-      if (bytesRead !== size) {
-        throw new Error(`Expected to read ${size} bytes, but read ${bytesRead}`)
-      }
-
-      return buffer
-    } catch (error) {
-      mainLogger.error('Error reading from shared memory:', error)
-      throw error
     }
   }
 
@@ -152,17 +130,13 @@ class SharedMemoryFrameReader {
       this.zmqSocket = null
     }
 
-    if (this.sharedMemoryFd) {
-      fs.closeSync(this.sharedMemoryFd)
-      this.sharedMemoryFd = null
-    }
-
     mainLogger.info('SharedMemoryFrameReader cleaned up')
   }
 }
 
-// Global shared memory reader instance
-let sharedMemoryReader: SharedMemoryFrameReader | null = null
+// Global shared memory reader instances
+let sharedMemoryReader: SharedMemoryFrameReader | null = null  // For stimulus frames
+let cameraFrameReader: SharedMemoryFrameReader | null = null  // For camera frames
 
 function resolveBackendRoot(): string {
   const appPath = app?.getAppPath?.() ?? process.cwd()
@@ -420,7 +394,16 @@ class MultiChannelIPCManager {
   }
 
   private handleSyncMessage(message: SyncMessage): void {
-    mainLogger.debug('Received SYNC channel message:', message)
+    // Special logging for analysis layer messages
+    if (message.type === 'analysis_layer_ready') {
+      mainLogger.info(`🎯 ANALYSIS LAYER READY: ${(message as any).layer_name}`)
+    } else if (message.type === 'analysis_started') {
+      mainLogger.info('🚀 ANALYSIS STARTED')
+    } else if (message.type === 'analysis_complete') {
+      mainLogger.info('✅ ANALYSIS COMPLETE')
+    } else {
+      mainLogger.debug('Received SYNC channel message:', message)
+    }
 
     // Check if backend has reached ready state and initialize shared memory reader
     if (message.type === 'system_state' && message.state === 'ready' && !this.isReady) {
@@ -468,11 +451,17 @@ class MultiChannelIPCManager {
 
   private async initializeSharedMemoryReader(): Promise<void> {
     try {
-      sharedMemoryReader = new SharedMemoryFrameReader()
-      await sharedMemoryReader.initialize()
-      mainLogger.info('Shared memory frame reader initialized')
+      // Initialize stimulus frame reader (port 5557) - sends to stimulus IPC channel
+      sharedMemoryReader = new SharedMemoryFrameReader('shared-memory-frame')
+      await sharedMemoryReader.initialize(IPC_CONFIG.SHARED_MEMORY_PORT)
+      mainLogger.info('Stimulus frame reader initialized on port 5557')
+
+      // Initialize camera frame reader (port 5559) - sends to camera IPC channel
+      cameraFrameReader = new SharedMemoryFrameReader('camera-frame')
+      await cameraFrameReader.initialize(IPC_CONFIG.CAMERA_METADATA_PORT)
+      mainLogger.info('Camera frame reader initialized on port 5559')
     } catch (error) {
-      mainLogger.error('Failed to initialize shared memory reader:', error)
+      mainLogger.error('Failed to initialize shared memory readers:', error)
     }
   }
 
@@ -591,10 +580,14 @@ class MultiChannelIPCManager {
     }
     this.pendingRequests.clear()
 
-    // Cleanup shared memory reader
+    // Cleanup shared memory readers
     if (sharedMemoryReader) {
       sharedMemoryReader.cleanup()
       sharedMemoryReader = null
+    }
+    if (cameraFrameReader) {
+      cameraFrameReader.cleanup()
+      cameraFrameReader = null
     }
 
     // Close ZeroMQ PUB/SUB sockets
@@ -931,15 +924,27 @@ ipcMain.handle('emergency-stop', async () => {
   return await backendManager.sendCommand({ type: 'emergency_stop' })
 })
 
-ipcMain.handle('read-shared-memory-frame', async (_event, offset: number, size: number) => {
-  if (!sharedMemoryReader) {
-    throw new Error('Shared memory reader not initialized')
-  }
-
+ipcMain.handle('read-shared-memory-frame', async (_event, offset: number, size: number, shmPath: string) => {
   try {
-    const frameData = await sharedMemoryReader['readFrameFromSharedMemory'](offset, size)
-    // Return as ArrayBuffer for efficient transfer
-    return frameData.buffer.slice(frameData.byteOffset, frameData.byteOffset + frameData.byteLength)
+    // Read directly from the specified shared memory file
+    if (!fs.existsSync(shmPath)) {
+      throw new Error(`Shared memory file does not exist: ${shmPath}`)
+    }
+
+    const fd = fs.openSync(shmPath, 'r')
+    try {
+      const buffer = Buffer.alloc(size)
+      const bytesRead = fs.readSync(fd, buffer, 0, size, offset)
+
+      if (bytesRead !== size) {
+        throw new Error(`Expected to read ${size} bytes, but read ${bytesRead}`)
+      }
+
+      // Return as ArrayBuffer for efficient transfer
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    } finally {
+      fs.closeSync(fd)
+    }
   } catch (error) {
     mainLogger.error('Failed to read shared memory frame:', error)
     throw error

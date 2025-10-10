@@ -1,0 +1,260 @@
+[
+  {
+    "timestamp": 1759976095930725,
+    "frame_id": 0,
+    "frame_index": 0,
+    "angle": 72.85331330197822
+  },
+  {
+    "timestamp": 1759976096063929,
+    "frame_id": 1,
+    "frame_index": 1,
+    "angle": 69.38410790664592
+  },
+  {
+    "timestamp": 1759976096130746,
+    "frame_id": 2,
+    "frame_index": 2,
+    "angle": 65.91490251131363
+  },
+  {
+    "timestamp": 1759976096197467,
+    "frame_id": 3,
+    "frame_index": 3,
+    "angle": 62.44569711598133
+  },
+  {
+    "timestamp": 1759976096263928,
+    "frame_id": 4,
+    "frame_index": 4,
+    "angle": 58.97649172064904
+  },
+  {
+    "timestamp": 1759976096329822,
+    "frame_id": 5,
+    "frame_index": 5,
+    "angle": 55.50728632531674
+  },
+  {
+    "timestamp": 1759976096397081,
+    "frame_id": 6,
+    "frame_index": 6,
+    "angle": 52.038080929984446
+  },
+  {
+    "timestamp": 1759976096463474,
+    "frame_id": 7,
+    "frame_index": 7,
+    "angle": 48.56887553465215
+  },
+  {
+    "timestamp": 1759976096530815,
+    "frame_id": 8,
+    "frame_index": 8,
+    "angle": 45.099670139319855
+  },
+  {
+    "timestamp": 1759976096597391,
+    "frame_id": 9,
+    "frame_index": 9,
+    "angle": 41.63046474398756
+  },
+  {
+    "timestamp": 1759976096663226,
+    "frame_id": 10,
+    "frame_index": 10,
+    "angle": 38.16125934865526
+  },
+  {
+    "timestamp": 1759976096730616,
+    "frame_id": 11,
+    "frame_index": 11,
+    "angle": 34.69205395332296
+  },
+  {
+    "timestamp": 1759976096796996,
+    "frame_id": 12,
+    "frame_index": 12,
+    "angle": 31.222848557990666
+  },
+  {
+    "timestamp": 1759976096864474,
+    "frame_id": 13,
+    "frame_index": 13,
+    "angle": 27.75364316265837
+  },
+  {
+    "timestamp": 1759976096930843,
+    "frame_id": 14,
+    "frame_index": 14,
+    "angle": 24.284437767326075
+  },
+  {
+    "timestamp": 1759976096996973,
+    "frame_id": 15,
+    "frame_index": 15,
+    "angle": 20.815232371993773
+  },
+  {
+    "timestamp": 1759976097064011,
+    "frame_id": 16,
+    "frame_index": 16,
+    "angle": 17.346026976661484
+  },
+  {
+    "timestamp": 1759976097130903,
+    "frame_id": 17,
+    "frame_index": 17,
+    "angle": 13.876821581329182
+  },
+  {
+    "timestamp": 1759976097198578,
+    "frame_id": 18,
+    "frame_index": 18,
+    "angle": 10.407616185996893
+  },
+  {
+    "timestamp": 1759976097264093,
+    "frame_id": 19,
+    "frame_index": 19,
+    "angle": 6.938410790664591
+  },
+  {
+    "timestamp": 1759976097330573,
+    "frame_id": 20,
+    "frame_index": 20,
+    "angle": 3.4692053953322954
+  },
+  {
+    "timestamp": 1759976097398348,
+    "frame_id": 21,
+    "frame_index": 21,
+    "angle": 0.0
+  },
+  {
+    "timestamp": 1759976097464353,
+    "frame_id": 22,
+    "frame_index": 22,
+    "angle": -3.4692053953322954
+  },
+  {
+    "timestamp": 1759976097531025,
+    "frame_id": 23,
+    "frame_index": 23,
+    "angle": -6.938410790664605
+  },
+  {
+    "timestamp": 1759976097599100,
+    "frame_id": 24,
+    "frame_index": 24,
+    "angle": -10.407616185996886
+  },
+  {
+    "timestamp": 1759976097664355,
+    "frame_id": 25,
+    "frame_index": 25,
+    "angle": -13.876821581329182
+  },
+  {
+    "timestamp": 1759976097731741,
+    "frame_id": 26,
+    "frame_index": 26,
+    "angle": -17.346026976661477
+  },
+  {
+    "timestamp": 1759976097798503,
+    "frame_id": 27,
+    "frame_index": 27,
+    "angle": -20.815232371993787
+  },
+  {
+    "timestamp": 1759976097864531,
+    "frame_id": 28,
+    "frame_index": 28,
+    "angle": -24.284437767326068
+  },
+  {
+    "timestamp": 1759976097931944,
+    "frame_id": 29,
+    "frame_index": 29,
+    "angle": -27.753643162658364
+  },
+  {
+    "timestamp": 1759976097997728,
+    "frame_id": 30,
+    "frame_index": 30,
+    "angle": -31.222848557990673
+  },
+  {
+    "timestamp": 1759976098064720,
+    "frame_id": 31,
+    "frame_index": 31,
+    "angle": -34.69205395332297
+  },
+  {
+    "timestamp": 1759976098131490,
+    "frame_id": 32,
+    "frame_index": 32,
+    "angle": -38.16125934865525
+  },
+  {
+    "timestamp": 1759976098199133,
+    "frame_id": 33,
+    "frame_index": 33,
+    "angle": -41.630464743987545
+  },
+  {
+    "timestamp": 1759976098264517,
+    "frame_id": 34,
+    "frame_index": 34,
+    "angle": -45.099670139319855
+  },
+  {
+    "timestamp": 1759976098330928,
+    "frame_id": 35,
+    "frame_index": 35,
+    "angle": -48.56887553465215
+  },
+  {
+    "timestamp": 1759976098398714,
+    "frame_id": 36,
+    "frame_index": 36,
+    "angle": -52.03808092998443
+  },
+  {
+    "timestamp": 1759976098464752,
+    "frame_id": 37,
+    "frame_index": 37,
+    "angle": -55.50728632531674
+  },
+  {
+    "timestamp": 1759976098532040,
+    "frame_id": 38,
+    "frame_index": 38,
+    "angle": -58.97649172064904
+  },
+  {
+    "timestamp": 1759976098598448,
+    "frame_id": 39,
+    "frame_index": 39,
+    "angle": -62.44569711598133
+  },
+  {
+    "timestamp": 1759976098664394,
+    "frame_id": 40,
+    "frame_index": 40,
+    "angle": -65.91490251131363
+  },
+  {
+    "timestamp": 1759976098731741,
+    "frame_id": 41,
+    "frame_index": 41,
+    "angle": -69.38410790664592
+  },
+  {
+    "timestamp": 1759976098798993,
+    "frame_id": 42,
+    "frame_index": 42,
+    "angle": -72.85331330197822
+  }
+]

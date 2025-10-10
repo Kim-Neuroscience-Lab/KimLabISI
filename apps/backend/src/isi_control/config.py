@@ -26,7 +26,8 @@ class SharedMemoryConfig:
 
     stream_name: str
     buffer_size_mb: int
-    metadata_port: int
+    metadata_port: int  # Port for stimulus frame metadata
+    camera_metadata_port: int  # Port for camera frame metadata
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,8 @@ class AppConfig:
             shared_memory=SharedMemoryConfig(
                 stream_name="stimulus_stream",
                 buffer_size_mb=100,
-                metadata_port=5557,
+                metadata_port=5557,  # Stimulus frames
+                camera_metadata_port=5559,  # Camera frames
             ),
             parameters=ParameterStoreConfig(
                 file_path=parameters_file,
