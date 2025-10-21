@@ -21,9 +21,9 @@ class Logger {
 
   constructor(config: Partial<LoggerConfig> = {}) {
     this.config = {
-      // Default to INFO level to reduce console noise
-      // Change to LogLevel.DEBUG for verbose logging during development
-      level: config.level ?? LogLevel.INFO,
+      // Default to WARN to match backend logging configuration
+      // Only show warnings and errors by default - reduces console clutter
+      level: config.level ?? LogLevel.WARN,
       prefix: config.prefix,
       timestamp: config.timestamp ?? true,
     }

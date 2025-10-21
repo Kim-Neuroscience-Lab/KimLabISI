@@ -15,14 +15,33 @@ interface FrameData {
 /**
  * Hook for rendering raw binary frame data to a canvas element
  * Provides high-performance direct rendering for stimulus frames
+ *
+ * HARDWARE VSYNC:
+ * - Uses requestAnimationFrame() which is automatically synchronized to the
+ *   display's hardware VSync by the browser/Electron
+ * - Actual display happens at exact monitor refresh intervals (~50μs precision)
+ * - Backend publishes frames at approximate FPS (time.sleep ~0.5-2ms jitter)
+ * - Frontend's hardware VSync ensures display timing is precise regardless of
+ *   backend publication timing jitter
  */
 export function useFrameRenderer() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frameCache = useRef<Map<number, ImageData>>(new Map())
 
   const renderFrame = useCallback((frameData: FrameData) => {
+    // DIAGNOSTIC: Log frame rendering attempt
+    console.log('[useFrameRenderer] Rendering frame:', {
+      frame_id: frameData.frame_id,
+      width: frameData.width_px,
+      height: frameData.height_px,
+      data_size: frameData.frame_data instanceof ArrayBuffer ? frameData.frame_data.byteLength : 'unknown'
+    })
+
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas) {
+      console.warn('[useFrameRenderer] Canvas ref not available!')
+      return
+    }
 
     const { width_px, height_px, frame_data, frame_id } = frameData
 
@@ -77,14 +96,35 @@ export function useFrameRenderer() {
     const totalPixels = width_px * height_px
     const channels = uint8Array.length / totalPixels
 
+    // DIAGNOSTIC: Log channel detection
+    console.log('[useFrameRenderer] Frame format:', {
+      totalPixels,
+      dataLength: uint8Array.length,
+      calculatedChannels: channels,
+      isGrayscale: channels === 1
+    })
+
     // Create ImageData for canvas rendering
     const imageData = ctx.createImageData(width_px, height_px)
 
     if (channels === 4) {
-      // Backend sends RGBA directly - zero-copy direct transfer
+      // RGBA format - direct transfer (legacy support)
       imageData.data.set(uint8Array)
+    } else if (channels === 1) {
+      // Grayscale format (NEW: optimized for zero-overhead backend)
+      // Convert grayscale to RGBA for Canvas API
+      // This happens in the frontend, not in the critical backend playback loop!
+      const rgbaData = imageData.data
+      for (let i = 0; i < totalPixels; i++) {
+        const gray = uint8Array[i]
+        const rgbaIndex = i * 4
+        rgbaData[rgbaIndex] = gray     // R
+        rgbaData[rgbaIndex + 1] = gray // G
+        rgbaData[rgbaIndex + 2] = gray // B
+        rgbaData[rgbaIndex + 3] = 255  // A
+      }
     } else {
-      hookLogger.error(`Unexpected channel count: ${channels}. Backend should send RGBA (4 channels).`)
+      hookLogger.error(`Unexpected channel count: ${channels}. Expected 1 (grayscale) or 4 (RGBA).`)
       return
     }
 

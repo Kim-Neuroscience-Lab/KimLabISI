@@ -298,12 +298,19 @@ class MultiChannelIPC:
             True if message sent successfully, False otherwise
         """
         try:
-            sync_socket = self._channels.get(ChannelType.SYNC, {}).get("socket")
-            if sync_socket is None:
-                logger.warning("SYNC channel unavailable")
-                return False
-            sync_socket.send_json(message, zmq.NOBLOCK)
-            return True
+            with self._lock:
+                # Check if IPC is still running before sending
+                if not self._running:
+                    logger.debug("IPC not running, skipping sync message")
+                    return False
+
+                sync_socket = self._channels.get(ChannelType.SYNC, {}).get("socket")
+                if sync_socket is None:
+                    logger.warning("SYNC channel unavailable")
+                    return False
+
+                sync_socket.send_json(message, zmq.NOBLOCK)
+                return True
         except Exception as exc:
             logger.error("Failed to send sync message: %s", exc)
             return False

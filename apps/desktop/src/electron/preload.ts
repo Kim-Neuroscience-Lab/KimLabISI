@@ -30,9 +30,11 @@ export interface ElectronAPI {
   onHealthMessage: (callback: (message: HealthMessage) => void) => () => void
   onSharedMemoryFrame: (callback: (frameData: SharedMemoryFrameData) => void) => () => void
   onCameraFrame: (callback: (frameData: SharedMemoryFrameData) => void) => () => void
+  onAnalysisFrame: (callback: (frameData: SharedMemoryFrameData) => void) => () => void
   readSharedMemoryFrame: (offset: number, size: number, shmPath: string) => Promise<ArrayBuffer>
   removeSharedMemoryListener: () => void
   removeCameraFrameListener: () => void
+  removeAnalysisFrameListener: () => void
 
   // System control
   getSystemStatus: () => Promise<{ success: boolean; error?: string }>
@@ -72,12 +74,20 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('camera-frame', listener)
     return () => ipcRenderer.off('camera-frame', listener)
   },
+  onAnalysisFrame: (callback: (frameData: SharedMemoryFrameData) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, frameData: SharedMemoryFrameData) => callback(frameData)
+    ipcRenderer.on('analysis-frame', listener)
+    return () => ipcRenderer.off('analysis-frame', listener)
+  },
   readSharedMemoryFrame: (offset: number, size: number, shmPath: string) => ipcRenderer.invoke('read-shared-memory-frame', offset, size, shmPath),
   removeSharedMemoryListener: () => {
     ipcRenderer.removeAllListeners('shared-memory-frame')
   },
   removeCameraFrameListener: () => {
     ipcRenderer.removeAllListeners('camera-frame')
+  },
+  removeAnalysisFrameListener: () => {
+    ipcRenderer.removeAllListeners('analysis-frame')
   },
   getSystemStatus: () => ipcRenderer.invoke('get-system-status'),
   emergencyStop: () => ipcRenderer.invoke('emergency-stop'),

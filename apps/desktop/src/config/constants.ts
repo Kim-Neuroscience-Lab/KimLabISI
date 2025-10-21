@@ -9,6 +9,7 @@ export const IPC_CONFIG = {
   SYNC_PORT: 5558,
   SHARED_MEMORY_PORT: 5557,        // Stimulus frames
   CAMERA_METADATA_PORT: 5559,      // Camera frames (separate channel)
+  ANALYSIS_METADATA_PORT: 5561,    // Analysis frames (separate channel)
 
   // Timeouts (milliseconds)
   STARTUP_TIMEOUT: 15000, // 15 seconds

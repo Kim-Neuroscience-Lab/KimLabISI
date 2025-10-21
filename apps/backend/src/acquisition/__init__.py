@@ -7,7 +7,7 @@ Modules:
     - sync_tracker: Timestamp synchronization tracking
     - state: Acquisition state coordination
     - modes: Preview/Record/Playback mode controllers
-    - camera_stimulus: Camera-triggered stimulus generation
+    - unified_stimulus: Unified stimulus controller for preview and record modes
     - recorder: Data recording and session management
     - manager: Main acquisition orchestration
 """
@@ -20,7 +20,7 @@ from .modes import (
     RecordModeController,
     PlaybackModeController,
 )
-from .camera_stimulus import CameraTriggeredStimulusController
+from .unified_stimulus import UnifiedStimulusController
 from .recorder import (
     AcquisitionRecorder,
     StimulusEvent,
@@ -40,8 +40,8 @@ __all__ = [
     "PreviewModeController",
     "RecordModeController",
     "PlaybackModeController",
-    # Camera-triggered stimulus
-    "CameraTriggeredStimulusController",
+    # Unified stimulus
+    "UnifiedStimulusController",
     # Recording
     "AcquisitionRecorder",
     "StimulusEvent",

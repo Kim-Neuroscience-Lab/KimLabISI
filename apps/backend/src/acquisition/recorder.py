@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StimulusEvent:
     """Single stimulus event record."""
+
     timestamp_us: int
     frame_id: int
     frame_index: int
@@ -33,6 +34,7 @@ class StimulusEvent:
 @dataclass
 class CameraFrame:
     """Single camera frame record."""
+
     timestamp_us: int
     frame_index: int
     frame_data: np.ndarray  # Will be saved to HDF5, not JSON
@@ -59,7 +61,7 @@ class AcquisitionRecorder:
             self.metadata["timestamp_info"] = {
                 "camera_timestamp_source": "unknown",
                 "stimulus_timestamp_source": "vsync_from_frontend",
-                "note": "Timestamp source determines data accuracy for scientific analysis"
+                "note": "Timestamp source determines data accuracy for scientific analysis",
             }
 
         self.is_recording = False
@@ -163,7 +165,7 @@ class AcquisitionRecorder:
         try:
             # Save metadata
             metadata_path = self.session_path / "metadata.json"
-            with open(metadata_path, 'w') as f:
+            with open(metadata_path, "w") as f:
                 json.dump(self.metadata, f, indent=2)
             logger.info(f"  Saved metadata: {metadata_path}")
 
@@ -175,7 +177,9 @@ class AcquisitionRecorder:
             if self.anatomical_image is not None:
                 anatomical_path = self.session_path / "anatomical.npy"
                 np.save(anatomical_path, self.anatomical_image)
-                logger.info(f"  Saved anatomical image: {anatomical_path} ({self.anatomical_image.shape})")
+                logger.info(
+                    f"  Saved anatomical image: {anatomical_path} ({self.anatomical_image.shape})"
+                )
             else:
                 logger.warning("  No anatomical image captured for this session")
 
@@ -200,38 +204,131 @@ class AcquisitionRecorder:
             }
             for event in self.stimulus_events[direction]
         ]
-        with open(events_path, 'w') as f:
+        with open(events_path, "w") as f:
             json.dump(events_data, f, indent=2)
         logger.info(f"    Saved {len(events_data)} stimulus events")
 
-        # Save stimulus angles as HDF5
+        # Save stimulus data as HDF5 with atomic write
         stimulus_path = self.session_path / f"{direction}_stimulus.h5"
-        angles = np.array([event.angle_degrees for event in self.stimulus_events[direction]])
-        with h5py.File(stimulus_path, 'w') as f:
-            f.create_dataset('angles', data=angles)
-        logger.info(f"    Saved stimulus angles: {len(angles)} frames")
+        stimulus_temp_path = self.session_path / f"{direction}_stimulus.h5.tmp"
 
-        # Save camera frames as HDF5 (if any were recorded)
+        # Extract all fields from stimulus events
+        timestamps = np.array(
+            [event.timestamp_us for event in self.stimulus_events[direction]],
+            dtype=np.int64,
+        )
+        frame_indices = np.array(
+            [event.frame_index for event in self.stimulus_events[direction]],
+            dtype=np.int32,
+        )
+        angles = np.array(
+            [event.angle_degrees for event in self.stimulus_events[direction]],
+            dtype=np.float32,
+        )
+
+        # Write to temporary file first
+        with h5py.File(stimulus_temp_path, "w") as f:
+            # Create all three required datasets
+            f.create_dataset("timestamps", data=timestamps)
+            f.create_dataset("frame_indices", data=frame_indices)
+            f.create_dataset("angles", data=angles)
+
+            # Add essential monitor metadata
+            monitor_params = self.metadata.get("monitor", {})
+            f.attrs["monitor_fps"] = monitor_params.get("monitor_fps", -1)
+            f.attrs["monitor_width_px"] = monitor_params.get("monitor_width_px", -1)
+            f.attrs["monitor_height_px"] = monitor_params.get("monitor_height_px", -1)
+            f.attrs["monitor_distance_cm"] = monitor_params.get(
+                "monitor_distance_cm", -1.0
+            )
+            f.attrs["monitor_width_cm"] = monitor_params.get("monitor_width_cm", -1.0)
+            f.attrs["monitor_height_cm"] = monitor_params.get("monitor_height_cm", -1.0)
+            # Angle parameters: use -1.0 as sentinel for missing data (consistent with other params)
+            f.attrs["monitor_lateral_angle_deg"] = monitor_params.get(
+                "monitor_lateral_angle_deg", -1.0
+            )
+            f.attrs["monitor_tilt_angle_deg"] = monitor_params.get(
+                "monitor_tilt_angle_deg", -1.0
+            )
+
+            # Add stimulus metadata
+            f.attrs["direction"] = direction
+            f.attrs["total_displayed"] = len(timestamps)
+
+            # Ensure all data is written to disk
+            f.flush()
+
+        # Atomic rename - file appears complete or not at all
+        stimulus_temp_path.rename(stimulus_path)
+
+        logger.info(
+            f"    Saved stimulus data (atomic): {len(angles)} events (timestamps, frame_indices, angles)"
+        )
+
+        # Save camera frames as HDF5 with atomic write (if any were recorded)
         if direction in self.camera_frames and self.camera_frames[direction]:
             camera_path = self.session_path / f"{direction}_camera.h5"
+            camera_temp_path = self.session_path / f"{direction}_camera.h5.tmp"
 
             frames_list = self.camera_frames[direction]
             frames_array = np.stack([f.frame_data for f in frames_list])
             timestamps_array = np.array([f.timestamp_us for f in frames_list])
 
-            with h5py.File(camera_path, 'w') as f:
-                f.create_dataset(
-                    'frames',
-                    data=frames_array,
-                    compression='gzip',
-                    compression_opts=4
-                )
-                f.create_dataset('timestamps', data=timestamps_array)
+            # Write to temporary file first (atomic write pattern)
+            # This prevents readers from seeing partial writes
+            try:
+                with h5py.File(camera_temp_path, "w") as f:
+                    f.create_dataset(
+                        "frames", data=frames_array, compression="gzip", compression_opts=4
+                    )
+                    f.create_dataset("timestamps", data=timestamps_array)
 
-            logger.info(
-                f"    Saved camera data: {frames_array.shape} "
-                f"({frames_array.nbytes / 1024 / 1024:.1f} MB)"
-            )
+                    # Add essential monitor metadata
+                    monitor_params = self.metadata.get("monitor", {})
+                    f.attrs["monitor_fps"] = monitor_params.get("monitor_fps", -1)
+                    f.attrs["monitor_width_px"] = monitor_params.get("monitor_width_px", -1)
+                    f.attrs["monitor_height_px"] = monitor_params.get(
+                        "monitor_height_px", -1
+                    )
+                    f.attrs["monitor_distance_cm"] = monitor_params.get(
+                        "monitor_distance_cm", -1.0
+                    )
+                    f.attrs["monitor_width_cm"] = monitor_params.get(
+                        "monitor_width_cm", -1.0
+                    )
+                    f.attrs["monitor_height_cm"] = monitor_params.get(
+                        "monitor_height_cm", -1.0
+                    )
+                    # Angle parameters: use -1.0 as sentinel for missing data (consistent with other params)
+                    f.attrs["monitor_lateral_angle_deg"] = monitor_params.get(
+                        "monitor_lateral_angle_deg", -1.0
+                    )
+                    f.attrs["monitor_tilt_angle_deg"] = monitor_params.get(
+                        "monitor_tilt_angle_deg", -1.0
+                    )
+
+                    # Add camera metadata
+                    camera_params = self.metadata.get("camera", {})
+                    f.attrs["camera_fps"] = camera_params.get("camera_fps", -1)
+                    f.attrs["direction"] = direction
+
+                    # Ensure all data is written to disk (critical for compressed data)
+                    f.flush()
+
+                # Atomic rename - file appears complete or not at all
+                camera_temp_path.rename(camera_path)
+
+                logger.info(
+                    f"    Saved camera data (atomic): {frames_array.shape} "
+                    f"({frames_array.nbytes / 1024 / 1024:.1f} MB)"
+                )
+
+            except Exception as e:
+                # Clean up temp file if it exists
+                if camera_temp_path.exists():
+                    camera_temp_path.unlink()
+                logger.error(f"    Failed to save camera data: {e}")
+                raise
 
     def get_session_info(self) -> Dict[str, Any]:
         """Get information about the current recording session."""

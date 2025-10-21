@@ -163,22 +163,26 @@ const acquisitionParameterConfigs: ParameterConfig[] = [
 
 const analysisParameterConfigs: ParameterConfig[] = [
   {
-    key: 'ring_size_mm',
-    label: 'Ring Size',
+    key: 'area_min_size_mm2',
+    label: 'Min Area Size',
     type: 'number',
-    unit: 'mm'
+    step: 0.001,
+    unit: 'mm²'
   },
   {
-    key: 'vfs_threshold_sd',
-    label: 'VFS Threshold',
-    type: 'number',
-    unit: 'SD'
+    key: 'coherence_threshold',
+    label: 'Coherence Threshold',
+    type: 'range',
+    min: 0,
+    max: 1,
+    step: 0.05
   },
   {
-    key: 'smoothing_sigma',
-    label: 'Smoothing Sigma',
+    key: 'gradient_window_size',
+    label: 'Gradient Window',
     type: 'number',
-    step: 0.1
+    step: 2,
+    unit: 'px'
   },
   {
     key: 'magnitude_threshold',
@@ -192,26 +196,36 @@ const analysisParameterConfigs: ParameterConfig[] = [
     key: 'phase_filter_sigma',
     label: 'Phase Filter Sigma',
     type: 'number',
-    step: 0.1
-  },
-  {
-    key: 'gradient_window_size',
-    label: 'Gradient Window Size',
-    type: 'number'
-  },
-  {
-    key: 'area_min_size_mm2',
-    label: 'Min Area Size',
-    type: 'number',
-    unit: 'mm²'
+    step: 0.1,
+    unit: 'σ'
   },
   {
     key: 'response_threshold_percent',
     label: 'Response Threshold',
-    type: 'range',
-    min: 0,
-    max: 100,
+    type: 'number',
+    step: 1,
     unit: '%'
+  },
+  {
+    key: 'ring_size_mm',
+    label: 'Ring Size',
+    type: 'number',
+    step: 0.1,
+    unit: 'mm'
+  },
+  {
+    key: 'smoothing_sigma',
+    label: 'Smoothing Sigma',
+    type: 'number',
+    step: 0.1,
+    unit: 'σ'
+  },
+  {
+    key: 'vfs_threshold_sd',
+    label: 'VFS Threshold',
+    type: 'number',
+    step: 0.1,
+    unit: 'SD'
   }
 ]
 
@@ -335,31 +349,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   }, [updateParameters])
 
-  React.useEffect(() => {
-    if (!cameraParams || !availableCameras?.length) {
-      return
-    }
-
-    if (!cameraParams.selected_camera && availableCameras.length > 0) {
-      handleParameterChange('camera', {
-        ...cameraParams,
-        selected_camera: availableCameras[0]
-      })
-    }
-  }, [availableCameras, cameraParams, handleParameterChange])
-
-  React.useEffect(() => {
-    if (!monitorParams || !availableDisplays?.length) {
-      return
-    }
-
-    if (!monitorParams.selected_display && availableDisplays.length > 0) {
-      handleParameterChange('monitor', {
-        ...monitorParams,
-        selected_display: availableDisplays[0]
-      })
-    }
-  }, [availableDisplays, monitorParams, handleParameterChange])
+  // REMOVED: Autonomous camera/monitor selection
+  // Backend is the SSoT and auto-selects hardware on startup based on detection logic.
+  // Frontend only sends user-initiated parameter changes through handleParameterChange(),
+  // which flows through backend and returns via parameters_snapshot.
+  // This ensures backend hardware preference logic (e.g., non-FaceTime cameras) is respected.
 
   React.useEffect(() => {
     if (!cameraParams?.selected_camera || !sendCommand || !isReady) {

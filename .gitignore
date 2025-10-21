@@ -108,8 +108,14 @@ poetry.toml
 reports
 .backup
 
-# Data
-sample_data
+# Data files and directories
+sample_data/
+ISI-master/
+old_implementation/
 *.h5
 *.hdf5
 *.npy
+*.mat
+*.zip
+apps/backend/data/sessions/
+apps/backend/data/stimulus_library/

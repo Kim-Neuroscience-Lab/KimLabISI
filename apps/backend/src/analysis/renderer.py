@@ -46,25 +46,38 @@ class AnalysisRenderer:
         phase_map: np.ndarray,
         magnitude_map: Optional[np.ndarray] = None
     ) -> np.ndarray:
-        """Render phase map to RGB image.
+        """Render phase map to RGBA image.
 
         Phase is mapped to hue (cyclical colormap), and optionally
         modulated by magnitude (as brightness).
+        NaN/masked regions are rendered as transparent.
 
         Args:
             phase_map: Phase in radians [-π, π]
             magnitude_map: Optional magnitude for brightness modulation
 
         Returns:
-            RGB image [height, width, 3] uint8
+            RGBA image [height, width, 4] uint8 with alpha channel for transparency
         """
-        logger.info("Rendering phase map...")
+        logger.info("Rendering phase map with transparency for NaN...")
+
+        # CRITICAL: Ensure C-contiguous before processing
+        # Fortran-order arrays cause artifacts in HSV conversion
+        if not phase_map.flags['C_CONTIGUOUS']:
+            logger.info("  Phase map NOT C-contiguous, converting...")
+            phase_map = np.ascontiguousarray(phase_map)
 
         height, width = phase_map.shape
 
+        # Identify NaN/invalid regions for transparency
+        nan_mask = np.isnan(phase_map)
+
+        # Replace NaN with 0 for processing
+        phase_clean = np.nan_to_num(phase_map, nan=0.0)
+
         # Map phase [-π, π] to hue [0, 179] (OpenCV HSV range)
         # HSV hue is in [0, 179] for uint8
-        hue = ((phase_map + np.pi) / (2 * np.pi) * 179).astype(np.uint8)
+        hue = ((phase_clean + np.pi) / (2 * np.pi) * 179).astype(np.uint8)
 
         # Saturation full (255)
         saturation = np.full((height, width), 255, dtype=np.uint8)
@@ -75,7 +88,8 @@ class AnalysisRenderer:
             mag_min = np.nanmin(magnitude_map)
             mag_max = np.nanmax(magnitude_map)
             if mag_max > mag_min:
-                value = ((magnitude_map - mag_min) / (mag_max - mag_min) * 255).astype(np.uint8)
+                magnitude_clean = np.nan_to_num(magnitude_map, nan=0.0)
+                value = ((magnitude_clean - mag_min) / (mag_max - mag_min) * 255).astype(np.uint8)
             else:
                 value = np.full((height, width), 255, dtype=np.uint8)
         else:
@@ -87,52 +101,89 @@ class AnalysisRenderer:
         # Convert HSV to RGB
         rgb_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
 
-        return rgb_image
+        # Add alpha channel
+        rgba_image = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba_image[:, :, :3] = rgb_image
+        rgba_image[:, :, 3] = 255  # Fully opaque by default
+
+        # Make NaN/masked regions transparent
+        rgba_image[nan_mask, 3] = 0
+
+        return rgba_image
 
     def render_amplitude_map(self, magnitude_map: np.ndarray) -> np.ndarray:
-        """Render amplitude/magnitude map to grayscale image.
+        """Render amplitude/magnitude map with colorful colormap and transparency for NaN.
 
         Args:
             magnitude_map: Response amplitude
 
         Returns:
-            RGB grayscale image [height, width, 3] uint8
+            RGBA image [height, width, 4] uint8 with alpha channel for transparency
         """
-        logger.info("Rendering amplitude map...")
+        logger.info("Rendering amplitude map with JET colormap...")
+
+        height, width = magnitude_map.shape
+
+        # Identify NaN/invalid regions for transparency
+        nan_mask = np.isnan(magnitude_map)
+
+        # Replace NaN with 0 for processing
+        magnitude_clean = np.nan_to_num(magnitude_map, nan=0.0)
 
         # Normalize to [0, 255]
         mag_min = np.nanmin(magnitude_map)
         mag_max = np.nanmax(magnitude_map)
 
         if mag_max > mag_min:
-            normalized = ((magnitude_map - mag_min) / (mag_max - mag_min) * 255).astype(np.uint8)
+            normalized = ((magnitude_clean - mag_min) / (mag_max - mag_min) * 255).astype(np.uint8)
         else:
-            normalized = np.zeros_like(magnitude_map, dtype=np.uint8)
+            normalized = np.zeros_like(magnitude_clean, dtype=np.uint8)
 
-        # Convert to RGB (grayscale)
-        rgb_image = cv2.cvtColor(normalized, cv2.COLOR_GRAY2RGB)
+        # Apply JET colormap (blue → cyan → green → yellow → red)
+        colored_bgr = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
 
-        return rgb_image
+        # Convert BGR to RGB
+        rgb_image = cv2.cvtColor(colored_bgr, cv2.COLOR_BGR2RGB)
+
+        # Add alpha channel
+        rgba_image = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba_image[:, :, :3] = rgb_image
+        rgba_image[:, :, 3] = 255  # Fully opaque by default
+
+        # Make NaN/masked regions transparent
+        rgba_image[nan_mask, 3] = 0
+
+        return rgba_image
 
     def render_retinotopic_map(
         self,
         retinotopic_map: np.ndarray,
         map_type: str = 'azimuth'
     ) -> np.ndarray:
-        """Render retinotopic map (azimuth or elevation) to RGB image.
+        """Render retinotopic map (azimuth or elevation) to RGBA image.
 
         Uses color-coded visualization where hue represents visual angle.
+        NaN/masked regions are rendered as transparent.
 
         Args:
             retinotopic_map: Retinotopic map in degrees
             map_type: 'azimuth' or 'elevation'
 
         Returns:
-            RGB image [height, width, 3] uint8
+            RGBA image [height, width, 4] uint8 with alpha channel for transparency
         """
-        logger.info(f"Rendering {map_type} map...")
+        logger.info(f"Rendering {map_type} map with transparency for NaN...")
+
+        # CRITICAL: Ensure C-contiguous before processing
+        # Fortran-order arrays cause artifacts in HSV conversion and stacking
+        if not retinotopic_map.flags['C_CONTIGUOUS']:
+            logger.info(f"  {map_type} map NOT C-contiguous, converting...")
+            retinotopic_map = np.ascontiguousarray(retinotopic_map)
 
         height, width = retinotopic_map.shape
+
+        # Identify NaN/invalid regions for transparency
+        nan_mask = np.isnan(retinotopic_map)
 
         # Determine value range based on map type
         if map_type == 'azimuth':
@@ -146,17 +197,15 @@ class AnalysisRenderer:
             value_min = np.nanmin(retinotopic_map)
             value_max = np.nanmax(retinotopic_map)
 
+        # Replace NaN with midpoint for processing
+        retinotopic_clean = np.nan_to_num(retinotopic_map, nan=(value_min + value_max) / 2.0)
+
         # Map value range to hue [0, 179]
-        hue = ((retinotopic_map - value_min) / (value_max - value_min) * 179).astype(np.uint8)
+        hue = ((retinotopic_clean - value_min) / (value_max - value_min) * 179).astype(np.uint8)
 
         # Full saturation and value
         saturation = np.full((height, width), 255, dtype=np.uint8)
         value = np.full((height, width), 255, dtype=np.uint8)
-
-        # Handle NaN values (set to black)
-        nan_mask = np.isnan(retinotopic_map)
-        saturation[nan_mask] = 0
-        value[nan_mask] = 0
 
         # Combine into HSV
         hsv_image = np.stack([hue, saturation, value], axis=-1)
@@ -164,36 +213,79 @@ class AnalysisRenderer:
         # Convert HSV to RGB
         rgb_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
 
-        return rgb_image
+        # Add alpha channel
+        rgba_image = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba_image[:, :, :3] = rgb_image
+        rgba_image[:, :, 3] = 255  # Fully opaque by default
+
+        # Make NaN/masked regions transparent
+        rgba_image[nan_mask, 3] = 0
+
+        return rgba_image
 
     def render_sign_map(self, sign_map: np.ndarray) -> np.ndarray:
-        """Render visual field sign map to RGB image.
+        """Render visual field sign map to RGBA image.
 
-        Positive sign (non-mirror) = Red
-        Negative sign (mirror) = Blue
-        Zero/undefined = Gray
+        Uses JET colormap to visualize VFS values:
+        - Negative values (mirror representation) = Blue
+        - Zero = Cyan/Green
+        - Positive values (non-mirror representation) = Red
+
+        Zero values from thresholding are rendered as transparent to show
+        the underlying anatomical image.
 
         Args:
-            sign_map: Visual field sign map (+1, -1, 0)
+            sign_map: Visual field sign map (raw Jacobian determinant values)
 
         Returns:
-            RGB image [height, width, 3] uint8
+            RGBA image [height, width, 4] uint8 with alpha channel for transparency
         """
-        logger.info("Rendering sign map...")
+        logger.info("Rendering sign map with JET colormap and transparency for thresholded regions...")
+        logger.info(f"  VFS range: [{np.nanmin(sign_map):.3f}, {np.nanmax(sign_map):.3f}]")
 
         height, width = sign_map.shape
-        rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
 
-        # Positive sign = Red
-        rgb_image[sign_map > 0] = [255, 0, 0]
+        # CRITICAL: Ensure C-contiguous before processing
+        if not sign_map.flags['C_CONTIGUOUS']:
+            logger.info("  Sign map NOT C-contiguous, converting...")
+            sign_map = np.ascontiguousarray(sign_map)
 
-        # Negative sign = Blue
-        rgb_image[sign_map < 0] = [0, 0, 255]
+        # Identify thresholded/masked regions for transparency
+        # The pipeline sets thresholded regions to exactly 0.0
+        nan_mask = np.isnan(sign_map)
+        zero_mask = (sign_map == 0.0)
+        masked_regions = nan_mask | zero_mask
 
-        # Zero/undefined = Gray
-        rgb_image[sign_map == 0] = [128, 128, 128]
+        logger.info(f"  Masked regions: NaN={np.sum(nan_mask)}, Zero={np.sum(zero_mask)}, Total={np.sum(masked_regions)}")
 
-        return rgb_image
+        # Replace NaN with 0 for processing
+        sign_clean = np.nan_to_num(sign_map, nan=0.0)
+
+        # Normalize to [0, 255] for colormap using symmetric range around zero
+        # Find the max absolute value for symmetric colormap
+        max_abs = np.max(np.abs(sign_clean[~masked_regions])) if np.any(~masked_regions) else 1.0
+        if max_abs == 0:
+            max_abs = 1.0
+
+        # Map [-max_abs, +max_abs] to [0, 255] symmetrically around 127 (green/cyan)
+        sign_normalized = ((sign_clean / max_abs + 1.0) / 2.0 * 255).astype(np.uint8)
+        logger.info(f"  Normalized using max_abs={max_abs:.3f}")
+
+        # Apply JET colormap (blue → cyan → green → yellow → red)
+        colored_bgr = cv2.applyColorMap(sign_normalized, cv2.COLORMAP_JET)
+
+        # Convert BGR to RGB
+        rgb_image = cv2.cvtColor(colored_bgr, cv2.COLOR_BGR2RGB)
+
+        # Add alpha channel
+        rgba_image = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba_image[:, :, :3] = rgb_image
+        rgba_image[:, :, 3] = 255  # Fully opaque by default
+
+        # Make thresholded regions transparent (zero values from magnitude/statistical thresholding)
+        rgba_image[masked_regions, 3] = 0
+
+        return rgba_image
 
     def render_boundary_map(self, boundary_map: np.ndarray) -> np.ndarray:
         """Render boundary map to RGBA image.
@@ -222,18 +314,17 @@ class AnalysisRenderer:
         binary_boundaries = (boundary_map > 0).astype(np.uint8)
 
         num_nonzero_before = np.sum(binary_boundaries > 0)
-        logger.info(f"Non-zero pixels before thinning: {num_nonzero_before}/{height*width} ({100*num_nonzero_before/(height*width):.1f}%)")
+        logger.info(f"Non-zero pixels: {num_nonzero_before}/{height*width} ({100*num_nonzero_before/(height*width):.1f}%)")
 
-        # Apply morphological thinning to get single-pixel-wide boundaries
-        # Use gradient to extract edges
-        kernel = np.ones((3, 3), np.uint8)
-        thinned_boundaries = cv2.morphologyEx(binary_boundaries, cv2.MORPH_GRADIENT, kernel)
+        # Boundary map is already processed by pipeline - use as-is
+        # No need for morphological operations here (separation of concerns)
+        thinned_boundaries = binary_boundaries
 
         # Log how many pixels are boundaries (for debugging)
         num_boundary_pixels = np.sum(thinned_boundaries > 0)
         total_pixels = height * width
         boundary_percentage = (num_boundary_pixels / total_pixels) * 100
-        logger.info(f"Boundary pixels after thinning: {num_boundary_pixels}/{total_pixels} ({boundary_percentage:.1f}%)")
+        logger.info(f"Boundary pixels: {num_boundary_pixels}/{total_pixels} ({boundary_percentage:.1f}%)")
 
         # If most of the image is boundaries, the logic might be inverted
         if boundary_percentage > 50:

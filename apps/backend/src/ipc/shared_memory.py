@@ -36,6 +36,7 @@ class FrameMetadata:
     total_frames: int = 0  # Total frames in dataset for this direction
     start_angle: float = 0.0  # Dataset start angle
     end_angle: float = 0.0  # Dataset end angle
+    channels: int = 1  # Number of channels (1=grayscale, 4=RGBA) - default grayscale
 
     def to_dict(self, shm_path: str) -> Dict[str, Any]:
         """Convert to dictionary for ZeroMQ transmission."""
@@ -66,8 +67,33 @@ class CameraFrameMetadata:
         return result
 
 
+@dataclass
+class AnalysisFrameMetadata:
+    """Frame metadata for analysis composite frames in shared memory streaming."""
+
+    frame_id: int
+    timestamp_us: int  # Render timestamp in microseconds
+    width_px: int
+    height_px: int
+    data_size_bytes: int
+    offset_bytes: int  # Offset in shared memory
+    source: str = "analysis_composite"  # Type of analysis frame
+    session_path: Optional[str] = None  # Source session path
+
+    def to_dict(self, shm_path: str) -> Dict[str, Any]:
+        """Convert to dictionary for ZeroMQ transmission."""
+        result = asdict(self)
+        result["shm_path"] = shm_path
+        return result
+
+
 class SharedMemoryFrameStream:
-    """High-performance shared memory streaming for stimulus and camera frames.
+    """High-performance shared memory streaming for stimulus, camera, and analysis frames.
+
+    Three separate channels:
+    - Stimulus frames (port 5557)
+    - Camera frames (port 5559)
+    - Analysis frames (port 5561)
 
     Simplified implementation using constructor injection.
     """
@@ -77,7 +103,8 @@ class SharedMemoryFrameStream:
         stream_name: str = "stimulus_stream",
         buffer_size_mb: int = 100,
         metadata_port: int = 5557,
-        camera_metadata_port: int = 5559
+        camera_metadata_port: int = 5559,
+        analysis_metadata_port: int = 5561
     ):
         """Initialize shared memory stream with explicit configuration.
 
@@ -86,11 +113,13 @@ class SharedMemoryFrameStream:
             buffer_size_mb: Size of shared memory buffer in megabytes
             metadata_port: Port for stimulus frame metadata
             camera_metadata_port: Port for camera frame metadata
+            analysis_metadata_port: Port for analysis frame metadata
         """
         self.stream_name = stream_name
         self.buffer_size_bytes = buffer_size_mb * 1024 * 1024
         self.metadata_port = metadata_port
         self.camera_metadata_port = camera_metadata_port
+        self.analysis_metadata_port = analysis_metadata_port
 
         # Stimulus frame tracking
         self.frame_counter = 0
@@ -105,15 +134,24 @@ class SharedMemoryFrameStream:
         self.camera_ring_buffer_frames = 100
         self.camera_frame_registry = {}
 
+        # Analysis frame tracking (separate from stimulus and camera)
+        self.analysis_frame_counter = 0
+        self.analysis_write_offset = 0
+        self.analysis_ring_buffer_frames = 100
+        self.analysis_frame_registry = {}
+
         self.zmq_context = zmq.Context()
         self.metadata_socket = None  # Stimulus metadata
         self.camera_metadata_socket = None  # Camera metadata
+        self.analysis_metadata_socket = None  # Analysis metadata
 
-        # Separate shared memory buffers for stimulus and camera
+        # Separate shared memory buffers for stimulus, camera, and analysis
         self.stimulus_shm_fd = None
         self.stimulus_shm_mmap = None
         self.camera_shm_fd = None
         self.camera_shm_mmap = None
+        self.analysis_shm_fd = None
+        self.analysis_shm_mmap = None
 
         self._lock = threading.RLock()
         self._running = False
@@ -158,15 +196,36 @@ class SharedMemoryFrameStream:
                     f"tcp://*:{self.camera_metadata_port}"
                 )
 
+                # Initialize ANALYSIS shared memory buffer
+                analysis_path = f"/tmp/{self.stream_name}_analysis_shm"
+                self.analysis_shm_fd = os.open(
+                    analysis_path, os.O_CREAT | os.O_RDWR | os.O_TRUNC, 0o666
+                )
+                os.ftruncate(self.analysis_shm_fd, self.buffer_size_bytes)
+
+                self.analysis_shm_mmap = mmap.mmap(
+                    self.analysis_shm_fd,
+                    self.buffer_size_bytes,
+                    access=mmap.ACCESS_WRITE,
+                )
+
+                # Analysis metadata socket (separate channel)
+                self.analysis_metadata_socket = self.zmq_context.socket(zmq.PUB)
+                self.analysis_metadata_socket.bind(
+                    f"tcp://*:{self.analysis_metadata_port}"
+                )
+
                 time.sleep(0.1)
 
                 self._running = True
                 logger.info(
-                    "SharedMemoryFrameStream initialised: stimulus=%s, camera=%s (stimulus port %d, camera port %d)",
+                    "SharedMemoryFrameStream initialised: stimulus=%s, camera=%s, analysis=%s (ports: stimulus=%d, camera=%d, analysis=%d)",
                     stimulus_path,
                     camera_path,
+                    analysis_path,
                     self.metadata_port,
                     self.camera_metadata_port,
+                    self.analysis_metadata_port,
                 )
         except Exception as exc:
             logger.error("Failed to initialise SharedMemoryFrameStream: %s", exc)
@@ -224,6 +283,7 @@ class SharedMemoryFrameStream:
                 angle_degrees = metadata.get("angle_degrees", 0.0)
                 start_angle = metadata.get("start_angle", 0.0)
                 end_angle = metadata.get("end_angle", 0.0)
+                channels = metadata.get("channels", 1)  # Default to grayscale
 
                 frame_metadata = FrameMetadata(
                     frame_id=self.frame_counter,
@@ -231,13 +291,14 @@ class SharedMemoryFrameStream:
                     frame_index=frame_index,
                     direction=direction,
                     angle_degrees=angle_degrees,
-                    width_px=frame_data.shape[1],
-                    height_px=frame_data.shape[0],
+                    width_px=frame_data.shape[1] if len(frame_data.shape) >= 2 else frame_data.shape[0],
+                    height_px=frame_data.shape[0] if len(frame_data.shape) >= 2 else 1,
                     data_size_bytes=data_size,
                     offset_bytes=self.write_offset,
                     total_frames=total_frames,
                     start_angle=start_angle,
                     end_angle=end_angle,
+                    channels=channels,
                 )
 
                 self.frame_registry[self.frame_counter] = frame_metadata
@@ -362,6 +423,79 @@ class SharedMemoryFrameStream:
             logger.error(f"Error writing camera frame to shared memory: {e}")
             raise
 
+    def write_analysis_frame(
+        self,
+        frame_data: np.ndarray,
+        source: str = "analysis_composite",
+        session_path: Optional[str] = None,
+    ) -> int:
+        """Write analysis frame to shared memory on separate channel.
+
+        Args:
+            frame_data: Frame data as numpy array
+            source: Type of analysis frame (e.g., "analysis_composite")
+            session_path: Optional source session path
+
+        Returns:
+            Frame ID
+        """
+        try:
+            with self._lock:
+                if not self._running:
+                    raise RuntimeError("SharedMemoryFrameStream not initialized")
+
+                if frame_data.dtype != np.uint8:
+                    frame_data = frame_data.astype(np.uint8)
+
+                frame_bytes = frame_data.tobytes()
+                data_size = len(frame_bytes)
+
+                # Use separate offset for analysis frames to avoid collisions
+                if self.analysis_write_offset + data_size > self.buffer_size_bytes:
+                    self.analysis_write_offset = 0  # Wrap to beginning
+
+                self.analysis_shm_mmap[
+                    self.analysis_write_offset : self.analysis_write_offset + data_size
+                ] = frame_bytes
+
+                self.analysis_frame_counter += 1
+                timestamp_us = int(time.time() * 1_000_000)
+
+                analysis_metadata = AnalysisFrameMetadata(
+                    frame_id=self.analysis_frame_counter,
+                    timestamp_us=timestamp_us,
+                    width_px=frame_data.shape[1],
+                    height_px=frame_data.shape[0],
+                    data_size_bytes=data_size,
+                    offset_bytes=self.analysis_write_offset,
+                    source=source,
+                    session_path=session_path,
+                )
+
+                self.analysis_frame_registry[self.analysis_frame_counter] = analysis_metadata
+
+                if len(self.analysis_frame_registry) > self.analysis_ring_buffer_frames:
+                    oldest_frame_id = min(self.analysis_frame_registry.keys())
+                    del self.analysis_frame_registry[oldest_frame_id]
+
+                metadata_msg = analysis_metadata.to_dict(
+                    f"/tmp/{self.stream_name}_analysis_shm"
+                )
+
+                try:
+                    self.analysis_metadata_socket.send_json(metadata_msg, zmq.NOBLOCK)
+                except zmq.Again:
+                    logger.warning(
+                        "Analysis metadata send queue full, dropping frame metadata"
+                    )
+
+                self.analysis_write_offset += data_size
+
+                return analysis_metadata.frame_id
+        except Exception as e:
+            logger.error(f"Error writing analysis frame to shared memory: {e}")
+            raise
+
     def clear_stimulus_frames(self) -> None:
         """Clear stimulus shared memory buffer and metadata."""
         with self._lock:
@@ -374,12 +508,16 @@ class SharedMemoryFrameStream:
                 self.stimulus_shm_mmap.flush()
         logger.debug("Stimulus shared memory frames cleared")
 
-    def publish_black_frame(self, width: int, height: int) -> int:
-        """Publish a solid black RGBA frame to shared memory.
+    def publish_black_frame(self, width: int, height: int, luminance: float = 0.0) -> int:
+        """Publish a solid grayscale frame to shared memory with specified luminance.
+
+        IMPORTANT: Now publishes GRAYSCALE (1 channel) instead of RGBA to eliminate
+        conversion overhead and reduce memory bandwidth by 4x.
 
         Args:
             width: Frame width in pixels
             height: Frame height in pixels
+            luminance: Luminance value from 0.0 (black) to 1.0 (white)
 
         Returns:
             Frame ID
@@ -389,8 +527,11 @@ class SharedMemoryFrameStream:
                 "Width and height must be positive to publish baseline frame"
             )
 
-        frame = np.zeros((height, width, 4), dtype=np.uint8)
-        frame[:, :, 3] = 255
+        # Convert luminance (0.0-1.0) to uint8 (0-255)
+        luminance_uint8 = int(np.clip(luminance * 255, 0, 255))
+
+        # Create grayscale frame (1 channel, NOT RGBA!)
+        frame = np.full((height, width), luminance_uint8, dtype=np.uint8)
 
         metadata = {
             "frame_index": 0,
@@ -399,6 +540,7 @@ class SharedMemoryFrameStream:
             "total_frames": 1,
             "start_angle": 0.0,
             "end_angle": 0.0,
+            "channels": 1  # Grayscale frame
         }
 
         return self.write_frame(frame, metadata)
@@ -427,6 +569,18 @@ class SharedMemoryFrameStream:
         with self._lock:
             return self.camera_frame_registry.get(frame_id)
 
+    def get_analysis_frame_info(self, frame_id: int) -> Optional[AnalysisFrameMetadata]:
+        """Get analysis frame metadata by ID.
+
+        Args:
+            frame_id: Frame ID
+
+        Returns:
+            Analysis frame metadata or None if not found
+        """
+        with self._lock:
+            return self.analysis_frame_registry.get(frame_id)
+
     def cleanup(self):
         """Clean up shared memory and ZeroMQ resources."""
         try:
@@ -442,6 +596,11 @@ class SharedMemoryFrameStream:
                 if self.camera_metadata_socket:
                     self.camera_metadata_socket.close()
                     self.camera_metadata_socket = None
+
+                # Close analysis metadata socket
+                if self.analysis_metadata_socket:
+                    self.analysis_metadata_socket.close()
+                    self.analysis_metadata_socket = None
 
                 # Close stimulus shared memory
                 if self.stimulus_shm_mmap:
@@ -461,6 +620,15 @@ class SharedMemoryFrameStream:
                     os.close(self.camera_shm_fd)
                     self.camera_shm_fd = None
 
+                # Close analysis shared memory
+                if self.analysis_shm_mmap:
+                    self.analysis_shm_mmap.close()
+                    self.analysis_shm_mmap = None
+
+                if self.analysis_shm_fd:
+                    os.close(self.analysis_shm_fd)
+                    self.analysis_shm_fd = None
+
                 # Remove stimulus shared memory file
                 stimulus_path = f"/tmp/{self.stream_name}_stimulus_shm"
                 if os.path.exists(stimulus_path):
@@ -471,10 +639,15 @@ class SharedMemoryFrameStream:
                 if os.path.exists(camera_path):
                     os.unlink(camera_path)
 
+                # Remove analysis shared memory file
+                analysis_path = f"/tmp/{self.stream_name}_analysis_shm"
+                if os.path.exists(analysis_path):
+                    os.unlink(analysis_path)
+
                 self.zmq_context.term()
 
                 logger.info(
-                    "SharedMemoryFrameStream cleaned up (stimulus and camera buffers)"
+                    "SharedMemoryFrameStream cleaned up (stimulus, camera, and analysis buffers)"
                 )
 
         except Exception as e:
@@ -492,7 +665,8 @@ class SharedMemoryService:
         stream_name: str = "stimulus_stream",
         buffer_size_mb: int = 100,
         metadata_port: int = 5557,
-        camera_metadata_port: int = 5559
+        camera_metadata_port: int = 5559,
+        analysis_metadata_port: int = 5561
     ):
         """Initialize shared memory service with explicit configuration.
 
@@ -501,11 +675,13 @@ class SharedMemoryService:
             buffer_size_mb: Size of shared memory buffer in megabytes
             metadata_port: Port for stimulus frame metadata
             camera_metadata_port: Port for camera frame metadata
+            analysis_metadata_port: Port for analysis frame metadata
         """
         self._stream_name = stream_name
         self._buffer_size_mb = buffer_size_mb
         self._metadata_port = metadata_port
         self._camera_metadata_port = camera_metadata_port
+        self._analysis_metadata_port = analysis_metadata_port
 
         self._stream: Optional[SharedMemoryFrameStream] = None
         self._last_stimulus_timestamp: Optional[int] = None  # Microseconds
@@ -520,7 +696,8 @@ class SharedMemoryService:
                 stream_name=self._stream_name,
                 buffer_size_mb=self._buffer_size_mb,
                 metadata_port=self._metadata_port,
-                camera_metadata_port=self._camera_metadata_port
+                camera_metadata_port=self._camera_metadata_port,
+                analysis_metadata_port=self._analysis_metadata_port
             )
             self._stream.initialize()
         return self._stream
@@ -554,9 +731,20 @@ class SharedMemoryService:
             frame_data, camera_name, capture_timestamp_us, exposure_us, gain
         )
 
-    def publish_black_frame(self, width: int, height: int) -> int:
-        """Publish a solid black RGBA frame to shared memory."""
-        return self.stream.publish_black_frame(width, height)
+    def write_analysis_frame(
+        self,
+        frame_data: np.ndarray,
+        source: str = "analysis_composite",
+        session_path: Optional[str] = None,
+    ) -> int:
+        """Write analysis frame to shared memory on separate channel."""
+        return self.stream.write_analysis_frame(
+            frame_data, source, session_path
+        )
+
+    def publish_black_frame(self, width: int, height: int, luminance: float = 0.0) -> int:
+        """Publish a solid RGBA frame to shared memory with specified luminance."""
+        return self.stream.publish_black_frame(width, height, luminance)
 
     def clear_stimulus_frames(self) -> None:
         """Clear stimulus shared memory buffer and metadata."""

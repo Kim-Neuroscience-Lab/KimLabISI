@@ -3,16 +3,16 @@
 Handles on-demand frame generation for frontend preview and full dataset generation
 for acquisition. Uses GPU acceleration (MPS on Mac, CUDA on Windows/Linux) when available.
 
-Refactored from isi_control/stimulus_manager.py with KISS approach:
-- Constructor injection: config passed as parameter
-- No service_locator imports
-- No global singletons
-- No decorators
+Refactored to use ParameterManager as Single Source of Truth:
+- Constructor injection: ParameterManager injected
+- Subscribes to parameter changes
+- No frozen configs
+- Real-time parameter updates
 """
 
 import numpy as np
 import logging
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any, List
 from dataclasses import dataclass
 
 # GPU acceleration
@@ -20,13 +20,6 @@ import torch
 
 # Import spherical transformation
 from .transform import SphericalTransform
-
-# Import config types from Phase 1
-import sys
-from pathlib import Path
-# Add parent directory to path to import config
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import StimulusConfig, MonitorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -113,85 +106,229 @@ class SpatialConfiguration:
 class StimulusGenerator:
     """Unified stimulus generation for both on-demand frames and full datasets.
 
-    Uses KISS approach:
-    - All dependencies injected via constructor
-    - No service locator
-    - No global state
-    - Explicit configuration
+    Uses ParameterManager as Single Source of Truth:
+    - Injects ParameterManager instead of frozen configs
+    - Subscribes to parameter changes
+    - Rebuilds GPU state when parameters change
     """
 
     def __init__(
         self,
-        stimulus_config: StimulusConfig,
-        monitor_config: MonitorConfig
+        param_manager,  # ParameterManager instance
+        logger=None
     ):
-        """Initialize stimulus generator with explicit configuration.
+        """Initialize stimulus generator with ParameterManager.
 
         Args:
-            stimulus_config: Stimulus parameters (bar width, contrast, etc.)
-            monitor_config: Monitor geometry and display settings
+            param_manager: ParameterManager instance (Single Source of Truth)
+            logger: Optional logger instance
 
         Raises:
             ValueError: If monitor configuration is invalid
         """
         # Store injected dependencies
-        self.stimulus_config = stimulus_config
-        self.monitor_config = monitor_config
+        self.param_manager = param_manager
+        self.logger = logger or logging.getLogger(__name__)
 
-        # Validate monitor configuration
-        if (
-            monitor_config.monitor_width_px <= 0
-            or monitor_config.monitor_height_px <= 0
-            or monitor_config.monitor_fps <= 0
-        ):
-            raise ValueError(
-                f"Invalid monitor configuration: "
-                f"width_px={monitor_config.monitor_width_px}, "
-                f"height_px={monitor_config.monitor_height_px}, "
-                f"fps={monitor_config.monitor_fps}"
-            )
-
-        # Create spatial configuration from monitor config
-        self.spatial_config = SpatialConfiguration(
-            monitor_distance_cm=monitor_config.monitor_distance_cm,
-            monitor_angle_degrees=monitor_config.monitor_lateral_angle_deg,
-            screen_width_pixels=monitor_config.monitor_width_px,
-            screen_height_pixels=monitor_config.monitor_height_px,
-            screen_width_cm=monitor_config.monitor_width_cm,
-            screen_height_cm=monitor_config.monitor_height_cm,
-            fps=monitor_config.monitor_fps,
-        )
+        # Subscribe to parameter changes
+        self.param_manager.subscribe("stimulus", self._handle_stimulus_params_changed)
+        self.param_manager.subscribe("monitor", self._handle_monitor_params_changed)
 
         # Detect and set GPU device (CUDA/MPS/CPU)
         self.device = get_device()
 
-        # Initialize spherical transform and coordinate grids
+        # Initialize state from current parameters
+        # These will be instance variables updated from ParameterManager
+        self.bar_width_deg = None
+        self.checker_size_deg = None
+        self.drift_speed_deg_per_sec = None
+        self.contrast = None
+        self.strobe_rate_hz = None
+        self.background_luminance = None
+
+        self.monitor_distance_cm = None
+        self.monitor_width_px = None
+        self.monitor_height_px = None
+        self.monitor_width_cm = None
+        self.monitor_height_cm = None
+        self.monitor_lateral_angle_deg = None
+        self.monitor_tilt_angle_deg = None
+        self.monitor_fps = None
+
+        # Spatial configuration (will be rebuilt from parameters)
+        self.spatial_config = None
+
+        # GPU state (will be built from parameters)
         self.spherical_transform = None
         self.X_pixels = None
         self.Y_pixels = None
         self.X_degrees = None
         self.Y_degrees = None
-        self._setup_spherical_transform()
-        self._setup_coordinate_grids()
-
-        # Pre-compute invariants on GPU (computed once, used for all frames)
         self.pixel_azimuth = None
         self.pixel_altitude = None
         self.base_checkerboard = None
+
+        # Check if monitor parameters are valid before initializing
+        monitor_params = self.param_manager.get_parameter_group("monitor")
+        monitor_width_px = monitor_params.get("monitor_width_px", -1)
+        monitor_height_px = monitor_params.get("monitor_height_px", -1)
+        monitor_fps = monitor_params.get("monitor_fps", -1)
+
+        if monitor_width_px > 0 and monitor_height_px > 0 and monitor_fps > 0:
+            # Valid monitor config - initialize now
+            self._setup_from_parameters()
+            self.logger.info("StimulusGenerator initialized with ParameterManager")
+            self.logger.info(
+                "  Screen: %sx%s",
+                self.spatial_config.screen_width_pixels,
+                self.spatial_config.screen_height_pixels,
+            )
+            self.logger.info(
+                "  FoV: %.1f° x %.1f°",
+                self.spatial_config.field_of_view_horizontal,
+                self.spatial_config.field_of_view_vertical,
+            )
+            self.logger.info("  Distance: %s cm", self.spatial_config.monitor_distance_cm)
+        else:
+            # Invalid monitor config - defer initialization until hardware detection
+            # This is EXPECTED during normal startup (services created before hardware detection)
+            self.logger.debug(
+                "StimulusGenerator created with placeholder monitor parameters "
+                f"(width={monitor_width_px}, height={monitor_height_px}, fps={monitor_fps}). "
+                "Will initialize after hardware detection."
+            )
+
+    def _setup_from_parameters(self):
+        """Initialize/reinitialize all state from current parameter values.
+
+        Called on startup and whenever parameters change.
+        Reads fresh values from ParameterManager and rebuilds all GPU state.
+        """
+        # Get current parameters
+        stimulus_params = self.param_manager.get_parameter_group("stimulus")
+        monitor_params = self.param_manager.get_parameter_group("monitor")
+
+        # Extract ALL stimulus parameters
+        self.bar_width_deg = stimulus_params.get("bar_width_deg", 15.0)
+        self.checker_size_deg = stimulus_params.get("checker_size_deg", 5.0)
+        self.drift_speed_deg_per_sec = stimulus_params.get("drift_speed_deg_per_sec", 10.0)
+        self.contrast = stimulus_params.get("contrast", 0.5)
+        self.strobe_rate_hz = stimulus_params.get("strobe_rate_hz", 2.0)
+        self.background_luminance = stimulus_params.get("background_luminance", 0.5)
+
+        # CRITICAL VALIDATION: Ensure pattern will be visible
+        if self.background_luminance < self.contrast:
+            self.logger.error(
+                f"INVALID STIMULUS PARAMETERS: background_luminance ({self.background_luminance}) < contrast ({self.contrast}). "
+                f"This will cause half the checkerboard to be clamped to black and invisible! "
+                f"Clamping contrast to background_luminance to prevent invisible pattern."
+            )
+            self.contrast = self.background_luminance  # Emergency fix: reduce contrast to prevent negative values
+
+        # Extract ALL monitor parameters
+        self.monitor_distance_cm = monitor_params.get("monitor_distance_cm", 15.0)
+        self.monitor_width_px = monitor_params.get("monitor_width_px", 1920)
+        self.monitor_height_px = monitor_params.get("monitor_height_px", 1080)
+        self.monitor_width_cm = monitor_params.get("monitor_width_cm", 50.0)
+        self.monitor_height_cm = monitor_params.get("monitor_height_cm", 28.0)
+        self.monitor_lateral_angle_deg = monitor_params.get("monitor_lateral_angle_deg", 0.0)
+        self.monitor_tilt_angle_deg = monitor_params.get("monitor_tilt_angle_deg", 0.0)
+        self.monitor_fps = monitor_params.get("monitor_fps", 60)
+
+        # Validate monitor configuration
+        if (
+            self.monitor_width_px <= 0
+            or self.monitor_height_px <= 0
+            or self.monitor_fps <= 0
+        ):
+            raise ValueError(
+                f"Invalid monitor configuration: "
+                f"width_px={self.monitor_width_px}, "
+                f"height_px={self.monitor_height_px}, "
+                f"fps={self.monitor_fps}"
+            )
+
+        # Rebuild spatial configuration
+        self.spatial_config = SpatialConfiguration(
+            monitor_distance_cm=self.monitor_distance_cm,
+            monitor_angle_degrees=self.monitor_lateral_angle_deg,
+            screen_width_pixels=self.monitor_width_px,
+            screen_height_pixels=self.monitor_height_px,
+            screen_width_cm=self.monitor_width_cm,
+            screen_height_cm=self.monitor_height_cm,
+            fps=self.monitor_fps,
+        )
+
+        # Rebuild spherical transform and coordinate grids
+        self._setup_spherical_transform()
+        self._setup_coordinate_grids()
+
+        # Rebuild GPU invariants
         self._precompute_invariants()
 
-        logger.debug("StimulusGenerator initialized")
-        logger.debug(
-            "  Screen: %sx%s",
-            self.spatial_config.screen_width_pixels,
-            self.spatial_config.screen_height_pixels,
-        )
-        logger.debug(
-            "  FoV: %.1f° x %.1f°",
-            self.spatial_config.field_of_view_horizontal,
-            self.spatial_config.field_of_view_vertical,
-        )
-        logger.debug("  Distance: %s cm", self.spatial_config.monitor_distance_cm)
+        if hasattr(self, 'logger'):
+            self.logger.info("Stimulus generator reconfigured from current parameters")
+
+    # Compatibility properties for external code (handlers in main.py)
+    @property
+    def stimulus_config(self):
+        """Compatibility property - returns dict-like object with stimulus parameters."""
+        class StimConfigCompat:
+            def __init__(self, generator):
+                self.generator = generator
+            def __getattr__(self, name):
+                return getattr(self.generator, name)
+        return StimConfigCompat(self)
+
+    def _handle_stimulus_params_changed(self, group_name: str, updates: Dict[str, Any]):
+        """React to stimulus parameter changes - rebuild state.
+
+        Args:
+            group_name: Parameter group that changed ("stimulus")
+            updates: Dictionary of updated parameters
+        """
+        self.logger.info(f"Stimulus parameters changed: {list(updates.keys())}")
+
+        # Any stimulus parameter change requires rebuild
+        self._setup_from_parameters()
+
+    def _handle_monitor_params_changed(self, group_name: str, updates: Dict[str, Any]):
+        """React to monitor parameter changes - rebuild spatial state.
+
+        Args:
+            group_name: Parameter group that changed ("monitor")
+            updates: Dictionary of updated parameters
+        """
+        self.logger.info(f"Monitor parameters changed: {list(updates.keys())}")
+
+        # Check if spatial parameters changed (affects FOV calculations)
+        spatial_keys = [
+            "monitor_distance_cm", "monitor_width_cm", "monitor_height_cm",
+            "monitor_width_px", "monitor_height_px",
+            "monitor_lateral_angle_deg", "monitor_tilt_angle_deg", "monitor_fps"
+        ]
+
+        if any(key in updates for key in spatial_keys):
+            # Check if the updated parameters are valid
+            monitor_params = self.param_manager.get_parameter_group("monitor")
+            width_px = monitor_params.get("monitor_width_px", -1)
+            height_px = monitor_params.get("monitor_height_px", -1)
+            fps = monitor_params.get("monitor_fps", -1)
+
+            if width_px > 0 and height_px > 0 and fps > 0:
+                # Valid parameters - initialize/rebuild
+                self._setup_from_parameters()  # Full rebuild
+                self.logger.info(
+                    f"StimulusGenerator initialized after hardware detection: "
+                    f"{width_px}x{height_px}@{fps}Hz"
+                )
+            else:
+                # Still invalid after hardware detection - this is a problem!
+                self.logger.warning(
+                    f"Monitor parameters still invalid after hardware detection: "
+                    f"width_px={width_px}, height_px={height_px}, fps={fps}. "
+                    f"StimulusGenerator cannot initialize until valid display is detected."
+                )
 
     def _setup_spherical_transform(self):
         """Initialize spherical transform with spatial configuration."""
@@ -238,7 +375,7 @@ class StimulusGenerator:
         )
 
         # Pre-compute base checkerboard pattern on GPU (before phase flips)
-        checker_size_degrees = self.stimulus_config.checker_size_deg
+        checker_size_degrees = self.checker_size_deg
         azimuth_checks = (self.pixel_azimuth / checker_size_degrees).to(torch.int64)
         altitude_checks = (self.pixel_altitude / checker_size_degrees).to(torch.int64)
         self.base_checkerboard = (azimuth_checks + altitude_checks) % 2
@@ -261,7 +398,7 @@ class StimulusGenerator:
         """
         try:
             # Calculate the actual total sweep distance including off-screen portions
-            bar_full_width = self.stimulus_config.bar_width_deg
+            bar_full_width = self.bar_width_deg
 
             if direction in ["LR", "RL"]:
                 # Vertical bars - sweep through azimuth plus off-screen extensions
@@ -273,7 +410,7 @@ class StimulusGenerator:
                 total_sweep_degrees = 2 * (fov_half + bar_full_width)
 
             sweep_duration = (
-                total_sweep_degrees / self.stimulus_config.drift_speed_deg_per_sec
+                total_sweep_degrees / self.drift_speed_deg_per_sec
             )
 
             if total_frames is None:
@@ -303,7 +440,7 @@ class StimulusGenerator:
         Returns:
             Tuple of (start_angle, end_angle) in degrees
         """
-        bar_full_width = self.stimulus_config.bar_width_deg
+        bar_full_width = self.bar_width_deg
 
         if direction in ["LR", "RL"]:
             max_angle = self.spatial_config.field_of_view_horizontal / 2
@@ -361,6 +498,7 @@ class StimulusGenerator:
         angle: float,
         show_bar_mask: bool = True,
         frame_index: int = 0,
+        output_format: str = "rgba",
     ) -> np.ndarray:
         """Generate a single frame on GPU using PyTorch tensors.
 
@@ -369,9 +507,10 @@ class StimulusGenerator:
             angle: Current bar angle in degrees
             show_bar_mask: Whether to show bar mask
             frame_index: Current frame index (for flicker phase)
+            output_format: Output format - "grayscale" (H, W) or "rgba" (H, W, 4)
 
         Returns:
-            NumPy array of shape (H, W, 4) with RGBA data
+            NumPy array with grayscale (H, W) or RGBA (H, W, 4) data
         """
         h, w = (
             self.spatial_config.screen_height_pixels,
@@ -381,7 +520,7 @@ class StimulusGenerator:
         # Start with background (on GPU)
         frame = torch.full(
             (h, w),
-            self.stimulus_config.background_luminance,
+            self.background_luminance,
             dtype=torch.float32,
             device=self.device,
         )
@@ -400,22 +539,26 @@ class StimulusGenerator:
                 coordinate_map = self.pixel_altitude
 
             # Vectorized bar mask calculation (GPU-accelerated)
-            bar_half_width = self.stimulus_config.bar_width_deg / 2
+            bar_half_width = self.bar_width_deg / 2
             bar_mask = torch.abs(coordinate_map - angle) <= bar_half_width
 
             # Apply checkerboard within bar using vectorized operation (GPU)
             frame[bar_mask] = checkerboard[bar_mask]
 
-        # Convert to uint8 RGBA for direct canvas rendering (GPU-accelerated)
+        # Convert to uint8
         frame_uint8 = torch.clamp(frame * 255, 0, 255).to(torch.uint8)
 
-        # Expand grayscale to RGBA using broadcasting (GPU)
-        frame_rgba = torch.empty((h, w, 4), dtype=torch.uint8, device=self.device)
-        frame_rgba[:, :, :3] = frame_uint8.unsqueeze(-1)  # Broadcast to RGB
-        frame_rgba[:, :, 3] = 255  # Alpha channel
+        if output_format == "grayscale":
+            # Return grayscale (for efficient storage - 4x smaller than RGBA)
+            return frame_uint8.cpu().numpy()
+        else:  # rgba
+            # Expand grayscale to RGBA using broadcasting (GPU)
+            frame_rgba = torch.empty((h, w, 4), dtype=torch.uint8, device=self.device)
+            frame_rgba[:, :, :3] = frame_uint8.unsqueeze(-1)  # Broadcast to RGB
+            frame_rgba[:, :, 3] = 255  # Alpha channel
 
-        # Convert to NumPy only at the end for output
-        return frame_rgba.cpu().numpy()
+            # Convert to NumPy only at the end for output
+            return frame_rgba.cpu().numpy()
 
     def generate_frame_at_index(
         self,
@@ -485,7 +628,7 @@ class StimulusGenerator:
 
         # Counter-phase flickering - simple inversion
         fps = self.spatial_config.fps
-        flicker_frequency_hz = self.stimulus_config.strobe_rate_hz
+        flicker_frequency_hz = self.strobe_rate_hz
         flicker_period_frames = (
             int(fps / flicker_frequency_hz)
             if flicker_frequency_hz > 0
@@ -502,11 +645,58 @@ class StimulusGenerator:
         # Apply contrast using vectorized torch.where (GPU-accelerated)
         pattern = torch.where(
             checkerboard.bool(),
-            self.stimulus_config.background_luminance + self.stimulus_config.contrast,
-            self.stimulus_config.background_luminance - self.stimulus_config.contrast,
+            self.background_luminance + self.contrast,
+            self.background_luminance - self.contrast,
         )
 
         return torch.clamp(pattern, 0, 1)
+
+    def generate_sweep(
+        self,
+        direction: str,
+        output_format: str = "grayscale"
+    ) -> Tuple[List[np.ndarray], List[float]]:
+        """Generate a complete sweep sequence (one cycle) for pre-generation.
+
+        Args:
+            direction: Sweep direction ("LR", "RL", "TB", "BT")
+            output_format: "grayscale" or "rgba"
+
+        Returns:
+            Tuple of (frames_list, angles_list)
+        """
+        # Get dataset info for one cycle
+        dataset_info = self.get_dataset_info(direction)
+        if "error" in dataset_info:
+            raise Exception(dataset_info["error"])
+
+        total_frames = dataset_info["total_frames"]
+        start_angle = dataset_info["start_angle"]
+        end_angle = dataset_info["end_angle"]
+
+        logger.info(f"Generating {direction} sweep: {total_frames} frames at {self.spatial_config.fps} fps")
+        logger.info(f"  Duration: {dataset_info['duration_sec']:.2f}s, Angle range: {start_angle:.1f}° to {end_angle:.1f}°")
+
+        frames = []
+        angles = []
+
+        for frame_index in range(total_frames):
+            angle = self.calculate_frame_angle(direction, frame_index, total_frames)
+            frame = self.generate_frame_at_angle(
+                direction=direction,
+                angle=angle,
+                show_bar_mask=True,
+                frame_index=frame_index,
+                output_format=output_format
+            )
+            frames.append(frame)
+            angles.append(angle)
+
+            if frame_index % 100 == 0:
+                logger.debug(f"  Generated frame {frame_index}/{total_frames}")
+
+        logger.info(f"Sweep generation complete: {len(frames)} frames")
+        return frames, angles
 
     def generate_full_dataset(
         self, direction: str, num_cycles: int = 10
@@ -523,8 +713,9 @@ class StimulusGenerator:
         try:
             logger.debug("Generating %s drifting bar stimulus dataset...", direction)
 
-            # Get dataset parameters
-            dataset_info = self.get_dataset_info(direction, num_cycles)
+            # Get dataset parameters for ONE cycle
+            # num_cycles is used to multiply total_frames below
+            dataset_info = self.get_dataset_info(direction)
             if "error" in dataset_info:
                 raise Exception(dataset_info["error"])
 

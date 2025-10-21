@@ -49,8 +49,9 @@ def get_available_camera_indices() -> List[int]:
 
         if system == "Darwin":  # macOS
             # Use system_profiler to get actual camera devices
+            # OPTIMIZATION: Reduced timeout from 5s to 2s for faster startup
             success, stdout, stderr = run_system_command(
-                ["system_profiler", "SPCameraDataType", "-json"], timeout=5
+                ["system_profiler", "SPCameraDataType", "-json"], timeout=2
             )
 
             if success:
@@ -104,27 +105,85 @@ def get_available_camera_indices() -> List[int]:
     return available_indices
 
 
-def generate_camera_name(index: int, width: int, height: int) -> str:
-    """Generate a user-friendly camera name based on platform and properties.
+def get_system_camera_names() -> List[Tuple[int, str]]:
+    """Get REAL camera names from the operating system.
 
-    Args:
-        index: Camera index
-        width: Camera width in pixels
-        height: Camera height in pixels
+    Returns list of (index, name) tuples with actual hardware camera names.
+    This replaces the deprecated generate_camera_name() function.
 
     Returns:
-        User-friendly camera name
+        List of (index, name) tuples where name is the REAL hardware name
     """
-    system = platform.system()
+    camera_names = []
 
-    if system == "Darwin":  # macOS
-        if index == 0:
-            return "FaceTime HD Camera"
-        else:
-            return f"Camera {index}"
-    elif system == "Windows":
-        return f"Camera {index}"
-    elif system == "Linux":
-        return f"Video{index}"
-    else:
-        return f"Camera {index}"
+    try:
+        system = platform.system()
+
+        if system == "Darwin":  # macOS
+            # Use system_profiler to get REAL camera names
+            success, stdout, stderr = run_system_command(
+                ["system_profiler", "SPCameraDataType", "-json"], timeout=2
+            )
+
+            if success:
+                try:
+                    data = json.loads(stdout)
+                    cameras = data.get("SPCameraDataType", [])
+                    for i, camera in enumerate(cameras):
+                        real_name = camera.get("_name", f"Camera {i}")
+                        camera_names.append((i, real_name))
+                        logger.debug(f"Found camera {i}: {real_name}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse system_profiler output: {e}")
+                    # Fallback: generic name
+                    camera_names.append((0, "Camera 0"))
+            else:
+                # Fallback: generic name
+                camera_names.append((0, "Camera 0"))
+
+        elif system == "Linux":
+            # On Linux, use v4l2-ctl to get camera names (if available)
+            # Otherwise fall back to generic names
+            try:
+                success, stdout, stderr = run_system_command(
+                    ["ls", "/dev/video*"], timeout=5
+                )
+                if success:
+                    video_devices = stdout.strip().split("\n")
+                    for device in video_devices:
+                        if device.startswith("/dev/video"):
+                            try:
+                                index = int(device.split("video")[1])
+                                # Try to get real name with v4l2-ctl
+                                v4l_success, v4l_stdout, _ = run_system_command(
+                                    ["v4l2-ctl", "--device", device, "--info"], timeout=2
+                                )
+                                if v4l_success and "Card type" in v4l_stdout:
+                                    # Extract camera name from v4l2-ctl output
+                                    for line in v4l_stdout.split("\n"):
+                                        if "Card type" in line:
+                                            name = line.split(":", 1)[1].strip()
+                                            camera_names.append((index, name))
+                                            break
+                                else:
+                                    # Fallback to generic name
+                                    camera_names.append((index, f"Camera {index}"))
+                            except (ValueError, IndexError):
+                                continue
+                else:
+                    camera_names.append((0, "Camera 0"))
+            except Exception as e:
+                logger.debug(f"Failed to enumerate Linux cameras: {e}")
+                camera_names.append((0, "Camera 0"))
+
+        else:  # Windows or other
+            # Windows: could use WMI or DirectShow, but for now use generic name
+            camera_names.append((0, "Camera 0"))
+
+    except Exception as e:
+        logger.error(f"Failed to get system camera names: {e}")
+        # Fallback to generic name
+        camera_names.append((0, "Camera 0"))
+
+    logger.debug(f"System camera names: {camera_names}")
+    return camera_names

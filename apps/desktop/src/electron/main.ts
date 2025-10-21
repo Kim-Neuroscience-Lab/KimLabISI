@@ -93,6 +93,19 @@ class SharedMemoryFrameReader {
 
   private async handleFrameMetadata(metadata: SharedMemoryFrameMetadata): Promise<void> {
     try {
+      // Detect test message for ZeroMQ synchronization handshake
+      // This proves the subscriber is fully connected and ready
+      if ('camera_name' in metadata && metadata.camera_name === 'TEST') {
+        mainLogger.info('✅ Test message received - ZeroMQ camera subscriber confirmed active')
+
+        // Send confirmation to backend so it can start real camera acquisition
+        await backendManager.sendStartupCommand({ type: 'camera_subscriber_confirmed' })
+        mainLogger.info('Sent camera_subscriber_confirmed to backend')
+
+        // Don't forward test message to renderer - it's only for synchronization
+        return
+      }
+
       // Send ONLY metadata to renderer - frame data stays in shared memory
       const frameMetadata = {
         frame_id: metadata.frame_id,
@@ -137,6 +150,7 @@ class SharedMemoryFrameReader {
 // Global shared memory reader instances
 let sharedMemoryReader: SharedMemoryFrameReader | null = null  // For stimulus frames
 let cameraFrameReader: SharedMemoryFrameReader | null = null  // For camera frames
+let analysisFrameReader: SharedMemoryFrameReader | null = null  // For analysis frames
 
 function resolveBackendRoot(): string {
   const appPath = app?.getAppPath?.() ?? process.cwd()
@@ -234,7 +248,7 @@ class MultiChannelIPCManager {
   private handshakeInProgress = false
   private backendRootOverride: string | null = null
   private startupResolve: ((value: void | PromiseLike<void>) => void) | null = null
-  private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeout: NodeJS.Timeout }> = new Map()
+  private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: any) => void; timeout: NodeJS.Timeout | null }> = new Map()
   private nextMessageId = 1
 
   overrideBackendRoot(rootDir: string): void {
@@ -401,7 +415,7 @@ class MultiChannelIPCManager {
   }
 
   private handleSyncMessage(message: SyncMessage): void {
-    // Special logging for analysis layer messages
+    // Special logging for analysis layer messages (important events only)
     if (message.type === 'analysis_layer_ready') {
       mainLogger.info(`🎯 ANALYSIS LAYER READY: ${(message as any).layer_name}`)
     } else if (message.type === 'analysis_started') {
@@ -411,7 +425,14 @@ class MultiChannelIPCManager {
     } else if (message.type === 'system_health') {
       // Silently forward system_health messages - don't log (sent every second)
       // Logging is already handled in handleHealthUpdate()
+    } else if (message.type === 'camera_histogram_update') {
+      // Silently forward histogram updates - don't log (sent every frame @ 30-60fps)
+    } else if (message.type === 'correlation_update') {
+      // Silently forward correlation updates - don't log (sent every frame during acquisition)
+    } else if (message.type === 'acquisition_progress') {
+      // Silently forward acquisition progress - don't log (sent every frame during recording)
     } else {
+      // Log unexpected message types for debugging
       mainLogger.debug('Received SYNC channel message:', message)
     }
 
@@ -435,8 +456,8 @@ class MultiChannelIPCManager {
     mainLogger.info('Backend multi-channel IPC system is ready')
     this.isReady = true
 
-    // Initialize shared memory reader for high-performance streaming
-    this.initializeSharedMemoryReader()
+    // Note: Shared memory readers already initialized earlier in zeromq_ready handler
+    // This ensures subscribers are ready BEFORE backend starts publishing frames
 
     // Clear startup timeout if still active
     if (this.startupTimeout) {
@@ -460,18 +481,84 @@ class MultiChannelIPCManager {
   }
 
   private async initializeSharedMemoryReader(): Promise<void> {
-    try {
-      // Initialize stimulus frame reader (port 5557) - sends to stimulus IPC channel
-      sharedMemoryReader = new SharedMemoryFrameReader('shared-memory-frame')
-      await sharedMemoryReader.initialize(IPC_CONFIG.SHARED_MEMORY_PORT)
-      mainLogger.info('Stimulus frame reader initialized on port 5557')
+    const maxRetries = 3
+    const delays = [1000, 2000, 4000] // Exponential backoff: 1s, 2s, 4s
 
-      // Initialize camera frame reader (port 5559) - sends to camera IPC channel
-      cameraFrameReader = new SharedMemoryFrameReader('camera-frame')
-      await cameraFrameReader.initialize(IPC_CONFIG.CAMERA_METADATA_PORT)
-      mainLogger.info('Camera frame reader initialized on port 5559')
-    } catch (error) {
-      mainLogger.error('Failed to initialize shared memory readers:', error)
+    const initializeWithRetry = async (
+      name: string,
+      channel: string,
+      port: number,
+      retryCount = 0
+    ): Promise<SharedMemoryFrameReader | null> => {
+      try {
+        const reader = new SharedMemoryFrameReader(channel)
+        await reader.initialize(port)
+        mainLogger.info(`${name} initialized successfully on port ${port}`)
+        return reader
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        mainLogger.error(`Failed to initialize ${name} (attempt ${retryCount + 1}/${maxRetries}):`, errorMsg)
+
+        if (retryCount < maxRetries - 1) {
+          const delay = delays[retryCount]
+          mainLogger.info(`Retrying ${name} in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          return initializeWithRetry(name, channel, port, retryCount + 1)
+        } else {
+          // All retries exhausted - send error to frontend
+          const userMessage = `Failed to initialize ${name} after ${maxRetries} attempts. Frame streaming may be unavailable.`
+          mainLogger.error(userMessage)
+          if (mainWindow) {
+            mainWindow.webContents.send('shared-memory-error', {
+              component: name,
+              error: errorMsg,
+              message: userMessage
+            })
+          }
+          return null
+        }
+      }
+    }
+
+    // Initialize all readers with retry logic (graceful degradation)
+    // Continue even if some readers fail - show controls but warn user
+    sharedMemoryReader = await initializeWithRetry(
+      'Stimulus frame reader',
+      'shared-memory-frame',
+      IPC_CONFIG.SHARED_MEMORY_PORT
+    )
+
+    cameraFrameReader = await initializeWithRetry(
+      'Camera frame reader',
+      'camera-frame',
+      IPC_CONFIG.CAMERA_METADATA_PORT
+    )
+
+    analysisFrameReader = await initializeWithRetry(
+      'Analysis frame reader',
+      'analysis-frame',
+      IPC_CONFIG.ANALYSIS_METADATA_PORT
+    )
+
+    // Report overall status
+    const failedReaders = [
+      !sharedMemoryReader && 'stimulus',
+      !cameraFrameReader && 'camera',
+      !analysisFrameReader && 'analysis'
+    ].filter(Boolean)
+
+    if (failedReaders.length === 0) {
+      mainLogger.info('All shared memory readers initialized successfully')
+    } else {
+      const warningMsg = `Shared memory initialization incomplete: ${failedReaders.join(', ')} streaming unavailable. System will continue with reduced functionality.`
+      mainLogger.warn(warningMsg)
+      if (mainWindow) {
+        mainWindow.webContents.send('system-warning', {
+          type: 'shared_memory_partial_failure',
+          message: warningMsg,
+          failedComponents: failedReaders
+        })
+      }
     }
   }
 
@@ -483,7 +570,9 @@ class MultiChannelIPCManager {
     if (messageId && this.pendingRequests.has(messageId)) {
       const pending = this.pendingRequests.get(messageId)!
       this.pendingRequests.delete(messageId)
-      clearTimeout(pending.timeout)
+      if (pending.timeout !== null) {
+        clearTimeout(pending.timeout)
+      }
       pending.resolve(message)
       return
     }
@@ -503,10 +592,22 @@ class MultiChannelIPCManager {
 
     // Backend explicitly tells frontend to connect to ZeroMQ
     if (message.type === 'zeromq_ready') {
-      mainLogger.info('Backend ZeroMQ ready - initializing subscriptions...')
+      mainLogger.info('Backend ZeroMQ ready - initializing ALL subscriptions...')
       mainLogger.info(`Health port: ${message.health_port}, Sync port: ${message.sync_port}`)
+
+      // Initialize health and sync channels
       await this.initializeZeroMQConnections()
-      mainLogger.info('ZeroMQ subscriptions established - waiting for backend waiting_frontend state...')
+
+      // CRITICAL FIX: Initialize shared memory frame readers BEFORE frontend_ready signal
+      // This prevents ZeroMQ "slow joiner" problem where backend starts publishing
+      // camera frames before frontend subscribers are ready
+      await this.initializeSharedMemoryReader()
+
+      mainLogger.info('All ZeroMQ subscriptions established (including frame readers) - ready for frames')
+
+      // Send explicit ready signal to backend that frame readers are subscribed
+      await this.sendStartupCommand({ type: 'shared_memory_readers_ready' })
+      mainLogger.info('Sent shared_memory_readers_ready signal to backend')
     }
     // Note: Frontend handshake will be triggered by waiting_frontend state (handled in SystemContext.tsx)
 
@@ -586,7 +687,9 @@ class MultiChannelIPCManager {
 
     // Reject all pending requests
     for (const pending of this.pendingRequests.values()) {
-      clearTimeout(pending.timeout)
+      if (pending.timeout !== null) {
+        clearTimeout(pending.timeout)
+      }
       pending.reject(new Error('Backend process terminated'))
     }
     this.pendingRequests.clear()
@@ -599,6 +702,10 @@ class MultiChannelIPCManager {
     if (cameraFrameReader) {
       cameraFrameReader.cleanup()
       cameraFrameReader = null
+    }
+    if (analysisFrameReader) {
+      analysisFrameReader.cleanup()
+      analysisFrameReader = null
     }
 
     // Close ZeroMQ PUB/SUB sockets
@@ -658,11 +765,11 @@ class MultiChannelIPCManager {
         // Generate unique message ID
         const messageId = `msg_${this.nextMessageId++}`
 
-        // Set up timeout for this request (10 seconds)
-        const timeout = setTimeout(() => {
-          this.pendingRequests.delete(messageId)
-          reject(new Error(`Command timeout: ${message.type}`))
-        }, 10000)
+        // NO TIMEOUTS: Backend responds when ready
+        // Commands take variable time based on hardware, data size, and system load
+        // Timeouts cause false failures and mask real issues
+        // If backend is truly hung, user can restart application
+        const timeout: NodeJS.Timeout | null = null
 
         // Store the promise handlers
         this.pendingRequests.set(messageId, { resolve, reject, timeout })
@@ -671,7 +778,9 @@ class MultiChannelIPCManager {
         const commandWithId = { ...message, messageId }
         const command = JSON.stringify(commandWithId) + '\n'
         if (!process.stdin) {
-          clearTimeout(timeout)
+          if (timeout !== null) {
+            clearTimeout(timeout)
+          }
           this.pendingRequests.delete(messageId)
           reject(new Error('Backend process stdin not available'))
           return
@@ -764,7 +873,45 @@ async function createWindow() {
   // Check if we're in development mode by trying to detect Vite dev server
   const isDevelopment = process.env.NODE_ENV !== 'production' || process.env.VITE_DEV_SERVER_URL
 
-  // Always load from built files for pure IPC communication
+  // Safety timeout: If did-finish-load doesn't fire within 10 seconds, something is wrong
+  const loadTimeout = setTimeout(() => {
+    if (isInitialLoad) {
+      mainLogger.error('CRITICAL: did-finish-load event never fired within 10 seconds!')
+      mainLogger.error('This indicates the renderer failed to load or main process is blocked')
+      // Try to create presentation window anyway
+      mainLogger.info('Attempting emergency presentation window creation...')
+      createPresentationWindow()
+    }
+  }, 10000)
+
+  // IMPORTANT: Register event handler BEFORE loading URL to avoid race condition
+  mainWindow.webContents.on('did-finish-load', async () => {
+    clearTimeout(loadTimeout)  // Clear the safety timeout
+    mainLogger.info('=== Main window did-finish-load event triggered ===')
+    mainWindow?.webContents.send('main-process-message', `Renderer loaded at ${new Date().toLocaleString()}`)
+
+    // Only restart backend on refresh, not initial load
+    // Note: start() internally calls cleanup() first, so no need to cleanup separately
+    if (!isInitialLoad) {
+      mainLogger.info('Reloading detected - restarting backend...')
+      // Non-blocking restart
+      backendManager.start().catch(error => {
+        const message = error instanceof Error ? error.message : String(error)
+        mainLogger.error('Backend restart failed:', message)
+        mainWindow?.webContents.send('backend-error', message)
+      })
+    }
+
+    // Mark that initial load is complete
+    isInitialLoad = false
+
+    // Create presentation window on secondary display (if available)
+    mainLogger.info('=== Attempting to create presentation window ===')
+    mainLogger.info(`Secondary display bounds: ${secondaryDisplayBounds ? JSON.stringify(secondaryDisplayBounds) : 'null'}`)
+    createPresentationWindow()
+  })
+
+  // NOW load the URL - event handler is already registered
   if (devUrl) {
     await mainWindow.loadURL(devUrl)
 
@@ -786,30 +933,6 @@ async function createWindow() {
     // Open devtools in development
     mainWindow.webContents.openDevTools()
   }
-
-  // Test actively push message to the Electron-Renderer
-  mainWindow.webContents.on('did-finish-load', async () => {
-    mainWindow?.webContents.send('main-process-message', `Renderer loaded at ${new Date().toLocaleString()}`)
-
-    // Only restart backend on refresh, not initial load
-    // Note: start() internally calls cleanup() first, so no need to cleanup separately
-    if (!isInitialLoad) {
-      mainLogger.info('Reloading detected - restarting backend...')
-      try {
-        await backendManager.start()
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        mainLogger.error('Backend restart failed:', message)
-        mainWindow?.webContents.send('backend-error', message)
-      }
-    }
-
-    // Mark that initial load is complete
-    isInitialLoad = false
-
-    // Create presentation window on secondary display (if available)
-    createPresentationWindow()
-  })
 
   // Handle window opening - allow internal presentation windows, block external URLs
   mainWindow.webContents.setWindowOpenHandler(({ url, frameName }) => {
@@ -853,63 +976,113 @@ async function createWindow() {
     mainWindow.webContents.send('backend-error', message)
   }
 
-  // Start Python backend after window is ready
-  try {
-    await backendManager.start()
-  } catch (error) {
+  // Start Python backend asynchronously (non-blocking)
+  // CRITICAL: Do NOT await here - it would block event loop and prevent did-finish-load from firing
+  backendManager.start().catch(error => {
     const message = error instanceof Error ? error.message : String(error)
-    mainWindow.webContents.send('backend-error', message)
-  }
+    mainLogger.error('Backend startup failed:', message)
+    if (mainWindow) {
+      mainWindow.webContents.send('backend-error', message)
+    }
+  })
+  mainLogger.info('Backend startup initiated (non-blocking)')
 }
 
 function createPresentationWindow() {
+  mainLogger.info('=== createPresentationWindow() called ===')
+
   const bounds = secondaryDisplayBounds
   if (!bounds) {
-    mainLogger.info('No secondary display found - presentation window will not be created')
+    mainLogger.warn('❌ No secondary display found - presentation window will not be created')
+    mainLogger.warn('This means no presentation monitor was detected. Check if a second monitor is connected.')
     return
   }
 
-  mainLogger.info(`Creating presentation window on secondary display: ${bounds.width}x${bounds.height}`)
+  mainLogger.info(`✅ Secondary display detected with bounds: ${JSON.stringify(bounds)}`)
+  mainLogger.info(`Creating presentation window at position (${bounds.x}, ${bounds.y}) with size ${bounds.width}x${bounds.height}`)
 
-  // Create fullscreen window on secondary display
-  presentationWindow = new BrowserWindow({
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.width,
-    height: bounds.height,
-    fullscreen: true,
-    frame: false,  // No window frame for presentation
-    title: 'ISI Stimulus Presentation',
-    backgroundColor: '#000000',  // Black background
-    webPreferences: {
-      preload,
-      nodeIntegration: ELECTRON_CONFIG.NODE_INTEGRATION,
-      contextIsolation: ELECTRON_CONFIG.CONTEXT_ISOLATION,
-      webSecurity: ELECTRON_CONFIG.WEB_SECURITY,
-    },
-  })
+  try {
+    // Create fullscreen window on secondary display
+    presentationWindow = new BrowserWindow({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      fullscreen: true,
+      frame: false,  // No window frame for presentation
+      title: 'ISI Stimulus Presentation',
+      backgroundColor: '#000000',  // Black background
+      webPreferences: {
+        preload,
+        nodeIntegration: ELECTRON_CONFIG.NODE_INTEGRATION,
+        contextIsolation: ELECTRON_CONFIG.CONTEXT_ISOLATION,
+        webSecurity: ELECTRON_CONFIG.WEB_SECURITY,
+      },
+    })
 
-  // Load the dedicated presentation HTML that renders only StimulusPresentationViewport
-  const presentationEntry = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL
-  if (presentationEntry) {
-    presentationWindow.loadURL(`${presentationEntry}#/presentation`)
-  } else {
-    const presentationHtml = path.join(process.env.DIST || '', 'presentation.html')
-    presentationWindow.loadFile(presentationHtml)
-  }
+    mainLogger.info('✅ Presentation window BrowserWindow created')
 
-  // Close presentation window when main window closes
-  mainWindow?.on('closed', () => {
-    if (presentationWindow && !presentationWindow.isDestroyed()) {
-      presentationWindow.close()
+    // Load the dedicated presentation HTML that renders only StimulusPresentationViewport
+    const presentationEntry = process.env.ELECTRON_RENDERER_URL || process.env.VITE_DEV_SERVER_URL
+    const loadingUrl = presentationEntry ? `${presentationEntry}#/presentation` : path.join(process.env.DIST || '', 'presentation.html')
+
+    mainLogger.info(`Loading presentation window content from: ${loadingUrl}`)
+    mainLogger.info(`Using ${presentationEntry ? 'dev server URL' : 'production HTML file'}`)
+
+    if (presentationEntry) {
+      presentationWindow.loadURL(`${presentationEntry}#/presentation`)
+        .then(() => {
+          mainLogger.info('✅ Presentation window URL loaded successfully')
+        })
+        .catch((error) => {
+          mainLogger.error('❌ Failed to load presentation window URL:', error)
+        })
+    } else {
+      const presentationHtml = path.join(process.env.DIST || '', 'presentation.html')
+      mainLogger.info(`Presentation HTML file path: ${presentationHtml}`)
+      mainLogger.info(`File exists: ${fs.existsSync(presentationHtml)}`)
+
+      presentationWindow.loadFile(presentationHtml)
+        .then(() => {
+          mainLogger.info('✅ Presentation window file loaded successfully')
+        })
+        .catch((error) => {
+          mainLogger.error('❌ Failed to load presentation window file:', error)
+        })
     }
-  })
 
-  presentationWindow.on('closed', () => {
-    presentationWindow = null
-  })
+    // Add event listeners for debugging
+    presentationWindow.webContents.on('did-finish-load', () => {
+      mainLogger.info('✅ Presentation window finished loading content')
+    })
 
-  mainLogger.info('Presentation window created successfully')
+    presentationWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      mainLogger.error(`❌ Presentation window failed to load: ${errorCode} - ${errorDescription}`)
+    })
+
+    presentationWindow.on('ready-to-show', () => {
+      mainLogger.info('✅ Presentation window ready to show')
+      presentationWindow?.show()
+    })
+
+    // Close presentation window when main window closes
+    mainWindow?.on('closed', () => {
+      if (presentationWindow && !presentationWindow.isDestroyed()) {
+        mainLogger.info('Main window closed - closing presentation window')
+        presentationWindow.close()
+      }
+    })
+
+    presentationWindow.on('closed', () => {
+      mainLogger.info('Presentation window closed event triggered')
+      presentationWindow = null
+    })
+
+    mainLogger.info('✅ Presentation window setup complete')
+  } catch (error) {
+    mainLogger.error('❌ Error creating presentation window:', error)
+    throw error
+  }
 }
 
 // IPC Handlers

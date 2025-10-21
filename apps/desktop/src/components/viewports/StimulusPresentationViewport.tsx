@@ -34,13 +34,56 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
   onClose
 }) => {
   const [hasFrameData, setHasFrameData] = useState(false)
+  const [presentationEnabled, setPresentationEnabled] = useState(false)
 
   // Canvas-based frame rendering
   const { canvasRef, renderFrame } = useFrameRenderer()
 
+  // Query presentation state on mount (in case we missed the broadcast)
+  // This prevents race condition where viewport mounts after acquisition already started
+  useEffect(() => {
+    const queryPresentationState = async () => {
+      try {
+        if (window.electronAPI?.sendToPython) {
+          console.log('[StimulusPresentationViewport] Querying presentation state on mount')
+          const result: any = await window.electronAPI.sendToPython({
+            type: 'get_presentation_state'
+          })
+
+          if (result.success && result.enabled !== undefined) {
+            console.log('[StimulusPresentationViewport] Query result:', {
+              enabled: result.enabled,
+              is_running: result.is_running
+            })
+            setPresentationEnabled(result.enabled)
+          }
+        }
+      } catch (error) {
+        componentLogger.error('Failed to query presentation state:', error)
+      }
+    }
+
+    queryPresentationState()
+  }, [])
+
   // Listen for shared memory frame metadata from main process
   useEffect(() => {
     const handleSharedMemoryFrame = async (metadata: SharedMemoryFrameData) => {
+      // DIAGNOSTIC: Log all received frames
+      console.log('[StimulusPresentationViewport] Frame received:', {
+        frame_id: metadata.frame_id,
+        presentationEnabled,
+        width: metadata.width_px,
+        height: metadata.height_px,
+        data_size: metadata.data_size_bytes
+      })
+
+      // Only render frames when presentation is enabled
+      if (!presentationEnabled) {
+        console.warn('[StimulusPresentationViewport] Frame DROPPED - presentation not enabled')
+        return
+      }
+
       try {
         // Read actual frame data from shared memory using offset and size
         const frameDataBuffer = await window.electronAPI.readSharedMemoryFrame(
@@ -70,7 +113,33 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
     return () => {
       unsubscribe?.()
     }
-  }, [renderFrame])
+  }, [renderFrame, presentationEnabled])
+
+  // Listen for presentation stimulus state changes
+  useEffect(() => {
+    const handleSyncMessage = (message: any) => {
+      if (message.type === 'presentation_stimulus_state') {
+        console.log('[StimulusPresentationViewport] Presentation state changed:', message.enabled)
+        setPresentationEnabled(message.enabled)
+        componentLogger.debug(`Presentation state changed: ${message.enabled}`)
+
+        // Clear frame data when presentation is disabled
+        if (!message.enabled) {
+          setHasFrameData(false)
+        }
+      }
+    }
+
+    // Subscribe to sync channel for presentation state changes
+    let unsubscribe: (() => void) | undefined
+    if (window.electronAPI?.onSyncMessage) {
+      unsubscribe = window.electronAPI.onSyncMessage(handleSyncMessage)
+    }
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [])
 
   // Listen for stimulus presentation stop
   useEffect(() => {
@@ -95,6 +164,8 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
     }
   }, [onClose])
 
+  // Component mounted - no logging needed (would clutter console)
+
   // Always render in fullscreen mode for presentation - no UI controls needed
   return (
     <div
@@ -105,15 +176,32 @@ const StimulusPresentationViewport: React.FC<StimulusPresentationViewportProps> 
         overflow: 'hidden'
       }}
     >
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full"
-        style={{
-          maxWidth: '100vw',
-          maxHeight: '100vh',
-          objectFit: 'contain'
-        }}
-      />
+      {presentationEnabled ? (
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full"
+          style={{
+            maxWidth: '100vw',
+            maxHeight: '100vh',
+            objectFit: 'contain'
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#666',
+            fontSize: '24px',
+            fontFamily: 'monospace'
+          }}
+        >
+          Presentation Monitor (Standby)
+        </div>
+      )}
     </div>
   )
 }

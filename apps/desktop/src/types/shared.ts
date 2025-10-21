@@ -85,9 +85,11 @@ export interface AcquisitionParameters {
 
 export interface AnalysisParameters {
   ring_size_mm: number
+  pixel_scale_mm_per_px: number
   vfs_threshold_sd: number
   smoothing_sigma: number
   magnitude_threshold: number
+  coherence_threshold: number
   phase_filter_sigma: number
   gradient_window_size: number
   area_min_size_mm2: number

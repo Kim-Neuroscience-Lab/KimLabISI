@@ -11,7 +11,7 @@ import threading
 import logging
 from typing import List, Dict, Optional, Any
 
-from .utils import get_available_camera_indices, generate_camera_name
+from .utils import get_available_camera_indices, get_system_camera_names
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,6 @@ class CameraManager:
         ipc,
         shared_memory,
         synchronization_tracker=None,
-        camera_triggered_stimulus=None,
     ):
         """Initialize camera manager with explicit dependencies.
 
@@ -59,14 +58,12 @@ class CameraManager:
             ipc: IPC service (MultiChannelIPC from ipc/channels.py)
             shared_memory: Shared memory service (SharedMemoryService from ipc/shared_memory.py)
             synchronization_tracker: Optional timestamp synchronization tracker
-            camera_triggered_stimulus: Optional camera-triggered stimulus controller
         """
         # Injected dependencies (NO service_locator!)
         self.config = config
         self.ipc = ipc
         self.shared_memory = shared_memory
         self.synchronization_tracker = synchronization_tracker
-        self.camera_triggered_stimulus = camera_triggered_stimulus
 
         # Data recorder will be set later (Phase 4)
         self._data_recorder = None
@@ -124,6 +121,12 @@ class CameraManager:
         logger.info("Starting camera detection...")
         self.detected_cameras.clear()
 
+        # Get REAL camera names from system (not fake generated names)
+        system_camera_names = get_system_camera_names()
+
+        # Create lookup dict: index -> real_name
+        name_lookup = {idx: name for idx, name in system_camera_names}
+
         # Get available camera indices using platform-specific methods
         available_indices = get_available_camera_indices()
 
@@ -146,8 +149,8 @@ class CameraManager:
                         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         fps = cap.get(cv2.CAP_PROP_FPS)
 
-                        # Generate camera name based on platform and index
-                        name = generate_camera_name(i, width, height)
+                        # Get REAL camera name from system (not fake generated name)
+                        name = name_lookup.get(i, f"Camera {i}")
 
                         camera_info = CameraInfo(index=i, name=name, backend="OpenCV")
                         camera_info.is_available = True
@@ -577,32 +580,54 @@ class CameraManager:
         test_hardware_ts = self.get_camera_hardware_timestamp_us()
         uses_hardware_timestamps = test_hardware_ts is not None
 
+        # Check development mode
+        system_params = (
+            self.config.get_parameter_group("system")
+            if hasattr(self.config, "get_parameter_group")
+            else {}
+        )
+        development_mode = system_params.get("development_mode", False)
+
         if uses_hardware_timestamps:
             logger.info(
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "✓ HARDWARE TIMESTAMPS AVAILABLE\n"
-                "  Camera provides hardware timestamps (CAP_PROP_POS_MSEC)\n"
+                "  Camera provides hardware timestamps\n"
                 "  Timestamp accuracy: < 1ms (hardware-precise)\n"
                 "  Suitable for scientific publication\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             )
         else:
-            logger.warning(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "⚠️  SOFTWARE TIMESTAMPS ONLY\n"
-                "  Camera does not provide hardware timestamps\n"
-                "  Using Python time.time() at frame capture\n"
-                "  Timestamp accuracy: ~1-2ms jitter (software timing)\n"
-                "  \n"
-                "  For scientific publication, use industrial camera with\n"
-                "  hardware timestamp support (FLIR, Basler, etc.)\n"
-                "  \n"
-                "  TIMESTAMP SOURCE WILL BE RECORDED IN DATA FILES\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
+            if development_mode:
+                logger.warning(
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "⚠️  DEVELOPMENT MODE - SOFTWARE TIMESTAMPS\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "\n"
+                    "  Camera: No hardware timestamps available\n"
+                    "  Mode: DEVELOPMENT ONLY (system.development_mode = true)\n"
+                    "  Timestamps: Python time.time() (~1-2ms jitter)\n"
+                    "\n"
+                    "  ⚠️  WARNING: NOT SUITABLE FOR PUBLICATION DATA\n"
+                    "  ⚠️  Use for development, testing, and UI work only\n"
+                    "  ⚠️  Production requires industrial camera (FLIR, Basler, PCO)\n"
+                    "\n"
+                    "  Timestamp source: 'software' (recorded in all data files)\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                )
+            else:
+                # This should not happen - the frame capture will raise RuntimeError
+                logger.error(
+                    "Camera does not support hardware timestamps and development_mode is disabled. "
+                    "Acquisition will fail. Enable development_mode for testing with consumer cameras."
+                )
 
         # Store timestamp source for metadata
-        self.timestamp_source = "hardware" if uses_hardware_timestamps else "software"
+        self.timestamp_source = (
+            "hardware"
+            if uses_hardware_timestamps
+            else "software_dev_mode" if development_mode else "software"
+        )
         self.uses_hardware_timestamps = uses_hardware_timestamps
 
         # Propagate timestamp source to data recorder metadata for scientific provenance
@@ -621,7 +646,7 @@ class CameraManager:
                     "Timestamp source will not be recorded."
                 )
 
-        # Track frame index for camera-triggered stimulus
+        # Track frame index for synchronization tracking
         camera_frame_index = 0
 
         while not self.stop_acquisition_event.is_set():
@@ -630,31 +655,36 @@ class CameraManager:
                 frame = self.capture_frame()
 
                 if frame is not None:
-                    # Get hardware timestamp if available, otherwise use software timestamp
+                    # Get hardware timestamp if available, otherwise check development mode
                     hardware_timestamp = self.get_camera_hardware_timestamp_us()
 
                     if hardware_timestamp is not None:
                         # Hardware timestamp available - use it
                         capture_timestamp = hardware_timestamp
                     else:
-                        # No hardware timestamp - use software timing
-                        # Timestamp captured as close to frame.read() as possible
+                        # No hardware timestamp - check if development mode allows software timestamps
+                        system_params = (
+                            self.config.get_parameter_group("system")
+                            if hasattr(self.config, "get_parameter_group")
+                            else {}
+                        )
+                        development_mode = system_params.get("development_mode", False)
+
+                        if not development_mode:
+                            raise RuntimeError(
+                                "Camera does not support hardware timestamps. "
+                                "Hardware timestamps are REQUIRED for scientific validity.\n\n"
+                                "To use this camera for DEVELOPMENT/TESTING ONLY:\n"
+                                "1. Set system.development_mode = true in parameters\n"
+                                "2. NEVER use development mode for publication data\n"
+                                "3. Use industrial camera (FLIR, Basler, PCO) for production\n\n"
+                                "Development mode enables software timestamps with explicit warnings."
+                            )
+
+                        # Development mode enabled - use software timestamp with warning
                         capture_timestamp = int(time.time() * 1_000_000)
 
-                    # === STEP 2: TRIGGER STIMULUS GENERATION (CAMERA-TRIGGERED) ===
-                    stimulus_frame = None
-                    stimulus_metadata = None
-                    stimulus_angle = None
-
-                    if self.camera_triggered_stimulus:
-                        stimulus_frame, stimulus_metadata = (
-                            self.camera_triggered_stimulus.generate_next_frame()
-                        )
-                        if stimulus_metadata:
-                            # Fail-hard if angle_degrees missing (indicates stimulus generator error)
-                            stimulus_angle = stimulus_metadata["angle_degrees"]
-
-                    # === STEP 3: PROCESS CAMERA FRAME ===
+                    # === STEP 2: PROCESS CAMERA FRAME ===
                     # Crop to square
                     cropped = self.crop_to_square(frame)
 
@@ -670,30 +700,25 @@ class CameraManager:
                         self.current_frame = frame  # Original frame for histogram
                         self.last_capture_timestamp = capture_timestamp
 
-                    # === STEP 4: RECORD DATA (CAMERA + STIMULUS) ===
+                    # === STEP 3: RECORD DATA (CAMERA ONLY) ===
                     # Thread-safe access to data recorder
                     data_recorder = self.get_data_recorder()
                     if data_recorder and data_recorder.is_recording:
+                        # Convert to grayscale for recording (single channel)
+                        # Intrinsic signal imaging requires grayscale data
+                        if len(frame.shape) == 3:
+                            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        else:
+                            frame_gray = frame
+
                         # Record camera frame
                         data_recorder.record_camera_frame(
                             timestamp_us=capture_timestamp,
                             frame_index=camera_frame_index,
-                            frame_data=frame,  # Original uncropped frame
+                            frame_data=frame_gray,  # Single-channel grayscale
                         )
 
-                        # Record stimulus event (if generated)
-                        if stimulus_metadata:
-                            # Fail-hard if required metadata fields missing
-                            # (indicates stimulus generator error - better to crash than save corrupted data)
-                            data_recorder.record_stimulus_event(
-                                timestamp_us=capture_timestamp,  # Same timestamp as camera
-                                frame_id=stimulus_metadata["frame_index"],
-                                frame_index=stimulus_metadata["camera_frame_index"],
-                                direction=stimulus_metadata["direction"],
-                                angle_degrees=stimulus_angle,  # Already validated above
-                            )
-
-                    # === STEP 5: WRITE TO SHARED MEMORY FOR FRONTEND DISPLAY ===
+                    # === STEP 4: WRITE TO SHARED MEMORY FOR FRONTEND DISPLAY ===
                     if self.shared_memory:
                         # Write camera frame
                         camera_name = "unknown"
@@ -706,25 +731,6 @@ class CameraManager:
                             rgba,
                             camera_name=camera_name,
                             capture_timestamp_us=capture_timestamp,
-                        )
-
-                        # Write stimulus frame (if generated)
-                        if stimulus_frame is not None and stimulus_metadata:
-                            frame_id = self.shared_memory.write_frame(
-                                stimulus_frame, stimulus_metadata
-                            )
-                            # Set stimulus timestamp for timing QA
-                            self.shared_memory.set_stimulus_timestamp(
-                                capture_timestamp, frame_id
-                            )
-
-                    # === STEP 6: TIMING QA (Frame interval monitoring) ===
-                    if self.synchronization_tracker and stimulus_metadata:
-                        # Track frame timing for QA (not synchronization anymore)
-                        self.record_synchronization(
-                            camera_timestamp=capture_timestamp,
-                            stimulus_timestamp=capture_timestamp,  # Same in camera-triggered mode
-                            frame_id=camera_frame_index,
                         )
 
                     camera_frame_index += 1
@@ -771,7 +777,7 @@ class CameraManager:
             return False
 
         if self.is_streaming:
-            logger.warning("Acquisition already running")
+            logger.debug("Camera acquisition already running (no action needed)")
             return True
 
         # Reset stop event

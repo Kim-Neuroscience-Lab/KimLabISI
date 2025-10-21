@@ -47,9 +47,10 @@ class AcquisitionManager:
         ipc,  # MultiChannelIPC instance
         shared_memory,  # SharedMemoryService instance
         stimulus_generator,  # StimulusGenerator instance
+        camera,  # CameraManager instance
         synchronization_tracker: Optional[TimestampSynchronizationTracker] = None,
         state_coordinator: Optional[AcquisitionStateCoordinator] = None,
-        camera_triggered_stimulus=None,
+        unified_stimulus=None,
         data_recorder=None,
         param_manager=None,
     ):
@@ -59,9 +60,10 @@ class AcquisitionManager:
             ipc: IPC service for communication with frontend
             shared_memory: Shared memory service for frame data
             stimulus_generator: Stimulus generator for frame generation
+            camera: Camera manager for frame acquisition
             synchronization_tracker: Optional timestamp synchronization tracker
             state_coordinator: Optional state coordinator
-            camera_triggered_stimulus: Optional camera-triggered stimulus controller
+            unified_stimulus: Optional unified stimulus controller for both preview and record modes
             data_recorder: Optional data recorder
             param_manager: Optional parameter manager
         """
@@ -69,7 +71,9 @@ class AcquisitionManager:
         self.ipc = ipc
         self.shared_memory = shared_memory
         self.stimulus_generator = stimulus_generator
+        self.camera = camera
         self.param_manager = param_manager
+        self.unified_stimulus = unified_stimulus
 
         self.is_running = False
         self.acquisition_thread: Optional[threading.Thread] = None
@@ -83,12 +87,15 @@ class AcquisitionManager:
         self.phase_start_time = 0.0
         self.acquisition_start_time = 0.0
 
-        # Parameters (set when acquisition starts)
-        self.baseline_sec = 5
-        self.between_sec = 5
-        self.cycles = 10
-        self.directions = ["LR", "RL", "TB", "BT"]
-        self.camera_fps = 30.0  # Camera frame rate (used for camera-triggered timing)
+        # Parameters (loaded from param_manager when acquisition starts)
+        # CRITICAL: NO default values - Parameter Manager is Single Source of Truth
+        # These MUST be loaded from param_manager before acquisition can start
+        # See start_acquisition() method for parameter loading and validation
+        self.baseline_sec: Optional[float] = None
+        self.between_sec: Optional[float] = None
+        self.cycles: Optional[int] = None
+        self.directions: Optional[List[str]] = None
+        self.camera_fps: Optional[float] = None
         self.target_mode: Literal["preview", "record", "playback"] = "preview"
         self.target_direction = "LR"
         self.target_frame_index = 0
@@ -100,9 +107,6 @@ class AcquisitionManager:
 
         # State coordinator (dependency injection)
         self.state_coordinator = state_coordinator
-
-        # Camera-triggered stimulus controller (dependency injection)
-        self.camera_triggered_stimulus = camera_triggered_stimulus
 
         # Data recorder (dependency injection)
         self.data_recorder = data_recorder
@@ -121,6 +125,29 @@ class AcquisitionManager:
 
         # Playback controller (injected from main.py to ensure single instance)
         self.playback_controller: Optional["PlaybackModeController"] = None
+
+        # Subscribe to acquisition parameter changes
+        if self.param_manager:
+            self.param_manager.subscribe(
+                "acquisition", self._handle_acquisition_params_changed
+            )
+
+    def _handle_acquisition_params_changed(
+        self, group_name: str, updates: Dict[str, Any]
+    ):
+        """React to acquisition parameter changes.
+
+        Args:
+            group_name: Parameter group that changed ("acquisition")
+            updates: Dictionary of updated parameters
+        """
+        logger.info(f"Acquisition parameters changed: {list(updates.keys())}")
+
+        if self.is_running:
+            logger.warning(
+                "Acquisition parameters changed during active acquisition. "
+                "Changes will apply to next acquisition start."
+            )
 
     def set_mode(
         self,
@@ -149,6 +176,20 @@ class AcquisitionManager:
             if mode in ("preview", "playback") and self.is_running:
                 self.stop_acquisition()
 
+            # CRITICAL: Deactivate previous mode to cleanup resources (close HDF5 files, etc.)
+            if self.target_mode != mode:
+                if self.target_mode == "playback" and self.playback_controller:
+                    logger.info(
+                        f"Deactivating playback mode before switching to {mode}"
+                    )
+                    self.playback_controller.deactivate()
+                elif self.target_mode == "record" and self.record_controller:
+                    logger.info(f"Deactivating record mode before switching to {mode}")
+                    self.record_controller.deactivate()
+                elif self.target_mode == "preview" and self.preview_controller:
+                    logger.info(f"Deactivating preview mode before switching to {mode}")
+                    self.preview_controller.deactivate()
+
             # Delegate to appropriate mode controller
             if mode == "preview":
                 result = self.preview_controller.activate(
@@ -164,7 +205,10 @@ class AcquisitionManager:
                 )
             else:  # playback
                 if self.playback_controller is None:
-                    return {"success": False, "error": "Playback controller not initialized"}
+                    return {
+                        "success": False,
+                        "error": "Playback controller not initialized",
+                    }
                 result = self.playback_controller.activate()
 
             if result.get("success"):
@@ -176,64 +220,118 @@ class AcquisitionManager:
             logger.error("Failed to set acquisition mode: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
-    def start_acquisition(self, params: Dict[str, Any], param_manager=None) -> Dict[str, Any]:
-        """Start the acquisition sequence."""
+    def start_acquisition(
+        self, param_manager=None, record_data: bool = True
+    ) -> Dict[str, Any]:
+        """Start the acquisition sequence.
+
+        Reads all parameters from param_manager (Single Source of Truth).
+
+        Args:
+            param_manager: Optional ParameterManager instance (uses self.param_manager if not provided)
+            record_data: If True, initialize data recorder and save data to disk (record mode).
+                        If False, run full sequence without saving (preview mode).
+
+        Returns:
+            Dict with success status and error message if failed
+        """
         with self._state_lock:
             if self.is_running:
                 return {"success": False, "error": "Acquisition already running"}
 
+            # Defensive cleanup: ensure camera is streaming
+            if not self.camera.is_streaming:
+                logger.info(
+                    "Starting camera acquisition for record mode (defensive startup)"
+                )
+                if not self.camera.start_acquisition():
+                    return {"success": False, "error": "Failed to start camera"}
+
             # Validate required dependencies for record mode
-            if not self.camera_triggered_stimulus:
+            if not self.unified_stimulus:
                 error_msg = (
-                    "Camera-triggered stimulus controller is required for record mode. "
-                    "This indicates a system initialization error - camera_triggered_stimulus "
+                    "Unified stimulus controller is required for record mode. "
+                    "This indicates a system initialization error - unified_stimulus "
                     "must be injected during backend setup."
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
 
-            # Load and validate REQUIRED acquisition parameters
+            # Use injected param_manager or passed one
+            pm = param_manager or self.param_manager
+            if not pm:
+                error_msg = (
+                    "Parameter manager is required but not available. "
+                    "This indicates a system initialization error - param_manager "
+                    "must be injected during backend setup."
+                )
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+
+            # Load and validate REQUIRED acquisition parameters from param_manager
             # No defaults - experimental protocol must be explicit for scientific validity
 
-            baseline_sec = params.get("baseline_sec")
-            if baseline_sec is None or not isinstance(baseline_sec, (int, float)) or baseline_sec < 0:
+            # Read acquisition parameters
+            acquisition_params = pm.get_parameter_group("acquisition")
+            if not acquisition_params:
                 error_msg = (
-                    "baseline_sec is required but not provided in acquisition parameters. "
+                    "Acquisition parameters not found in param_manager. "
+                    "Please configure acquisition parameters before starting acquisition."
+                )
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+
+            baseline_sec = acquisition_params.get("baseline_sec")
+            if (
+                baseline_sec is None
+                or not isinstance(baseline_sec, (int, float))
+                or baseline_sec < 0
+            ):
+                error_msg = (
+                    "baseline_sec is required but not configured in param_manager. "
                     "Baseline duration must be explicitly specified for reproducible experiments. "
-                    f"Received: {baseline_sec}"
+                    f"Please configure acquisition.baseline_sec in parameter manager. Received: {baseline_sec}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
             self.baseline_sec = float(baseline_sec)
 
-            between_sec = params.get("between_sec")
-            if between_sec is None or not isinstance(between_sec, (int, float)) or between_sec < 0:
+            between_sec = acquisition_params.get("between_sec")
+            if (
+                between_sec is None
+                or not isinstance(between_sec, (int, float))
+                or between_sec < 0
+            ):
                 error_msg = (
-                    "between_sec is required but not provided in acquisition parameters. "
+                    "between_sec is required but not configured in param_manager. "
                     "Inter-trial interval must be explicitly specified for reproducible experiments. "
-                    f"Received: {between_sec}"
+                    f"Please configure acquisition.between_sec in parameter manager. Received: {between_sec}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
             self.between_sec = float(between_sec)
 
-            cycles = params.get("cycles")
+            cycles = acquisition_params.get("cycles")
             if cycles is None or not isinstance(cycles, int) or cycles <= 0:
                 error_msg = (
-                    "cycles is required but not provided in acquisition parameters. "
+                    "cycles is required but not configured in param_manager. "
                     "Number of repetitions must be explicitly specified for reproducible experiments. "
-                    f"Received: {cycles}"
+                    f"Please configure acquisition.cycles in parameter manager. Received: {cycles}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
             self.cycles = cycles
 
-            directions = params.get("directions")
-            if not directions or not isinstance(directions, list) or len(directions) == 0:
+            directions = acquisition_params.get("directions")
+            if (
+                not directions
+                or not isinstance(directions, list)
+                or len(directions) == 0
+            ):
                 error_msg = (
-                    "directions is required but not provided in acquisition parameters. "
+                    "directions is required but not configured in param_manager. "
                     "Must specify list of sweep directions (e.g., ['LR', 'RL', 'TB', 'BT']). "
-                    f"Received: {directions}"
+                    f"Please configure acquisition.directions in parameter manager. Received: {directions}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
@@ -243,22 +341,35 @@ class AcquisitionManager:
             invalid = [d for d in directions if d not in valid_directions]
             if invalid:
                 error_msg = (
-                    f"Invalid directions: {invalid}. "
+                    f"Invalid directions configured in param_manager: {invalid}. "
                     f"Must be one of {valid_directions}. "
-                    f"Received: {directions}"
+                    f"Please configure acquisition.directions with valid values. Received: {directions}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
             self.directions = directions
 
-            # Camera FPS is REQUIRED - no default for scientific validity
-            camera_fps_value = params.get("camera_fps")
-            if camera_fps_value is None or not isinstance(camera_fps_value, (int, float)) or camera_fps_value <= 0:
+            # Read camera FPS from camera parameter group
+            camera_params = pm.get_parameter_group("camera")
+            if not camera_params:
                 error_msg = (
-                    "camera_fps is required but not provided in acquisition parameters. "
+                    "Camera parameters not found in param_manager. "
+                    "Please configure camera parameters before starting acquisition."
+                )
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+
+            camera_fps_value = camera_params.get("camera_fps")
+            if (
+                camera_fps_value is None
+                or not isinstance(camera_fps_value, (int, float))
+                or camera_fps_value <= 0
+            ):
+                error_msg = (
+                    "camera_fps is required but not configured in param_manager. "
                     "Camera FPS must be set to the actual frame rate of your camera hardware "
                     "for scientifically valid acquisition timing. "
-                    f"Received: {camera_fps_value}"
+                    f"Please configure camera.camera_fps in parameter manager. Received: {camera_fps_value}"
                 )
                 logger.error(error_msg)
                 return {"success": False, "error": error_msg}
@@ -266,13 +377,45 @@ class AcquisitionManager:
             # Type-safe assignment after validation
             self.camera_fps: float = float(camera_fps_value)
 
-            self.target_mode = "record"
+            # CRITICAL: Check if stimulus library is pre-generated
+            # User MUST consciously generate and verify stimulus before acquisition
+            # Auto-generation is NOT allowed - user must use Stimulus Generation viewport
+            status = self.unified_stimulus.get_status()
+            if not status.get("library_loaded"):
+                error_msg = (
+                    "Stimulus library must be pre-generated before acquisition. "
+                    "Please go to Stimulus Generation viewport and generate the library."
+                )
+                logger.error(f"Acquisition start failed: {error_msg}")
+
+                # Send error to frontend with redirect action
+                if self.ipc:
+                    self.ipc.send_sync_message(
+                        {
+                            "type": "acquisition_start_failed",
+                            "reason": "stimulus_not_pre_generated",
+                            "message": error_msg,
+                            "action": "redirect_to_stimulus_generation",
+                            "timestamp": time.time(),
+                        }
+                    )
+
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "reason": "stimulus_not_pre_generated",
+                    "action": "redirect_to_stimulus_generation",
+                }
+
+            # Set mode based on record_data flag
+            self.target_mode = "record" if record_data else "preview"
+            mode_str = "record" if record_data else "preview"
 
             logger.info(
-                f"Starting acquisition: {self.cycles} cycles × {len(self.directions)} directions"
+                f"Starting acquisition ({mode_str} mode): {self.cycles} cycles × {len(self.directions)} directions"
             )
             logger.info(f"Baseline: {self.baseline_sec}s, Between: {self.between_sec}s")
-            logger.info(f"Camera-triggered mode: {self.camera_fps} fps")
+            logger.info(f"Unified stimulus mode: {self.camera_fps} camera fps")
 
             # Reset state
             self.is_running = True
@@ -285,28 +428,25 @@ class AcquisitionManager:
         if self.state_coordinator:
             self.state_coordinator.set_acquisition_running(True)
 
-        # Initialize data recorder with session metadata
-        # Use passed param_manager or injected one
-        pm = param_manager or self.param_manager
-
-        if self.data_recorder is None and pm:
+        # Initialize data recorder with session metadata (ONLY if record_data=True)
+        if record_data and self.data_recorder is None and pm:
             from .recorder import create_session_recorder
 
             # Build comprehensive session metadata from all parameter groups
-            session_params = pm.get_parameter_group("session") if pm else {}
+            session_params = pm.get_parameter_group("session")
             session_metadata = {
                 "session_name": session_params.get("session_name", "unnamed_session"),
                 "animal_id": session_params.get("animal_id", ""),
                 "animal_age": session_params.get("animal_age", ""),
                 "timestamp": time.time(),
-                "acquisition": params,
-                "camera": pm.get_parameter_group("camera") if pm else {},
-                "monitor": pm.get_parameter_group("monitor") if pm else {},
-                "stimulus": pm.get_parameter_group("stimulus") if pm else {},
+                "acquisition": acquisition_params,
+                "camera": camera_params,
+                "monitor": pm.get_parameter_group("monitor"),
+                "stimulus": pm.get_parameter_group("stimulus"),
                 "timestamp_info": {
                     "camera_timestamp_source": "to_be_determined",  # Set by camera manager
-                    "stimulus_timestamp_source": "camera_triggered_synchronous",
-                    "synchronization_method": "camera_capture_triggers_stimulus_generation",
+                    "stimulus_timestamp_source": "unified_stimulus_independent",
+                    "synchronization_method": "independent_threads_no_triggering",
                     "display_vsync": "monitor_refresh_rate_vsync",
                     "display_latency_note": "Consistent ~8-16ms display lag (not compensated in data)",
                     "timing_architecture": {
@@ -319,8 +459,8 @@ class AcquisitionManager:
                             "Display uses monitor VSync for smooth rendering. "
                             "Camera captures at independent rate. "
                             "Frame index provides 1:1 correspondence between camera and stimulus."
-                        )
-                    }
+                        ),
+                    },
                 },
             }
 
@@ -330,9 +470,9 @@ class AcquisitionManager:
             )
             logger.info(f"Data recorder created: {self.data_recorder.session_path}")
 
-            # NOTE: Passing data recorder to camera manager would normally happen here
-            # but camera manager is not injected in this refactor (would need to be added)
-            # For now, this would be handled by the system that creates the AcquisitionManager
+            # Wire data recorder to camera manager so frames get saved
+            self.camera.set_data_recorder(self.data_recorder)
+            logger.info("Data recorder wired to camera manager")
 
         # Clear synchronization history and enable continuous tracking
         # Timestamp validation will filter non-stimulus synchronization data
@@ -345,6 +485,18 @@ class AcquisitionManager:
             target=self._acquisition_loop, name="AcquisitionManager", daemon=True
         )
         self.acquisition_thread.start()
+
+        # Broadcast presentation stimulus state change to enable presentation window
+        # This tells the presentation window to start rendering frames from shared memory
+        if self.ipc:
+            self.ipc.send_sync_message(
+                {
+                    "type": "presentation_stimulus_state",
+                    "enabled": True,
+                    "timestamp": time.time(),
+                }
+            )
+            logger.info("Sent presentation_stimulus_state: enabled=True")
 
         return {
             "success": True,
@@ -382,6 +534,17 @@ class AcquisitionManager:
         except Exception as e:
             logger.warning(f"Failed to display black screen when stopping: {e}")
 
+        # Broadcast presentation stimulus state change to disable presentation window
+        if self.ipc:
+            self.ipc.send_sync_message(
+                {
+                    "type": "presentation_stimulus_state",
+                    "enabled": False,
+                    "timestamp": time.time(),
+                }
+            )
+            logger.info("Sent presentation_stimulus_state: enabled=False")
+
         with self._state_lock:
             self.phase = AcquisitionPhase.IDLE
             self.target_mode = "preview"
@@ -404,20 +567,43 @@ class AcquisitionManager:
                 time.time() - self.acquisition_start_time if self.is_running else 0
             )
 
+            # Defensive: handle case where parameters not yet loaded from param_manager
+            # This should only happen if get_status() called before start_acquisition()
+            current_direction = None
+            if self.directions and self.current_direction_index < len(self.directions):
+                current_direction = self.directions[self.current_direction_index]
+
             return {
                 "is_running": self.is_running,
                 "phase": self.phase.value,
-                "current_direction": (
-                    self.directions[self.current_direction_index]
-                    if self.current_direction_index < len(self.directions)
-                    else None
-                ),
+                "current_direction": current_direction,
                 "current_direction_index": self.current_direction_index,
-                "total_directions": len(self.directions),
+                "total_directions": len(self.directions) if self.directions else 0,
                 "current_cycle": self.current_cycle,
-                "total_cycles": self.cycles,
+                "total_cycles": self.cycles if self.cycles else 0,
                 "elapsed_time": elapsed_time,
                 "phase_start_time": self.phase_start_time,
+            }
+
+    def get_presentation_state(self) -> Dict[str, Any]:
+        """Get current presentation stimulus state.
+
+        This allows frontend to query presentation state on mount/ready,
+        preventing race conditions where the presentation window misses
+        the presentation_stimulus_state broadcast message.
+
+        Returns:
+            Dict with enabled status (True during acquisition)
+        """
+        with self._state_lock:
+            # Presentation should be enabled when acquisition is running
+            enabled = self.is_running
+
+            return {
+                "success": True,
+                "enabled": enabled,
+                "is_running": self.is_running,
+                "target_mode": self.target_mode,
             }
 
     def _acquisition_loop(self):
@@ -438,21 +624,6 @@ class AcquisitionManager:
                     self.current_direction_index = direction_index
                     self.current_cycle = 0
 
-                # Start camera-triggered stimulus for this direction
-                if self.camera_triggered_stimulus:
-                    start_result = self.camera_triggered_stimulus.start_direction(
-                        direction=direction,
-                        camera_fps=self.camera_fps
-                    )
-                    if not start_result.get("success"):
-                        raise RuntimeError(
-                            f"Failed to start camera-triggered stimulus: {start_result.get('error')}"
-                        )
-                    logger.info(
-                        f"Camera-triggered stimulus started for {direction}: "
-                        f"{start_result.get('total_frames')} frames"
-                    )
-
                 # Start data recording for this direction
                 if self.data_recorder:
                     self.data_recorder.start_recording(direction)
@@ -468,41 +639,55 @@ class AcquisitionManager:
                     # Play stimulus for this direction
                     self._enter_phase(AcquisitionPhase.STIMULUS)
 
-                    # Camera-triggered mode: REQUIRED for record mode
-                    if not self.camera_triggered_stimulus:
+                    # Get monitor FPS from parameters
+                    monitor_params = self.param_manager.get_parameter_group("monitor")
+                    monitor_fps = monitor_params.get("monitor_fps")
+
+                    # Validate monitor_fps explicitly
+                    if (
+                        monitor_fps is None
+                        or not isinstance(monitor_fps, (int, float))
+                        or monitor_fps <= 0
+                    ):
                         raise RuntimeError(
-                            "Camera-triggered stimulus controller is required for record mode. "
-                            "This indicates a configuration error - ensure camera_triggered_stimulus "
-                            "is properly injected during initialization."
+                            "monitor_fps is required but not configured in param_manager. "
+                            "Monitor refresh rate must be explicitly specified for accurate stimulus timing. "
+                            f"Please set monitor.monitor_fps parameter. Received: {monitor_fps}"
                         )
 
-                    # Calculate expected duration based on camera fps
-                    stimulus_duration = self._get_stimulus_duration_camera_fps()
-                    timeout = stimulus_duration * 2.0  # Safety timeout
-
+                    # Start unified stimulus playback for this direction
+                    start_result = self.unified_stimulus.start_playback(
+                        direction=direction, monitor_fps=monitor_fps
+                    )
+                    if not start_result.get("success"):
+                        raise RuntimeError(
+                            f"Failed to start unified stimulus: {start_result.get('error')}"
+                        )
                     logger.info(
-                        f"Waiting for camera-triggered stimulus completion: "
-                        f"direction={direction}, cycle={cycle+1}/{self.cycles}, "
-                        f"expected_duration={stimulus_duration:.2f}s"
+                        f"Unified stimulus playback started for {direction} cycle {cycle+1}: "
+                        f"{start_result.get('total_frames')} frames at {start_result.get('fps')} fps"
                     )
 
-                    # Poll for completion
-                    start_time = time.time()
-                    while not self.camera_triggered_stimulus.is_direction_complete():
-                        if self.stop_event.is_set():
-                            break
-                        if time.time() - start_time > timeout:
-                            logger.warning(
-                                f"Camera-triggered stimulus timeout after {timeout:.2f}s"
-                            )
-                            break
-                        time.sleep(0.1)  # Poll every 100ms
+                    # Calculate sweep duration based on stimulus dataset (one cycle)
+                    # Unified stimulus plays at monitor FPS, camera captures independently
+                    # Each cycle is one complete sweep - acquisition loops over cycles
+                    dataset_info = self.stimulus_generator.get_dataset_info(direction)
+                    sweep_duration_sec = dataset_info.get("duration_sec", 0.0)
 
-                    status = self.camera_triggered_stimulus.get_status()
                     logger.info(
-                        f"Camera-triggered stimulus complete: {status.get('frame_index')}/"
-                        f"{status.get('total_frames')} frames"
+                        f"Sweep duration: {sweep_duration_sec:.2f}s for {direction}"
                     )
+
+                    # Sleep for sweep duration (unified stimulus plays in background thread)
+                    self._wait_duration(sweep_duration_sec)
+
+                    # Stop unified stimulus playback
+                    stop_result = self.unified_stimulus.stop_playback()
+                    if not stop_result.get("success"):
+                        logger.warning(
+                            f"Failed to stop unified stimulus: {stop_result.get('error')}"
+                        )
+                    logger.info(f"Unified stimulus playback stopped for {direction}")
 
                     # Always exit STIMULUS phase immediately after stopping stimulus
                     # This ensures we never remain in STIMULUS phase without active stimulus
@@ -513,18 +698,11 @@ class AcquisitionManager:
                         self._publish_baseline_frame()
                         self._wait_duration(self.between_sec)
                     else:
-                        # Last cycle completed - stay in STIMULUS briefly for black screen
+                        # Last cycle completed - stay in STIMULUS briefly for background screen
                         # Will transition to BETWEEN_TRIALS or FINAL_BASELINE next
                         self._publish_baseline_frame()
 
-                # Stop camera-triggered stimulus and data recording for this direction
-                if self.camera_triggered_stimulus:
-                    stop_result = self.camera_triggered_stimulus.stop_direction()
-                    logger.info(
-                        f"Camera-triggered stimulus stopped: {stop_result.get('frames_generated')}/"
-                        f"{stop_result.get('expected_frames')} frames generated"
-                    )
-
+                # Stop data recording for this direction (after all cycles complete)
                 if self.data_recorder:
                     self.data_recorder.stop_recording()
 
@@ -562,7 +740,22 @@ class AcquisitionManager:
                 try:
                     logger.info("Saving acquisition data...")
                     self.data_recorder.save_session()
-                    logger.info(f"Acquisition data saved to: {self.data_recorder.session_path}")
+                    logger.info(
+                        f"Acquisition data saved to: {self.data_recorder.session_path}"
+                    )
+
+                    # Send IPC signal that data is saved and ready for analysis
+                    # This eliminates race conditions by coordinating file access
+                    if self.ipc:
+                        self.ipc.send_sync_message(
+                            {
+                                "type": "acquisition_data_saved",
+                                "session_path": str(self.data_recorder.session_path),
+                                "timestamp": time.time(),
+                            }
+                        )
+                        logger.info("Sent acquisition_data_saved IPC signal")
+
                 except Exception as e:
                     logger.error(f"Failed to save acquisition data: {e}", exc_info=True)
 
@@ -570,7 +763,9 @@ class AcquisitionManager:
             try:
                 self._display_black_screen()
             except Exception as e:
-                logger.warning(f"Failed to display black screen at end of acquisition: {e}")
+                logger.warning(
+                    f"Failed to display black screen at end of acquisition: {e}"
+                )
 
     def _enter_phase(self, phase: AcquisitionPhase):
         """Enter a new acquisition phase."""
@@ -604,100 +799,20 @@ class AcquisitionManager:
                 break
             time.sleep(0.1)  # Check every 100ms
 
-    def _get_stimulus_duration_camera_fps(self) -> float:
-        """
-        Calculate stimulus duration for camera-triggered mode.
-
-        In camera-triggered mode, stimulus advancement is paced by camera FPS,
-        not monitor FPS. Returns expected duration based on camera frame rate.
-
-        The direction is tracked internally by the camera-triggered stimulus controller.
-
-        Returns:
-            Expected stimulus duration in seconds
-
-        Raises:
-            RuntimeError: If camera_triggered_stimulus is not available or if
-                         stimulus parameters are invalid (system misconfiguration)
-        """
-        if not self.camera_triggered_stimulus:
-            raise RuntimeError(
-                "Camera-triggered stimulus controller is required for record mode. "
-                "This indicates a system initialization error - camera_triggered_stimulus "
-                "must be injected during backend setup. Cannot calculate stimulus duration."
-            )
-
-        # Get stimulus info from camera-triggered controller
-        status = self.camera_triggered_stimulus.get_status()
-
-        # Fail hard if total_frames missing or invalid - no defaults allowed
-        total_frames = status.get("total_frames")
-        if total_frames is None:
-            raise RuntimeError(
-                "Camera-triggered stimulus status does not contain 'total_frames'. "
-                "This indicates the stimulus controller is in an invalid state. "
-                "Cannot proceed with scientifically invalid acquisition parameters."
-            )
-
-        if not isinstance(total_frames, int) or total_frames <= 0:
-            raise RuntimeError(
-                f"Camera-triggered stimulus has invalid frame count: {total_frames}. "
-                f"This indicates stimulus was not properly started or configured incorrectly. "
-                f"Cannot proceed with scientifically invalid acquisition parameters."
-            )
-
-        if self.camera_fps <= 0:
-            raise RuntimeError(
-                f"Invalid camera FPS: {self.camera_fps}. "
-                f"This indicates camera parameters are not properly configured. "
-                f"Cannot proceed with scientifically invalid acquisition parameters."
-            )
-
-        duration = float(total_frames) / float(self.camera_fps)
-        logger.debug(
-            f"Camera-triggered stimulus duration: {duration:.2f}s "
-            f"({total_frames} frames at {self.camera_fps} fps)"
-        )
-        return duration
-
     def _display_black_screen(self) -> None:
-        """Display a black screen immediately."""
-        # Get monitor parameters from injected param_manager
-        if not self.param_manager:
-            logger.warning("Cannot display black screen: no parameter manager available")
+        """Display a background screen at configured background_luminance using unified stimulus."""
+        if not self.unified_stimulus:
+            logger.warning(
+                "Cannot display baseline: no unified stimulus controller available"
+            )
             return
 
-        monitor_params = self.param_manager.get_parameter_group("monitor")
-
-        # Validate monitor dimensions - REQUIRED for display operations
-        width = monitor_params.get("monitor_width_px")
-        if width is None:
-            raise RuntimeError(
-                "monitor_width_px is required but not configured in monitor parameters. "
-                "Must specify monitor width for stimulus display."
-            )
-        if not isinstance(width, int) or width <= 0:
-            raise RuntimeError(
-                f"monitor_width_px must be a positive integer. Received: {width}"
-            )
-
-        height = monitor_params.get("monitor_height_px")
-        if height is None:
-            raise RuntimeError(
-                "monitor_height_px is required but not configured in monitor parameters. "
-                "Must specify monitor height for stimulus display."
-            )
-        if not isinstance(height, int) or height <= 0:
-            raise RuntimeError(
-                f"monitor_height_px must be a positive integer. Received: {height}"
-            )
-
-        if self.shared_memory:
-            self.shared_memory.publish_black_frame(width, height)
-            logger.debug("Black screen displayed")
+        result = self.unified_stimulus.display_baseline()
+        if not result.get("success"):
+            logger.error(f"Failed to display baseline: {result.get('error')}")
 
     def _publish_baseline_frame(self) -> float:
-        """Publish a black frame to display during baseline and return baseline duration."""
+        """Publish a background frame to display during baseline and return baseline duration."""
         self._display_black_screen()
         return float(self.baseline_sec)
 
@@ -727,5 +842,7 @@ class AcquisitionManager:
     ) -> List[Dict[str, Any]]:
         """Return synchronization within the most recent window (delegates to tracker)."""
         if self.synchronization_tracker:
-            return self.synchronization_tracker.get_recent_synchronization(window_seconds)
+            return self.synchronization_tracker.get_recent_synchronization(
+                window_seconds
+            )
         return []

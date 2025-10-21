@@ -51,7 +51,8 @@ const MainViewport: React.FC<MainViewportProps> = ({
     cameraParams,
     stimulusParams,
     monitorParams,
-    acquisitionParams
+    acquisitionParams,
+    analysisParams
   } = parameterState
 
   const systemContext = useMemo(() => ({
@@ -127,6 +128,7 @@ const MainViewport: React.FC<MainViewportProps> = ({
       systemState={systemContext}
       sendCommand={sendCommand}
       lastMessage={lastSyncMessage}
+      analysisParams={analysisParams}
     />
   )
 

@@ -2,17 +2,30 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { componentLogger } from '../../utils/logger'
 import type { ISIMessage, ControlMessage, SyncMessage, ListSessionsResponse, GetAnalysisResultsResponse, GetAnalysisCompositeImageResponse } from '../../types/ipc-messages'
-import type { SystemState } from '../../types/shared'
+import type { SystemState, AnalysisParameters } from '../../types/shared'
 import AnalysisProgress, { type AnalysisStage } from '../analysis/AnalysisProgress'
+import { CalibrationCircleOverlay } from '../CalibrationCircleOverlay'
 
 interface AnalysisViewportProps {
   className?: string
   sendCommand?: (command: ISIMessage) => Promise<{ success: boolean; error?: string }>
   lastMessage?: ControlMessage | SyncMessage | null
   systemState?: SystemState
+  analysisParams?: AnalysisParameters
 }
 
-type SignalType = 'azimuth' | 'elevation' | 'sign' | 'magnitude' | 'phase'
+type SignalType =
+  // Primary retinotopy maps (HSV colormap)
+  | 'azimuth' | 'elevation'
+  // VFS options (JET colormap) - 3 variants
+  | 'raw_vfs_map' | 'magnitude_vfs_map' | 'statistical_vfs_map'
+  // Individual direction phase maps (HSV colormap - cyclic hue for phase angle)
+  | 'LR_phase_map' | 'RL_phase_map' | 'TB_phase_map' | 'BT_phase_map'
+  // Individual direction magnitude maps (VIRIDIS colormap)
+  | 'LR_magnitude_map' | 'RL_magnitude_map' | 'TB_magnitude_map' | 'BT_magnitude_map'
+  // Individual direction coherence maps (VIRIDIS colormap)
+  | 'LR_coherence_map' | 'RL_coherence_map' | 'TB_coherence_map' | 'BT_coherence_map'
+
 type OverlayType = 'area_borders' | 'area_patches' | 'none'
 
 // Analysis result metadata (no heavy arrays - only metadata)
@@ -39,10 +52,47 @@ const base64ToBlob = (base64: string, mimeType: string = 'image/png'): Blob => {
   return new Blob([byteArray], { type: mimeType })
 }
 
+/**
+ * Convert RGB24 data from shared memory to a blob URL for display.
+ * RGB24 format has 3 bytes per pixel (R, G, B), no alpha channel.
+ */
+const rgb24ToBlob = async (data: ArrayBuffer, width: number, height: number): Promise<Blob> => {
+  // Create a canvas
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Failed to get canvas context')
+
+  // Create ImageData
+  const imageData = ctx.createImageData(width, height)
+  const rgb24Data = new Uint8Array(data)
+
+  // Convert RGB24 to RGBA
+  for (let i = 0; i < width * height; i++) {
+    imageData.data[i * 4 + 0] = rgb24Data[i * 3 + 0]  // R
+    imageData.data[i * 4 + 1] = rgb24Data[i * 3 + 1]  // G
+    imageData.data[i * 4 + 2] = rgb24Data[i * 3 + 2]  // B
+    imageData.data[i * 4 + 3] = 255                    // A (fully opaque)
+  }
+
+  // Put ImageData on canvas
+  ctx.putImageData(imageData, 0, 0)
+
+  // Convert canvas to blob
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('Failed to convert canvas to blob'))
+    }, 'image/png')
+  })
+}
+
 const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
   className = '',
   sendCommand,
-  lastMessage
+  lastMessage,
+  analysisParams
 }) => {
   // Image ref (replaces canvas refs)
   const imageRef = useRef<HTMLImageElement>(null)
@@ -55,6 +105,13 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
   const [availableSessions, setAvailableSessions] = useState<any[]>([])
   const [currentSessionPath, setCurrentSessionPath] = useState<string | null>(null)
+
+  // Calibration state
+  const [isCalibrating, setIsCalibrating] = useState(false)
+  const [calibrationMmPerPixel, setCalibrationMmPerPixel] = useState<number | null>(null)
+  const [calibrationCircleDiameter, setCalibrationCircleDiameter] = useState<number>(100)
+  const [calibrationImageDimensions, setCalibrationImageDimensions] = useState({ width: 640, height: 480 })
+  const [calibrationImageUrl, setCalibrationImageUrl] = useState<string | null>(null)
 
   // Command submission state (prevents double-clicks, shows loading)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -73,13 +130,14 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
 
   // Image display
   const [compositeImageUrl, setCompositeImageUrl] = useState<string | null>(null)
+  const [pendingFrameId, setPendingFrameId] = useState<number | null>(null)
 
   // Layer visibility and settings
   const [showAnatomical, setShowAnatomical] = useState(true)
   const [showSignal, setShowSignal] = useState(true)
   const [showOverlay, setShowOverlay] = useState(true)
 
-  const [signalType, setSignalType] = useState<SignalType>('sign')
+  const [signalType, setSignalType] = useState<SignalType>('magnitude_vfs_map')
   const [overlayType, setOverlayType] = useState<OverlayType>('area_borders')
 
   const [anatomicalAlpha, setAnatomicalAlpha] = useState(0.5)
@@ -308,6 +366,76 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     }
   }, [lastMessage, compositeImageUrl, analysisMetadata])
 
+  // ========== CALIBRATION HANDLERS ==========
+
+  const handleCalibrationChange = useCallback((mmPerPixel: number, circleDiameterPixels: number) => {
+    setCalibrationMmPerPixel(mmPerPixel)
+    setCalibrationCircleDiameter(circleDiameterPixels)
+  }, [])
+
+  const saveCalibration = async () => {
+    if (!calibrationMmPerPixel || !sendCommand) {
+      componentLogger.warn('Cannot save calibration - invalid scale or no command function')
+      return
+    }
+    
+    try {
+      await sendCommand({
+        type: 'update_parameter_group',
+        group_name: 'analysis',
+        parameters: { pixel_scale_mm_per_px: calibrationMmPerPixel }
+      })
+      
+      setIsCalibrating(false)
+      componentLogger.info('Calibration saved:', calibrationMmPerPixel, 'mm/px')
+    } catch (error) {
+      componentLogger.error('Failed to save calibration:', error)
+    }
+  }
+
+  const startCalibration = async () => {
+    if (!sendCommand) return
+
+    try {
+      // Try to load anatomical image first if available
+      if (analysisMetadata?.has_anatomical && currentSessionPath) {
+        componentLogger.info('Loading anatomical image for calibration')
+        const result = await sendCommand({ 
+          type: 'get_anatomical_image', 
+          session_path: currentSessionPath 
+        }) as any
+        
+        if (result?.image_data && result?.width && result?.height) {
+          const blob = base64ToBlob(result.image_data)
+          const url = URL.createObjectURL(blob)
+          setCalibrationImageUrl(url)
+          setCalibrationImageDimensions({ width: result.width, height: result.height })
+          setIsCalibrating(true)
+          componentLogger.info('Anatomical image loaded for calibration:', result.width, 'x', result.height)
+          return
+        }
+      }
+      
+      // Fall back to current composite image
+      if (compositeImageUrl && analysisMetadata) {
+        setCalibrationImageUrl(compositeImageUrl)
+        setCalibrationImageDimensions({ 
+          width: analysisMetadata.shape[1] || 640, 
+          height: analysisMetadata.shape[0] || 480 
+        })
+        setIsCalibrating(true)
+        componentLogger.info('Using composite image for calibration')
+        return
+      }
+      
+      componentLogger.warn('No image available for calibration')
+    } catch (error) {
+      componentLogger.error('Failed to start calibration:', error)
+    }
+  }
+
+  // ========== IMAGE LOADING ==========
+
   // Load analysis results metadata only (no heavy arrays)
   const loadAnalysisResults = async (outputPath: string) => {
     if (!sendCommand) return
@@ -381,12 +509,17 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
         }
       } as any) as GetAnalysisCompositeImageResponse
 
-      if (result.success && result.image_base64) {
-        // Convert base64 to blob URL
+      if (result.success && result.frame_id !== undefined) {
+        // Backend now sends frame via shared memory
+        // Frame will arrive via onAnalysisFrame subscriber
+        componentLogger.info(`Composite image requested, frame_id: ${result.frame_id}, dimensions: ${result.width}x${result.height}`)
+        setPendingFrameId(result.frame_id)
+      } else if (result.success && result.image_base64) {
+        // Legacy fallback for base64 (backward compatibility during migration)
+        componentLogger.warn('Received base64 image (legacy mode)')
         const blob = base64ToBlob(result.image_base64, 'image/png')
         const url = URL.createObjectURL(blob)
 
-        // Revoke old URL to prevent memory leak
         setCompositeImageUrl(prevUrl => {
           if (prevUrl) {
             URL.revokeObjectURL(prevUrl)
@@ -394,7 +527,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
           return url
         })
 
-        componentLogger.info(`Composite image loaded: ${result.width}x${result.height}`)
+        componentLogger.info(`Composite image loaded (base64): ${result.width}x${result.height}`)
       } else {
         componentLogger.error('Failed to get composite image:', result.error)
       }
@@ -409,6 +542,7 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
       componentLogger.info('Settings changed, requesting composite image...')
       requestCompositeImage()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     showAnatomical,
     anatomicalAlpha,
@@ -419,9 +553,50 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     overlayType,
     overlayAlpha,
     analysisMetadata,
-    isAnalysisRunning,
-    requestCompositeImage
+    isAnalysisRunning
+    // NOTE: requestCompositeImage intentionally omitted to avoid dependency cycle
   ])
+
+  // Subscribe to analysis frames from shared memory
+  useEffect(() => {
+    if (!window.electronAPI?.onAnalysisFrame) {
+      componentLogger.warn('Analysis frame subscriber not available')
+      return
+    }
+
+    const unsubscribe = window.electronAPI.onAnalysisFrame(async (frameData) => {
+      try {
+        componentLogger.info('Received analysis frame metadata:', frameData)
+
+        // Read frame data from shared memory
+        const arrayBuffer = await window.electronAPI.readSharedMemoryFrame(
+          frameData.offset_bytes,
+          frameData.data_size_bytes,
+          frameData.shm_path
+        )
+
+        // Convert RGB24 to blob URL
+        const blob = await rgb24ToBlob(arrayBuffer, frameData.width_px, frameData.height_px)
+        const url = URL.createObjectURL(blob)
+
+        // Revoke old URL to prevent memory leak
+        setCompositeImageUrl(prevUrl => {
+          if (prevUrl) {
+            URL.revokeObjectURL(prevUrl)
+          }
+          return url
+        })
+
+        componentLogger.info(`Analysis composite displayed: ${frameData.width_px}x${frameData.height_px}`)
+      } catch (error) {
+        componentLogger.error('Error processing analysis frame:', error)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -528,16 +703,39 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
     <div className={`flex flex-col h-full ${className}`}>
       {/* Main Content Area: Square visualization on left, controls on right */}
       <div className="flex-1 flex gap-4 min-h-0">
-        {/* Visualization Area - Square and left-justified, fixed height */}
-        <div className="flex-shrink-0 bg-black rounded-lg border border-sci-secondary-600 overflow-hidden flex items-center justify-center" style={{ aspectRatio: '1', height: '100%' }}>
+        {/* Visualization Area - Fixed square container that never changes size */}
+        <div
+          className="flex-shrink-0 bg-black rounded-lg border border-sci-secondary-600 overflow-hidden flex items-center justify-center relative"
+          style={{
+            width: 'min(100vh - 2rem, 50vw)',  // Square sized to fit viewport
+            height: 'min(100vh - 2rem, 50vw)', // Match width for perfect square
+            minWidth: '300px',  // Minimum usable size
+            minHeight: '300px'
+          }}
+        >
           {compositeImageUrl ? (
-            <img
-              ref={imageRef}
-              src={compositeImageUrl}
-              alt="Analysis Composite"
-              className="w-full h-full object-contain"
-              style={{ imageRendering: 'pixelated' }}
-            />
+            <>
+              <img
+                ref={imageRef}
+                src={compositeImageUrl}
+                alt="Analysis Composite"
+                className="w-full h-full object-contain"
+                style={{ imageRendering: 'pixelated' }}
+              />
+              
+              {/* Calibration Circle Overlay */}
+              {isCalibrating && calibrationImageUrl && (
+                <CalibrationCircleOverlay
+                  visible={isCalibrating}
+                  canvasWidth={calibrationImageDimensions.width}
+                  canvasHeight={calibrationImageDimensions.height}
+                  actualCameraWidth={calibrationImageDimensions.width}
+                  actualCameraHeight={calibrationImageDimensions.height}
+                  headFrameDiameterMm={analysisParams?.ring_size_mm || 10}
+                  onCalibrationChange={handleCalibrationChange}
+                />
+              )}
+            </>
           ) : (
             <div className="text-sci-secondary-500 text-sm text-center px-4">
               {isAnalysisRunning ? 'Analysis in progress...' : 'No analysis results to display'}
@@ -631,6 +829,54 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
             />
           </div>
 
+          {/* Calibration Controls */}
+          <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
+            <h3 className="text-sm font-medium text-sci-secondary-200 mb-3">Spatial Calibration</h3>
+            <div className="space-y-2">
+              <button
+                onClick={isCalibrating ? () => setIsCalibrating(false) : startCalibration}
+                disabled={!analysisMetadata && !compositeImageUrl}
+                className={`w-full px-3 py-2 rounded text-sm font-medium border transition-colors ${
+                  isCalibrating
+                    ? 'bg-sci-primary-600 border-sci-primary-500 text-white hover:bg-sci-primary-500'
+                    : 'bg-sci-secondary-700 border-sci-secondary-500 text-sci-secondary-200 hover:bg-sci-secondary-600 disabled:opacity-40 disabled:cursor-not-allowed'
+                }`}
+              >
+                {isCalibrating ? 'Exit Calibration' : 'Start Calibration'}
+              </button>
+
+              {isCalibrating && (
+                <div className="flex flex-col gap-2 mt-2">
+                  <div className="text-xs text-sci-secondary-400 bg-sci-secondary-900 p-2 rounded">
+                    <div>Reference Object: {analysisParams?.ring_size_mm || 10} mm</div>
+                    <div className="text-sci-secondary-500 text-[10px] mt-1">
+                      (Ring Size parameter)
+                    </div>
+                  </div>
+
+                  {calibrationMmPerPixel && (
+                    <div className="text-xs text-sci-secondary-300 bg-sci-secondary-900 p-2 rounded">
+                      <div>Scale: {calibrationMmPerPixel.toFixed(4)} mm/pixel</div>
+                      <div>Circle: {calibrationCircleDiameter.toFixed(1)} px = {analysisParams?.ring_size_mm || 10} mm</div>
+                    </div>
+                  )}
+
+                  <div className="text-xs text-sci-secondary-500 bg-sci-secondary-900 p-2 rounded">
+                    Drag and resize the circle to match the known reference object in the image.
+                  </div>
+
+                  <button
+                    onClick={saveCalibration}
+                    disabled={!calibrationMmPerPixel}
+                    className="px-3 py-2 rounded text-sm font-medium border transition-colors bg-sci-success-600 border-sci-success-500 text-white hover:bg-sci-success-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Save Calibration
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Anatomical Layer */}
           <div className="p-3 bg-sci-secondary-800 rounded-lg border border-sci-secondary-600 flex-shrink-0">
             <div className="flex items-center justify-between mb-3">
@@ -681,20 +927,42 @@ const AnalysisViewport: React.FC<AnalysisViewportProps> = ({
                   className="flex-1 px-2 py-1 bg-sci-secondary-900 text-white text-sm rounded border border-sci-secondary-600"
                   disabled={!showSignal}
                 >
-                  {/* Primary Layers */}
+                  {/* Primary Results */}
                   <optgroup label="Primary Results">
                     <option value="azimuth">Horizontal Retinotopy</option>
                     <option value="elevation">Vertical Retinotopy</option>
-                    <option value="sign">Visual Field Sign</option>
                   </optgroup>
 
-                  {/* Advanced Layers */}
-                  {analysisMetadata && analysisMetadata.advanced_layers.length > 0 && (
-                    <optgroup label="Advanced (Debug)">
-                      <option value="magnitude">Response Magnitude</option>
-                      <option value="phase">Phase Map</option>
-                    </optgroup>
-                  )}
+                  {/* VFS Options - 3 variants */}
+                  <optgroup label="Visual Field Sign">
+                    <option value="raw_vfs_map">Raw VFS</option>
+                    <option value="magnitude_vfs_map">Magnitude Threshold VFS</option>
+                    <option value="statistical_vfs_map">Statistical Threshold VFS</option>
+                  </optgroup>
+
+                  {/* Phase Maps */}
+                  <optgroup label="Phase Maps">
+                    <option value="LR_phase_map">LR Phase</option>
+                    <option value="RL_phase_map">RL Phase</option>
+                    <option value="TB_phase_map">TB Phase</option>
+                    <option value="BT_phase_map">BT Phase</option>
+                  </optgroup>
+
+                  {/* Quality Metrics (Literature Standard) */}
+                  <optgroup label="Quality Metrics">
+                    <option value="LR_coherence_map">LR Coherence</option>
+                    <option value="RL_coherence_map">RL Coherence</option>
+                    <option value="TB_coherence_map">TB Coherence</option>
+                    <option value="BT_coherence_map">BT Coherence</option>
+                  </optgroup>
+
+                  {/* Response Strength */}
+                  <optgroup label="Response Strength">
+                    <option value="LR_magnitude_map">LR Magnitude</option>
+                    <option value="RL_magnitude_map">RL Magnitude</option>
+                    <option value="TB_magnitude_map">TB Magnitude</option>
+                    <option value="BT_magnitude_map">BT Magnitude</option>
+                  </optgroup>
                 </select>
               </div>
               <div className="flex items-center gap-2">

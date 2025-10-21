@@ -9,6 +9,8 @@ Refactored from isi_control/acquisition_mode_controllers.py with KISS approach:
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import logging
+import threading
+import time
 
 from .state import AcquisitionStateCoordinator
 
@@ -65,7 +67,7 @@ class PreviewModeController(AcquisitionModeController):
         direction: str = "LR",
         frame_index: int = 0,
         show_bar_mask: bool = False,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Activate preview mode and display a single stimulus frame.
@@ -105,7 +107,9 @@ class PreviewModeController(AcquisitionModeController):
         }
 
         # Write preview frame to shared memory
-        frame_id = self.shared_memory_service.write_preview_frame(frame, preview_metadata)
+        frame_id = self.shared_memory_service.write_preview_frame(
+            frame, preview_metadata
+        )
         frame_info = self.shared_memory_service.get_frame_info(frame_id)
 
         # Notify frontend
@@ -122,7 +126,9 @@ class PreviewModeController(AcquisitionModeController):
                 }
             )
 
-        logger.info(f"Preview mode activated: direction={direction}, frame={frame_index}")
+        logger.info(
+            f"Preview mode activated: direction={direction}, frame={frame_index}"
+        )
 
         return {
             "success": True,
@@ -154,13 +160,12 @@ class RecordModeController(AcquisitionModeController):
         super().__init__(state_coordinator)
         self.acquisition_orchestrator = acquisition_orchestrator
 
-    def activate(
-        self,
-        param_manager=None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    def activate(self, param_manager=None, **kwargs) -> Dict[str, Any]:
         """
-        Activate record mode and start acquisition sequence.
+        Activate record mode (prepare for recording, but don't auto-start).
+
+        Record mode sets up the system for recording but waits for explicit
+        start_acquisition command from the user via the Acquisition viewport.
 
         Args:
             param_manager: Parameter manager for acquisition parameters
@@ -173,16 +178,11 @@ class RecordModeController(AcquisitionModeController):
         if self.acquisition_orchestrator and self.acquisition_orchestrator.is_running:
             return {"success": True, "mode": "record"}
 
-        # Update state coordinator
+        # Update state coordinator to indicate we're ready to record
         if self.state_coordinator:
-            self.state_coordinator.transition_to_recording()
+            self.state_coordinator.transition_to_idle()  # Ready but not recording yet
 
-        # Get acquisition parameters
-        acq_params = (
-            param_manager.get_parameter_group("acquisition") if param_manager else {}
-        )
-
-        # Add camera FPS from camera parameters - REQUIRED, no default
+        # Validate parameters are configured (but don't start acquisition)
         if param_manager:
             camera_params = param_manager.get_parameter_group("camera")
             camera_fps = camera_params.get("camera_fps")
@@ -193,24 +193,16 @@ class RecordModeController(AcquisitionModeController):
                         "camera_fps is required but not configured in camera parameters. "
                         "Camera FPS must be set to the actual frame rate of your camera hardware "
                         "for scientifically valid acquisition timing."
-                    )
+                    ),
                 }
-            acq_params["camera_fps"] = camera_fps
         else:
             return {
                 "success": False,
-                "error": "Parameter manager is required for record mode"
+                "error": "Parameter manager is required for record mode",
             }
 
-        # Start acquisition sequence
-        if self.acquisition_orchestrator:
-            start_result = self.acquisition_orchestrator.start_acquisition(
-                acq_params, param_manager=param_manager
-            )
-            if not start_result.get("success"):
-                return start_result
-
-        logger.info("Record mode activated")
+        # Record mode is now active - waiting for user to click Start in Acquisition viewport
+        logger.info("Record mode activated (ready to start acquisition)")
         return {"success": True, "mode": "record"}
 
     def deactivate(self) -> Dict[str, Any]:
@@ -233,12 +225,28 @@ class PlaybackModeController(AcquisitionModeController):
     def __init__(
         self,
         state_coordinator: Optional[AcquisitionStateCoordinator] = None,
+        shared_memory=None,
+        ipc=None,
     ):
         super().__init__(state_coordinator)
         self.current_session_path: Optional[str] = None
         self.session_metadata: Optional[Dict[str, Any]] = None
         self._hdf5_file = None  # Keep HDF5 file open for on-demand frame access
-        self._current_direction: Optional[str] = None  # Track which direction file is open
+        self._current_direction: Optional[str] = (
+            None  # Track which direction file is open
+        )
+
+        # Playback sequence control
+        self.shared_memory = shared_memory
+        self.ipc = ipc
+        self._playback_thread: Optional[threading.Thread] = None
+        self._playback_running = False
+        self._playback_stop_event = threading.Event()
+        self._current_playback_position = {
+            "direction_idx": 0,
+            "cycle_idx": 0,
+            "frame_idx": 0,
+        }
 
     def activate(self, session_path: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
@@ -266,19 +274,19 @@ class PlaybackModeController(AcquisitionModeController):
         if not os.path.exists(session_path):
             return {
                 "success": False,
-                "error": f"Session path not found: {session_path}"
+                "error": f"Session path not found: {session_path}",
             }
 
         metadata_path = os.path.join(session_path, "metadata.json")
         if not os.path.exists(metadata_path):
             return {
                 "success": False,
-                "error": f"Invalid session: metadata.json not found in {session_path}"
+                "error": f"Invalid session: metadata.json not found in {session_path}",
             }
 
         # Load session metadata
         try:
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path, "r") as f:
                 self.session_metadata = json.load(f)
 
             self.current_session_path = session_path
@@ -331,7 +339,9 @@ class PlaybackModeController(AcquisitionModeController):
         """
         return self._list_available_sessions(base_dir)
 
-    def _list_available_sessions(self, base_dir: Optional[str] = None) -> Dict[str, Any]:
+    def _list_available_sessions(
+        self, base_dir: Optional[str] = None
+    ) -> Dict[str, Any]:
         """List all available recorded sessions."""
         import os
 
@@ -340,7 +350,9 @@ class PlaybackModeController(AcquisitionModeController):
             base_path = base_dir
         else:
             # Use absolute path to ensure we find sessions regardless of working directory
-            base_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sessions")
+            base_path = os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "sessions"
+            )
             base_path = os.path.abspath(base_path)
 
         logger.info(f"Looking for sessions in: {base_path}")
@@ -354,14 +366,14 @@ class PlaybackModeController(AcquisitionModeController):
                 logger.error(f"Cannot create sessions directory: {e}")
                 return {
                     "success": False,
-                    "error": f"Cannot access sessions directory: {str(e)}"
+                    "error": f"Cannot access sessions directory: {str(e)}",
                 }
 
             return {
                 "success": True,
                 "mode": "playback",
                 "sessions": [],
-                "message": "No recorded sessions yet"
+                "message": "No recorded sessions yet",
             }
 
         sessions = []
@@ -372,21 +384,26 @@ class PlaybackModeController(AcquisitionModeController):
             if os.path.isdir(session_path) and os.path.exists(metadata_path):
                 try:
                     import json
-                    with open(metadata_path, 'r') as f:
+
+                    with open(metadata_path, "r") as f:
                         metadata = json.load(f)
-                    sessions.append({
-                        "session_name": session_name,
-                        "session_path": session_path,
-                        "metadata": metadata,
-                    })
+                    sessions.append(
+                        {
+                            "session_name": session_name,
+                            "session_path": session_path,
+                            "metadata": metadata,
+                        }
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to load session metadata: {session_path}: {e}")
+                    logger.warning(
+                        f"Failed to load session metadata: {session_path}: {e}"
+                    )
 
         return {
             "success": True,
             "mode": "playback",
             "sessions": sessions,
-            "count": len(sessions)
+            "count": len(sessions),
         }
 
     def get_session_data(self, direction: Optional[str] = None) -> Dict[str, Any]:
@@ -409,10 +426,12 @@ class PlaybackModeController(AcquisitionModeController):
 
         try:
             if direction is None:
-                # Return available directions
+                # Return available directions from acquisition metadata
+                acquisition_params = self.session_metadata.get("acquisition", {})
+                directions = acquisition_params.get("directions", [])
                 return {
                     "success": True,
-                    "directions": self.session_metadata.get("directions", []),
+                    "directions": directions,
                     "metadata": self.session_metadata,
                 }
 
@@ -424,18 +443,18 @@ class PlaybackModeController(AcquisitionModeController):
             if not os.path.exists(events_path):
                 return {
                     "success": False,
-                    "error": f"No data found for direction: {direction}"
+                    "error": f"No data found for direction: {direction}",
                 }
 
-            with open(events_path, 'r') as f:
+            with open(events_path, "r") as f:
                 events = json.load(f)
 
             # Load stimulus angles
             stimulus_path = os.path.join(session_path, f"{direction}_stimulus.h5")
             angles = None
             if os.path.exists(stimulus_path):
-                with h5py.File(stimulus_path, 'r') as f:
-                    angles = f['angles'][:]
+                with h5py.File(stimulus_path, "r") as f:
+                    angles = f["angles"][:]
 
             # Load camera data if available
             camera_path = os.path.join(session_path, f"{direction}_camera.h5")
@@ -447,24 +466,34 @@ class PlaybackModeController(AcquisitionModeController):
                         self._hdf5_file.close()
                         self._hdf5_file = None
 
-                    # Open HDF5 file and keep it open for on-demand frame access
-                    self._hdf5_file = h5py.File(camera_path, 'r')
+                    # Open HDF5 file in SWMR mode for concurrent read access
+                    # This allows multiple readers without exclusive locks
+                    self._hdf5_file = h5py.File(camera_path, "r", swmr=True)
 
                     # Check for required datasets
-                    if 'frames' not in self._hdf5_file or 'timestamps' not in self._hdf5_file:
-                        logger.error(f"Invalid camera file: missing datasets in {camera_path}")
+                    if (
+                        "frames" not in self._hdf5_file
+                        or "timestamps" not in self._hdf5_file
+                    ):
+                        logger.error(
+                            f"Invalid camera file: missing datasets in {camera_path}"
+                        )
                         self._hdf5_file.close()
                         self._hdf5_file = None
                         camera_data = {
                             "has_frames": False,
-                            "error": "Invalid camera data file (missing datasets)"
+                            "error": "Invalid camera data file (missing datasets)",
                         }
                     else:
                         self._current_direction = direction
 
                         # Read ONLY metadata - do not load actual frame data into memory
-                        frame_count = len(self._hdf5_file['frames'])
-                        frame_shape = self._hdf5_file['frames'].shape[1:] if frame_count > 0 else None
+                        frame_count = len(self._hdf5_file["frames"])
+                        frame_shape = (
+                            self._hdf5_file["frames"].shape[1:]
+                            if frame_count > 0
+                            else None
+                        )
 
                         camera_data = {
                             "frame_count": frame_count,
@@ -472,23 +501,27 @@ class PlaybackModeController(AcquisitionModeController):
                             "has_frames": True,
                         }
 
-                        logger.info(f"Session has {frame_count} frames available for playback (on-demand loading)")
+                        logger.info(
+                            f"Session has {frame_count} frames available for playback (on-demand loading)"
+                        )
                         logger.info(f"Frame shape: {frame_shape}")
 
                 except Exception as e:
-                    logger.error(f"Failed to open camera file {camera_path}: {e}", exc_info=True)
+                    logger.error(
+                        f"Failed to open camera file {camera_path}: {e}", exc_info=True
+                    )
                     if self._hdf5_file:
                         self._hdf5_file.close()
                         self._hdf5_file = None
                     camera_data = {
                         "has_frames": False,
-                        "error": f"Cannot read camera data: {str(e)}"
+                        "error": f"Cannot read camera data: {str(e)}",
                     }
             else:
                 camera_data = {
                     "has_frames": False,
                     "frame_count": 0,
-                    "message": "No camera data recorded for this direction"
+                    "message": "No camera data recorded for this direction",
                 }
 
             return {
@@ -526,16 +559,22 @@ class PlaybackModeController(AcquisitionModeController):
 
         try:
             # Validate frame index
-            if frame_index < 0 or frame_index >= len(self._hdf5_file['frames']):
-                return {"success": False, "error": f"Frame index {frame_index} out of range"}
+            if frame_index < 0 or frame_index >= len(self._hdf5_file["frames"]):
+                return {
+                    "success": False,
+                    "error": f"Frame index {frame_index} out of range",
+                }
 
             # Access frame directly from already-open file - FAST (no file open overhead)
-            frame_data = self._hdf5_file['frames'][frame_index]
-            timestamp = self._hdf5_file['timestamps'][frame_index]
+            frame_data = self._hdf5_file["frames"][frame_index]
+            timestamp = self._hdf5_file["timestamps"][frame_index]
 
             # Validate and convert frame shape
             if len(frame_data.shape) not in [2, 3]:
-                return {"success": False, "error": f"Invalid frame shape: {frame_data.shape}"}
+                return {
+                    "success": False,
+                    "error": f"Invalid frame shape: {frame_data.shape}",
+                }
 
             # Handle different color formats
             if len(frame_data.shape) == 3:
@@ -543,22 +582,25 @@ class PlaybackModeController(AcquisitionModeController):
                 if channels == 3:
                     # RGB -> Grayscale using ITU-R BT.601 luminance formula
                     frame_gray = (
-                        frame_data[:, :, 0] * 0.299 +
-                        frame_data[:, :, 1] * 0.587 +
-                        frame_data[:, :, 2] * 0.114
+                        frame_data[:, :, 0] * 0.299
+                        + frame_data[:, :, 1] * 0.587
+                        + frame_data[:, :, 2] * 0.114
                     ).astype(np.uint8)
                     frame_data = frame_gray
                 elif channels == 4:
                     # RGBA -> RGB -> Grayscale (drop alpha channel first)
                     rgb = frame_data[:, :, :3]
                     frame_gray = (
-                        rgb[:, :, 0] * 0.299 +
-                        rgb[:, :, 1] * 0.587 +
-                        rgb[:, :, 2] * 0.114
+                        rgb[:, :, 0] * 0.299
+                        + rgb[:, :, 1] * 0.587
+                        + rgb[:, :, 2] * 0.114
                     ).astype(np.uint8)
                     frame_data = frame_gray
                 else:
-                    return {"success": False, "error": f"Unsupported channel count: {channels}"}
+                    return {
+                        "success": False,
+                        "error": f"Unsupported channel count: {channels}",
+                    }
             # else: Already grayscale (2D shape), use as-is
 
             return {
@@ -566,9 +608,273 @@ class PlaybackModeController(AcquisitionModeController):
                 "frame_data": frame_data.tolist(),
                 "timestamp": int(timestamp),
                 "frame_index": frame_index,
-                "direction": direction
+                "direction": direction,
             }
 
         except Exception as e:
             logger.error(f"Failed to load playback frame: {e}", exc_info=True)
             return {"success": False, "error": f"Failed to load frame: {str(e)}"}
+
+    def start_playback_sequence(self) -> Dict[str, Any]:
+        """
+        Start automatic playback sequence that replays all directions and cycles.
+
+        Behavior matches acquisition-system.md lines 59-69:
+        - Automatically replays full recorded sequence (all directions)
+        - Respects baseline and between-trials timing from metadata
+        - Publishes frames to shared memory at recorded FPS
+        - No manual direction switching allowed
+
+        Returns:
+            Dictionary with success status
+        """
+        if not self.current_session_path or not self.session_metadata:
+            return {"success": False, "error": "No session loaded"}
+
+        if self._playback_running:
+            return {"success": False, "error": "Playback already running"}
+
+        # Reset position and events
+        self._current_playback_position = {
+            "direction_idx": 0,
+            "cycle_idx": 0,
+            "frame_idx": 0,
+        }
+        self._playback_stop_event.clear()
+        self._playback_running = True
+
+        # Start playback thread
+        self._playback_thread = threading.Thread(
+            target=self._playback_loop, name="PlaybackSequenceThread", daemon=True
+        )
+        self._playback_thread.start()
+
+        logger.info("Playback sequence started")
+        return {"success": True, "message": "Playback sequence started"}
+
+    def stop_playback_sequence(self) -> Dict[str, Any]:
+        """
+        Stop playback sequence and reset to beginning.
+
+        Returns:
+            Dictionary with success status
+        """
+        if not self._playback_running:
+            return {"success": True, "message": "Playback not running"}
+
+        # Signal stop and wait for thread to finish
+        self._playback_stop_event.set()
+        self._playback_running = False
+
+        if self._playback_thread and self._playback_thread.is_alive():
+            self._playback_thread.join(timeout=2.0)
+
+        self._playback_thread = None
+        self._current_playback_position = {
+            "direction_idx": 0,
+            "cycle_idx": 0,
+            "frame_idx": 0,
+        }
+
+        logger.info("Playback sequence stopped")
+        return {"success": True, "message": "Playback stopped"}
+
+    def _playback_loop(self):
+        """
+        Main playback loop that replays the acquisition sequence.
+
+        Architecture:
+        - Follows same sequence as acquisition (baseline → directions/cycles → final baseline)
+        - Respects timing from metadata (camera_fps, baseline_sec, between_sec)
+        - Publishes frames to shared memory for frontend display
+        - Broadcasts progress events via IPC
+        """
+        import os
+        import h5py
+        import numpy as np
+
+        try:
+            # Load acquisition parameters from metadata
+            acquisition_params = self.session_metadata.get("acquisition", {})
+            camera_params = self.session_metadata.get("camera", {})
+
+            directions = acquisition_params.get("directions", ["LR", "RL", "TB", "BT"])
+            cycles = acquisition_params.get("cycles", 1)
+            baseline_sec = acquisition_params.get("baseline_sec", 5.0)
+            between_sec = acquisition_params.get("between_sec", 5.0)
+            camera_fps = camera_params.get("camera_fps", 30.0)
+
+            frame_interval = 1.0 / camera_fps if camera_fps > 0 else 1.0 / 30.0
+
+            logger.info(
+                f"Starting playback sequence: {len(directions)} directions, {cycles} cycles"
+            )
+            logger.info(
+                f"Playback FPS: {camera_fps:.1f} (interval: {frame_interval*1000:.1f}ms)"
+            )
+
+            # Phase 1: Initial baseline
+            if self.ipc:
+                self.ipc.send_sync_message(
+                    {
+                        "type": "playback_progress",
+                        "phase": "INITIAL_BASELINE",
+                        "progress": 0.0,
+                        "message": "Playing initial baseline",
+                    }
+                )
+
+            logger.info(f"Phase: INITIAL_BASELINE ({baseline_sec}s)")
+            time.sleep(baseline_sec)
+
+            # Phase 2: Iterate through directions and cycles
+            total_direction_cycles = len(directions) * cycles
+            current_index = 0
+
+            for direction_idx, direction in enumerate(directions):
+                # Load camera data for this direction
+                camera_path = os.path.join(
+                    self.current_session_path, f"{direction}_camera.h5"
+                )
+
+                if not os.path.exists(camera_path):
+                    logger.warning(
+                        f"No camera data for direction {direction}, skipping"
+                    )
+                    continue
+
+                # Open HDF5 file for this direction
+                with h5py.File(camera_path, "r") as h5file:
+                    if "frames" not in h5file or "timestamps" not in h5file:
+                        logger.warning(f"Invalid camera file for {direction}, skipping")
+                        continue
+
+                    total_frames = len(h5file["frames"])
+                    frames_per_cycle = (
+                        total_frames // cycles if cycles > 0 else total_frames
+                    )
+
+                    for cycle_idx in range(cycles):
+                        # Check for stop signal
+                        if self._playback_stop_event.is_set():
+                            logger.info("Playback stopped by user")
+                            return
+
+                        current_index += 1
+                        progress = current_index / total_direction_cycles
+
+                        # Broadcast progress
+                        if self.ipc:
+                            self.ipc.send_sync_message(
+                                {
+                                    "type": "playback_progress",
+                                    "phase": "STIMULUS",
+                                    "direction": direction,
+                                    "cycle": cycle_idx + 1,
+                                    "total_cycles": cycles,
+                                    "progress": progress,
+                                    "message": f"Playing {direction} cycle {cycle_idx + 1}/{cycles}",
+                                }
+                            )
+
+                        logger.info(
+                            f"Phase: STIMULUS - {direction} cycle {cycle_idx + 1}/{cycles}"
+                        )
+
+                        # Play frames for this cycle
+                        start_frame = cycle_idx * frames_per_cycle
+                        end_frame = min(start_frame + frames_per_cycle, total_frames)
+
+                        for frame_idx in range(start_frame, end_frame):
+                            # Check for stop signal
+                            if self._playback_stop_event.is_set():
+                                return
+
+                            # Load and publish frame
+                            try:
+                                frame_data = h5file["frames"][frame_idx]
+                                timestamp = h5file["timestamps"][frame_idx]
+
+                                # Convert to grayscale if needed
+                                if len(frame_data.shape) == 3:
+                                    if frame_data.shape[2] == 3:
+                                        # RGB to grayscale
+                                        frame_gray = (
+                                            frame_data[:, :, 0] * 0.299
+                                            + frame_data[:, :, 1] * 0.587
+                                            + frame_data[:, :, 2] * 0.114
+                                        ).astype(np.uint8)
+                                        frame_data = frame_gray
+                                    elif frame_data.shape[2] == 4:
+                                        # RGBA to grayscale
+                                        rgb = frame_data[:, :, :3]
+                                        frame_gray = (
+                                            rgb[:, :, 0] * 0.299
+                                            + rgb[:, :, 1] * 0.587
+                                            + rgb[:, :, 2] * 0.114
+                                        ).astype(np.uint8)
+                                        frame_data = frame_gray
+
+                                # Publish to shared memory (best-effort, non-blocking)
+                                if self.shared_memory:
+                                    try:
+                                        self.shared_memory.write_camera_frame(
+                                            frame_data=frame_data,
+                                            camera_name="playback",
+                                            capture_timestamp_us=int(timestamp),
+                                        )
+                                    except Exception as e:
+                                        # Non-blocking: log but don't stop playback
+                                        logger.debug(
+                                            f"Failed to publish frame (non-critical): {e}"
+                                        )
+
+                                # Update position
+                                self._current_playback_position = {
+                                    "direction_idx": direction_idx,
+                                    "cycle_idx": cycle_idx,
+                                    "frame_idx": frame_idx,
+                                }
+
+                            except Exception as e:
+                                logger.warning(f"Failed to load frame {frame_idx}: {e}")
+
+                            # Sleep to maintain playback FPS
+                            time.sleep(frame_interval)
+
+                        # Between trials pause (except after last cycle)
+                        if cycle_idx < cycles - 1:
+                            logger.info(f"Phase: BETWEEN_TRIALS ({between_sec}s)")
+                            time.sleep(between_sec)
+
+            # Phase 3: Final baseline
+            if self.ipc:
+                self.ipc.send_sync_message(
+                    {
+                        "type": "playback_progress",
+                        "phase": "FINAL_BASELINE",
+                        "progress": 1.0,
+                        "message": "Playing final baseline",
+                    }
+                )
+
+            logger.info(f"Phase: FINAL_BASELINE ({baseline_sec}s)")
+            time.sleep(baseline_sec)
+
+            # Playback complete
+            if self.ipc:
+                self.ipc.send_sync_message(
+                    {
+                        "type": "playback_complete",
+                        "message": "Playback sequence completed successfully",
+                    }
+                )
+
+            logger.info("Playback sequence completed")
+
+        except Exception as e:
+            logger.error(f"Playback sequence error: {e}", exc_info=True)
+            if self.ipc:
+                self.ipc.send_sync_message({"type": "playback_error", "error": str(e)})
+        finally:
+            self._playback_running = False
